@@ -118,23 +118,43 @@ class LogViewerApp:
 			return
 
 
-		before = data
-		after = data
-		replaced = False
-		if self.replace_patterns:
+		# Annotate replacements inline: ORIGINAL(REPLACED)
+		def annotate_replacements(content: str):
+			matches: list[tuple[int,int,str,str]] = []
 			for search, replace, match_case in self.replace_patterns:
-				if match_case:
-					new_after = after.replace(search, replace)
-				else:
-					new_after = re.sub(re.escape(search), replace, after, flags=re.IGNORECASE)
-				if new_after != after:
-					replaced = True
-				after = new_after
+				flags = 0 if match_case else re.IGNORECASE
+				pattern = re.compile(re.escape(search), flags=flags)
+				for m in pattern.finditer(content):
+					matches.append((m.start(), m.end(), m.group(0), replace))
+
+			# sort and filter overlapping
+			matches.sort(key=lambda x: x[0])
+			filtered = []
+			last_end = -1
+			for s,e,orig,repl in matches:
+				if s >= last_end:
+					filtered.append((s,e,orig,repl))
+					last_end = e
+
+			# build annotated content
+			out = []
+			pos = 0
+			for s,e,orig,repl in filtered:
+				out.append(content[pos:s])
+				out.append(f"{orig}({repl})")
+				pos = e
+			out.append(content[pos:])
+			return ''.join(out), len(filtered) > 0
+
+		annotated = data
+		did_annotate = False
+		if self.replace_patterns:
+			annotated, did_annotate = annotate_replacements(data)
 
 		self.text.delete("1.0", tk.END)
-		self.text.insert("1.0", after)
-		if replaced:
-			self.status.config(text=f"Opened and replaced text: {path}")
+		self.text.insert("1.0", annotated)
+		if did_annotate:
+			self.status.config(text=f"Opened and annotated replacements: {path}")
 		else:
 			self.status.config(text=f"Opened: {path}")
 		self.highlight_keywords()
