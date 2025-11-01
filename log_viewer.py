@@ -49,6 +49,7 @@ class LogViewerApp:
 		self.config_path = os.path.join(os.path.dirname(__file__), "config.json")
 		self.keyword_colors: Dict[str, str] = DEFAULT_CONFIG.copy()
 		self.replace_patterns: list[tuple[str, str, bool]] = []  # (search, replace, match_case)
+		self.expected_order: list[str] = []  # list of keywords in expected order
 
 		self._build_ui()
 		# load config if exists
@@ -74,6 +75,7 @@ class LogViewerApp:
 		configmenu.add_separator()
 		configmenu.add_command(label="Edit Keywords...", command=self.edit_keywords_dialog)
 		configmenu.add_command(label="Edit Replace...", command=self.edit_replace_patterns_dialog)
+		configmenu.add_command(label="Edit Expected Order...", command=self.edit_expected_order_dialog)
 		menubar.add_cascade(label="Config", menu=configmenu)
 
 		self.root.config(menu=menubar)
@@ -159,6 +161,17 @@ class LogViewerApp:
 			self.status.config(text=f"Opened: {path}")
 		self.highlight_keywords()
 
+		# check expected order (use original data, not annotated)
+		violations = self.check_expected_order(data)
+		if violations:
+			# prepare message with a few examples
+			msg_lines = [f"Found {len(violations)} ordering violation(s):"]
+			for v in violations[:10]:
+				msg_lines.append(f"Line {v['line']}: {v['found']} (expected after: {v['expected_after']})")
+			if len(violations) > 10:
+				msg_lines.append("...more violations omitted...")
+			messagebox.showwarning("Order Violations", "\n".join(msg_lines))
+
 
 
 	# ---------- file / config operations ----------
@@ -206,6 +219,12 @@ class LogViewerApp:
 			raise ValueError("'replace_patterns' must be a JSON array")
 		self.replace_patterns = [(str(p["search"]), str(p["replace"]), bool(p["match_case"])) 
 							   for p in patterns]
+
+		# Load expected order
+		exp_order = data.get("expected_order", [])
+		if not isinstance(exp_order, list):
+			raise ValueError("'expected_order' must be a JSON array")
+		self.expected_order = [str(x) for x in exp_order]
 		
 		self.highlight_keywords()
 
@@ -216,9 +235,12 @@ class LogViewerApp:
 				{"search": s, "replace": r, "match_case": m}
 				for s, r, m in self.replace_patterns
 			]
+			,
+			"expected_order": self.expected_order,
 		}
 		with open(path, "w", encoding="utf-8") as f:
 			json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 	# ---------- keyword editing UI ----------
 	def edit_keywords_dialog(self) -> None:
@@ -280,6 +302,63 @@ class LogViewerApp:
 		cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=dlg.destroy)
 		ok_btn.pack(side=tk.RIGHT, padx=4)
 		cancel_btn.pack(side=tk.RIGHT)
+
+	# ---------- expected order editing ----------
+	def edit_expected_order_dialog(self) -> None:
+		dlg = tk.Toplevel(self.root)
+		dlg.title("Edit Expected Order")
+		dlg.transient(self.root)
+		dlg.grab_set()
+
+		lbl = tk.Label(dlg, text="Enter keywords in expected order (one per line):")
+		lbl.pack(anchor=tk.W, padx=8, pady=(8,0))
+		text = tk.Text(dlg, height=8, width=40)
+		text.pack(padx=8, pady=8)
+		# populate existing
+		for k in self.expected_order:
+			text.insert(tk.END, k + "\n")
+
+		def on_ok_order():
+			lines = [ln.strip() for ln in text.get("1.0", tk.END).splitlines()]
+			lines = [ln for ln in lines if ln]
+			self.expected_order = lines
+			dlg.destroy()
+
+		btn_frame = tk.Frame(dlg)
+		btn_frame.pack(fill=tk.X, pady=(0,8), padx=8)
+		ok_btn = tk.Button(btn_frame, text="OK", width=10, command=on_ok_order)
+		cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=dlg.destroy)
+		ok_btn.pack(side=tk.RIGHT, padx=4)
+		cancel_btn.pack(side=tk.RIGHT)
+
+	def check_expected_order(self, content: str) -> list:
+		"""
+		Check content for expected order violations.
+		Return a list of violation dicts: {line, found, expected_after}
+		"""
+		if not self.expected_order:
+			return []
+
+		# prepare map for quick lookup (case-insensitive)
+		order_map = {k.upper(): i for i, k in enumerate(self.expected_order)}
+		violations = []
+		last_index = -1
+		# scan line by line to report line numbers
+		for lineno, line in enumerate(content.splitlines(), start=1):
+			# find any token that matches any expected keyword
+			for tok_upper, idx in order_map.items():
+				for m in re.finditer(re.escape(tok_upper), line.upper()):
+					# found token
+					if idx < last_index:
+						violations.append({
+							"line": lineno,
+							"found": line[m.start():m.end()],
+							"found_key": tok_upper,
+							"expected_after": self.expected_order[last_index] if last_index >= 0 else None,
+						})
+					# update last_index to max seen index
+					last_index = max(last_index, idx)
+		return violations
 
 	# ---------- replace patterns editing ----------
 	def edit_replace_patterns_dialog(self) -> None:

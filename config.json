@@ -10,5 +10,9 @@
       "replace": "KUIHIRO",
       "match_case": false
     }
+  ],
+  "expected_order": [
+    "ERROR",
+    "WARNING"
   ]
 }
