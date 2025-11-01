@@ -1,0 +1,14 @@
+{
+  "colors": {
+    "ERROR": "#ff0000",
+    "WARN": "#ff8800",
+    "INFO": "#008800"
+  },
+  "replace_patterns": [
+    {
+      "search": "FUJITAe",
+      "replace": "KUIHIRO",
+      "match_case": false
+    }
+  ]
+}
