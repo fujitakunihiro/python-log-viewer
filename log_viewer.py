@@ -1,16 +1,17 @@
 """
-Embedded Log Viewer v14 (Auto Color Cycle Edition)
+Embedded Log Viewer v16 (Modal Dialog Edition)
 
 【変更点】
-- Edit Keywordsで「Add Row」を押した際、白(#ffffff)ではなく、
-  黄色・緑・水色などの「見やすい色」が順番に自動入力されるように修正。
+- 設定画面 (Edit Keywords, Edit Replace Patterns) を「モーダルダイアログ」に変更。
+- 設定画面を開いている間は、メイン画面や他のメニュー操作をブロックするようにしました。
+  これにより、複数の設定画面が同時に開くことを防ぎます。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
 2. 行番号表示
 3. フィルタ (簡易grep)
 4. キーワードハイライト (正規表現対応, 入力支援ボタン, 色自動選択)
-5. 文字列置換 (正規表現対応, グループ参照 \1 \2 対応, 即時反映)
+5. 文字列置換 (正規表現対応, グループ参照, 即時反映)
 6. 検索機能 (Ctrl+F)
 7. 設定保存 (JSON)
 """
@@ -408,11 +409,15 @@ class LogViewerApp:
         finally:
             menu.grab_release()
 
-    # --- Configuration Dialogs (Unified) ---
+    # --- Configuration Dialogs (Unified & Modal) ---
     def edit_keywords_dialog(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("Edit Keywords")
         dlg.geometry("700x450")
+
+        # --- モーダル設定 (他ウィンドウの操作をブロック) ---
+        dlg.transient(self.root) 
+        dlg.grab_set()
 
         container = tk.Frame(dlg)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -442,7 +447,6 @@ class LogViewerApp:
 
         entries = []
 
-        # 自動配色のためのプリセット色（淡いハイライト色）
         preset_colors = [
             "#ffff99", # 黄
             "#ccffcc", # 緑
@@ -456,7 +460,6 @@ class LogViewerApp:
             row = tk.Frame(scrollable_frame)
             row.pack(fill=tk.X, pady=2, padx=5)
             
-            # 色が指定されていない（新規追加）場合は自動ローテーション
             if c is None:
                 c = preset_colors[len(entries) % len(preset_colors)]
 
@@ -471,7 +474,6 @@ class LogViewerApp:
             
             tk.Entry(row, textvariable=cv, width=10).pack(side=tk.LEFT, padx=(0, 2))
             
-            # parent=dlg でカラーピッカーを最前面に
             tk.Button(row, text="Color", 
                       command=lambda: cv.set(colorchooser.askcolor(cv.get(), parent=dlg)[1] or cv.get())
                       ).pack(side=tk.LEFT, padx=2)
@@ -498,6 +500,10 @@ class LogViewerApp:
         dlg = tk.Toplevel(self.root)
         dlg.title("Edit Replace Patterns")
         dlg.geometry("850x450")
+
+        # --- モーダル設定 ---
+        dlg.transient(self.root)
+        dlg.grab_set()
 
         container = tk.Frame(dlg)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
