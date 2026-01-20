@@ -1,6 +1,6 @@
 {
   "colors": {
-    "ERROR": "#ff0000",
+    "^.*ERROR.*$": "#ff0000",
     "WARN": "#ff8800",
     "INFO": "#008800"
   },
@@ -10,9 +10,5 @@
       "replace": "KUIHIRO",
       "match_case": false
     }
-  ],
-  "expected_order": [
-    "ERROR",
-    "WARNING"
   ]
 }

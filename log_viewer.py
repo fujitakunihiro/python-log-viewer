@@ -1,546 +1,481 @@
-"""Simple Tkinter log viewer
-
-要件:
-- tkinterでGUIを作る
-- ファイルを開いてテキストを表示する
-- 特定のキーワード（ERROR, WARN, INFO）を色付けする
-- キーワードと色を設定ファイル(JSON)で保存・読み込みできる
-
-使い方:
- - 起動: python log_viewer.py
- - File -> Open でログファイルを開く
- - Config -> Load/Save で JSON 設定を読み書き
- - Config -> Edit Keywords でキーワードと色を編集
- - Config -> Edit Replace で文字列を別の文字列に置き換えを編集
-
-このファイルは最小限の実用的実装です。
 """
-
+Embedded Log Viewer v6 (Full Regex Replace Edition)
+機能:
+ - ファイル読み込み (Shift-JIS/UTF-8自動判別)
+ - 行番号表示
+ - 高速検索 (Ctrl+F)
+ - 設定編集GUI (キーワード色、正規表現置換)
+ - 正規表現による検索と置換（グループ参照対応）
+ - 設定保存 (JSON)
+"""
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tkinter as tk
-from tkinter import colorchooser, filedialog, messagebox
-from typing import Dict
-# --- DnD ---
-try:
-	from tkinterdnd2 import DND_FILES, TkinterDnD
-except ImportError:
-	TkinterDnD = None
-	DND_FILES = None
+from tkinter import colorchooser, filedialog, messagebox, simpledialog
+from typing import Dict, List, Tuple
 
+# --- DnD Support (Optional) ---
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    ROOT_CLASS = TkinterDnD.Tk
+except ImportError:
+    ROOT_CLASS = tk.Tk
+    DND_FILES = None
 
 DEFAULT_CONFIG = {
-	"ERROR": "#ff0000",
-	"WARN": "#ff8800",
-	"INFO": "#008800",
+    "colors": {
+        "ERROR": "#ffcccc",
+        "FAIL": "#ffcccc",
+        "WARN": "#ffebcc",
+        "INFO": "#ccffcc",
+        r"\[\d+\]": "#e0e0e0" 
+    },
+    "replace_patterns": []
 }
 
+class LineNumberCanvas(tk.Canvas):
+    """行番号を描画するキャンバス"""
+    def __init__(self, master, text_widget, **kwargs):
+        super().__init__(master, **kwargs)
+        self.text_widget = text_widget
+        self.text_widget.bind('<KeyRelease>', self.redraw)
+        self.text_widget.bind('<MouseWheel>', self.redraw)
+        self.text_widget.bind('<Configure>', self.redraw)
+        self.text_widget.bind('<<Modified>>', self.redraw)
+
+    def redraw(self, *args):
+        self.delete("all")
+        i = self.text_widget.index("@0,0")
+        while True:
+            dline = self.text_widget.dlineinfo(i)
+            if dline is None: 
+                break
+            y = dline[1]
+            linenum = str(i).split(".")[0]
+            self.create_text(40, y, anchor="ne", text=linenum, fill="#666666")
+            i = self.text_widget.index(f"{i}+1line")
 
 class LogViewerApp:
-	def __init__(self, root: tk.Tk) -> None:
-		self.root = root
-		root.title("Log Viewer")
-
-		self.config_path = os.path.join(os.path.dirname(__file__), "config.json")
-		self.keyword_colors: Dict[str, str] = DEFAULT_CONFIG.copy()
-		self.replace_patterns: list[tuple[str, str, bool]] = []  # (search, replace, match_case)
-		self.expected_order: list[str] = []  # list of keywords in expected order
-
-		self._build_ui()
-		# load config if exists
-		if os.path.exists(self.config_path):
-			try:
-				self.load_config(self.config_path)
-			except Exception:
-				# non-fatal
-				print("Failed to load default config", file=sys.stderr)
-
-	def _build_ui(self) -> None:
-		menubar = tk.Menu(self.root)
-		filemenu = tk.Menu(menubar, tearoff=0)
-		filemenu.add_command(label="Open...", command=self.open_file)
-		filemenu.add_command(label="Replace...", command=self.replace_dialog)
-		filemenu.add_separator()
-		filemenu.add_command(label="Exit", command=self.root.quit)
-		menubar.add_cascade(label="File", menu=filemenu)
-
-		configmenu = tk.Menu(menubar, tearoff=0)
-		configmenu.add_command(label="Load Config...", command=self.load_config_dialog)
-		configmenu.add_command(label="Save Config...", command=self.save_config_dialog)
-		configmenu.add_separator()
-		configmenu.add_command(label="Edit Keywords...", command=self.edit_keywords_dialog)
-		configmenu.add_command(label="Edit Replace...", command=self.edit_replace_patterns_dialog)
-		configmenu.add_command(label="Edit Expected Order...", command=self.edit_expected_order_dialog)
-		menubar.add_cascade(label="Config", menu=configmenu)
-
-		self.root.config(menu=menubar)
-
-		# Text widget with vertical scrollbar
-		frame = tk.Frame(self.root)
-		frame.pack(fill=tk.BOTH, expand=True)
-
-		self.text = tk.Text(frame, wrap=tk.NONE)
-		self.vsb = tk.Scrollbar(frame, orient=tk.VERTICAL, command=self.text.yview)
-		self.hsb = tk.Scrollbar(frame, orient=tk.HORIZONTAL, command=self.text.xview)
-		self.text.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
-
-		self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
-		self.hsb.pack(side=tk.BOTTOM, fill=tk.X)
-		self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-		# Drag & Drop support
-		if TkinterDnD and hasattr(self.text, 'drop_target_register'):
-			self.text.drop_target_register(DND_FILES)
-			self.text.dnd_bind('<<Drop>>', self._on_drop_file)
-
-		# status bar
-		self.status = tk.Label(self.root, text="Ready", anchor=tk.W)
-		self.status.pack(fill=tk.X, side=tk.BOTTOM)
-
-	def _on_drop_file(self, event):
-		path = event.data.strip()
-		if path.startswith('{') and path.endswith('}'):
-			path = path[1:-1]
-		if ' ' in path:
-			path = path.split(' ')[0]
-		if os.path.isfile(path):
-			self._open_file_path(path)
-
-	def _open_file_path(self, path: str) -> None:
-		try:
-			with open(path, "r", encoding="utf-8", errors="replace") as f:
-				data = f.read()
-		except Exception as e:
-			messagebox.showerror("Open file", f"Failed to open file:\n{e}")
-			return
-
-
-		# Annotate replacements inline: ORIGINAL(REPLACED)
-		def annotate_replacements(content: str):
-			matches: list[tuple[int,int,str,str]] = []
-			for search, replace, match_case in self.replace_patterns:
-				flags = 0 if match_case else re.IGNORECASE
-				pattern = re.compile(re.escape(search), flags=flags)
-				for m in pattern.finditer(content):
-					matches.append((m.start(), m.end(), m.group(0), replace))
-
-			# sort and filter overlapping
-			matches.sort(key=lambda x: x[0])
-			filtered = []
-			last_end = -1
-			for s,e,orig,repl in matches:
-				if s >= last_end:
-					filtered.append((s,e,orig,repl))
-					last_end = e
-
-			# build annotated content
-			out = []
-			pos = 0
-			for s,e,orig,repl in filtered:
-				out.append(content[pos:s])
-				out.append(f"{orig}({repl})")
-				pos = e
-			out.append(content[pos:])
-			return ''.join(out), len(filtered) > 0
-
-		annotated = data
-		did_annotate = False
-		if self.replace_patterns:
-			annotated, did_annotate = annotate_replacements(data)
-
-		self.text.delete("1.0", tk.END)
-		self.text.insert("1.0", annotated)
-		if did_annotate:
-			self.status.config(text=f"Opened and annotated replacements: {path}")
-		else:
-			self.status.config(text=f"Opened: {path}")
-		self.highlight_keywords()
-
-		# check expected order (use original data, not annotated)
-		violations = self.check_expected_order(data)
-		if violations:
-			# prepare message with a few examples
-			msg_lines = [f"Found {len(violations)} ordering violation(s):"]
-			for v in violations[:10]:
-				msg_lines.append(f"Line {v['line']}: {v['found']} (expected after: {v['expected_after']})")
-			if len(violations) > 10:
-				msg_lines.append("...more violations omitted...")
-			messagebox.showwarning("Order Violations", "\n".join(msg_lines))
-
-
-
-	# ---------- file / config operations ----------
-	def open_file(self) -> None:
-		path = filedialog.askopenfilename(title="Open log file", filetypes=[("All files", "*")])
-		if not path:
-			return
-		self._open_file_path(path)
-
-	def load_config_dialog(self) -> None:
-		path = filedialog.askopenfilename(title="Load config", defaultextension=".json", filetypes=[("JSON files","*.json"), ("All files","*")])
-		if not path:
-			return
-		try:
-			self.load_config(path)
-			messagebox.showinfo("Load config", "Config loaded")
-		except Exception as e:
-			messagebox.showerror("Load config", f"Failed to load config:\n{e}")
-
-	def save_config_dialog(self) -> None:
-		path = filedialog.asksaveasfilename(title="Save config", defaultextension=".json", filetypes=[("JSON files","*.json"), ("All files","*")])
-		if not path:
-			return
-		try:
-			self.save_config(path)
-			messagebox.showinfo("Save config", "Config saved")
-		except Exception as e:
-			messagebox.showerror("Save config", f"Failed to save config:\n{e}")
-
-	def load_config(self, path: str) -> None:
-		with open(path, "r", encoding="utf-8") as f:
-			data = json.load(f)
-		if not isinstance(data, dict):
-			raise ValueError("Config must be a JSON object")
-			
-		# Load keyword colors
-		colors = data.get("colors", {})
-		if not isinstance(colors, dict):
-			raise ValueError("'colors' must be a JSON object mapping keywords to color strings")
-		self.keyword_colors = {str(k): str(v) for k, v in colors.items()}
-		
-		# Load replace patterns
-		patterns = data.get("replace_patterns", [])
-		if not isinstance(patterns, list):
-			raise ValueError("'replace_patterns' must be a JSON array")
-		self.replace_patterns = [(str(p["search"]), str(p["replace"]), bool(p["match_case"])) 
-							   for p in patterns]
-
-		# Load expected order
-		exp_order = data.get("expected_order", [])
-		if not isinstance(exp_order, list):
-			raise ValueError("'expected_order' must be a JSON array")
-		self.expected_order = [str(x) for x in exp_order]
-		
-		self.highlight_keywords()
-
-	def save_config(self, path: str) -> None:
-		data = {
-			"colors": self.keyword_colors,
-			"replace_patterns": [
-				{"search": s, "replace": r, "match_case": m}
-				for s, r, m in self.replace_patterns
-			]
-			,
-			"expected_order": self.expected_order,
-		}
-		with open(path, "w", encoding="utf-8") as f:
-			json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-	# ---------- keyword editing UI ----------
-	def edit_keywords_dialog(self) -> None:
-		dlg = tk.Toplevel(self.root)
-		dlg.title("Edit Keywords")
-		dlg.transient(self.root)
-		dlg.grab_set()
-
-		rows_frame = tk.Frame(dlg)
-		rows_frame.pack(padx=8, pady=8, fill=tk.BOTH, expand=True)
-
-		entries = []
-
-		def add_row(key: str = "", color: str = "#000000"):
-			row = tk.Frame(rows_frame)
-			row.pack(fill=tk.X, pady=2)
-			kvar = tk.StringVar(value=key)
-			cvar = tk.StringVar(value=color)
-			kentry = tk.Entry(row, textvariable=kvar, width=20)
-			centry = tk.Entry(row, textvariable=cvar, width=12)
-			def pick_color():
-				col = colorchooser.askcolor(cvar.get(), parent=dlg)
-				if col and col[1]:
-					cvar.set(col[1])
-			pick_btn = tk.Button(row, text="…", width=2, command=pick_color)
-			del_btn = tk.Button(row, text="-", width=2, command=lambda: (row.destroy(), entries.remove((kvar, cvar))))
-			kentry.pack(side=tk.LEFT, padx=(0,6))
-			centry.pack(side=tk.LEFT)
-			pick_btn.pack(side=tk.LEFT, padx=4)
-			del_btn.pack(side=tk.LEFT, padx=4)
-			entries.append((kvar, cvar))
-
-		# populate existing
-		for k, v in self.keyword_colors.items():
-			add_row(k, v)
-
-		add_btn = tk.Button(dlg, text="Add", command=lambda: add_row())
-		add_btn.pack(pady=(0,6))
-
-		def on_ok():
-			new_map: Dict[str, str] = {}
-			for kvar, cvar in entries:
-				key = kvar.get().strip()
-				col = cvar.get().strip()
-				if not key:
-					continue
-				# basic validation for color
-				if not col.startswith("#"):
-					messagebox.showerror("Edit Keywords", f"Invalid color for {key}: {col}")
-					return
-				new_map[key] = col
-			self.keyword_colors = new_map
-			self.highlight_keywords()
-			dlg.destroy()
-
-		btn_frame = tk.Frame(dlg)
-		btn_frame.pack(fill=tk.X, pady=(0,8))
-		ok_btn = tk.Button(btn_frame, text="OK", width=10, command=on_ok)
-		cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=dlg.destroy)
-		ok_btn.pack(side=tk.RIGHT, padx=4)
-		cancel_btn.pack(side=tk.RIGHT)
-
-	# ---------- expected order editing ----------
-	def edit_expected_order_dialog(self) -> None:
-		dlg = tk.Toplevel(self.root)
-		dlg.title("Edit Expected Order")
-		dlg.transient(self.root)
-		dlg.grab_set()
-
-		lbl = tk.Label(dlg, text="Enter keywords in expected order (one per line):")
-		lbl.pack(anchor=tk.W, padx=8, pady=(8,0))
-		text = tk.Text(dlg, height=8, width=40)
-		text.pack(padx=8, pady=8)
-		# populate existing
-		for k in self.expected_order:
-			text.insert(tk.END, k + "\n")
-
-		def on_ok_order():
-			lines = [ln.strip() for ln in text.get("1.0", tk.END).splitlines()]
-			lines = [ln for ln in lines if ln]
-			self.expected_order = lines
-			dlg.destroy()
-
-		btn_frame = tk.Frame(dlg)
-		btn_frame.pack(fill=tk.X, pady=(0,8), padx=8)
-		ok_btn = tk.Button(btn_frame, text="OK", width=10, command=on_ok_order)
-		cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=dlg.destroy)
-		ok_btn.pack(side=tk.RIGHT, padx=4)
-		cancel_btn.pack(side=tk.RIGHT)
-
-	def check_expected_order(self, content: str) -> list:
-		"""
-		Check content for expected order violations.
-		Return a list of violation dicts: {line, found, expected_after}
-		"""
-		if not self.expected_order:
-			return []
-
-		# prepare map for quick lookup (case-insensitive)
-		order_map = {k.upper(): i for i, k in enumerate(self.expected_order)}
-		violations = []
-		last_index = -1
-		# scan line by line to report line numbers
-		for lineno, line in enumerate(content.splitlines(), start=1):
-			# find any token that matches any expected keyword
-			for tok_upper, idx in order_map.items():
-				for m in re.finditer(re.escape(tok_upper), line.upper()):
-					# found token
-					if idx < last_index:
-						violations.append({
-							"line": lineno,
-							"found": line[m.start():m.end()],
-							"found_key": tok_upper,
-							"expected_after": self.expected_order[last_index] if last_index >= 0 else None,
-						})
-					# update last_index to max seen index
-					last_index = max(last_index, idx)
-		return violations
-
-	# ---------- replace patterns editing ----------
-	def edit_replace_patterns_dialog(self) -> None:
-		dlg = tk.Toplevel(self.root)
-		dlg.title("Edit Replace Patterns")
-		dlg.transient(self.root)
-		dlg.grab_set()
-
-		rows_frame = tk.Frame(dlg)
-		rows_frame.pack(padx=8, pady=8, fill=tk.BOTH, expand=True)
-
-		entries = []
-
-		def add_row(search: str = "", replace: str = "", match_case: bool = False):
-			row = tk.Frame(rows_frame)
-			row.pack(fill=tk.X, pady=2)
-			search_var = tk.StringVar(value=search)
-			replace_var = tk.StringVar(value=replace)
-			case_var = tk.BooleanVar(value=match_case)
-			
-			search_entry = tk.Entry(row, textvariable=search_var, width=20)
-			replace_entry = tk.Entry(row, textvariable=replace_var, width=20)
-			case_check = tk.Checkbutton(row, text="Aa", variable=case_var)
-			del_btn = tk.Button(row, text="-", width=2, 
-							   command=lambda: (row.destroy(), entries.remove((search_var, replace_var, case_var))))
-			
-			search_entry.pack(side=tk.LEFT, padx=(0,6))
-			replace_entry.pack(side=tk.LEFT, padx=(0,6))
-			case_check.pack(side=tk.LEFT)
-			del_btn.pack(side=tk.LEFT, padx=4)
-			entries.append((search_var, replace_var, case_var))
-
-		# header
-		header = tk.Frame(rows_frame)
-		header.pack(fill=tk.X, pady=(0,4))
-		tk.Label(header, text="Find", width=20).pack(side=tk.LEFT, padx=(0,6))
-		tk.Label(header, text="Replace", width=20).pack(side=tk.LEFT, padx=(0,6))
-		tk.Label(header, text="Case").pack(side=tk.LEFT)
-
-		# populate existing
-		for search, replace, match_case in self.replace_patterns:
-			add_row(search, replace, match_case)
-
-		add_btn = tk.Button(dlg, text="Add Pattern", command=lambda: add_row())
-		add_btn.pack(pady=(0,6))
-
-		def on_ok():
-			patterns = []
-			for svar, rvar, cvar in entries:
-				search = svar.get().strip()
-				replace = rvar.get().strip()
-				if not search:
-					continue
-				patterns.append((search, replace, cvar.get()))
-			self.replace_patterns = patterns
-			dlg.destroy()
-
-		btn_frame = tk.Frame(dlg)
-		btn_frame.pack(fill=tk.X, pady=(0,8))
-		ok_btn = tk.Button(btn_frame, text="OK", width=10, command=on_ok)
-		cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=dlg.destroy)
-		ok_btn.pack(side=tk.RIGHT, padx=4)
-		cancel_btn.pack(side=tk.RIGHT)
-
-	def apply_replace_patterns(self) -> None:
-		content = self.text.get("1.0", tk.END)
-		modified = False
-
-		for search, replace, match_case in self.replace_patterns:
-			if match_case:
-				new_content = content.replace(search, replace)
-			else:
-				new_content = re.sub(re.escape(search), replace, content, flags=re.IGNORECASE)
-			
-			if new_content != content:
-				modified = True
-				content = new_content
-
-		if modified:
-			self.text.delete("1.0", tk.END)
-			self.text.insert("1.0", content)
-			self.highlight_keywords()
-			return True
-		return False
-
-	# ---------- replace dialog ----------
-	def replace_dialog(self) -> None:
-		dlg = tk.Toplevel(self.root)
-		dlg.title("Replace Text")
-		dlg.transient(self.root)
-		dlg.grab_set()
-		dlg.geometry("300x150")
-
-		# Search frame
-		search_frame = tk.Frame(dlg)
-		search_frame.pack(fill=tk.X, padx=8, pady=(8,4))
-		tk.Label(search_frame, text="Find:").pack(side=tk.LEFT)
-		search_var = tk.StringVar()
-		search_entry = tk.Entry(search_frame, textvariable=search_var)
-		search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4,0))
-
-		# Replace frame
-		replace_frame = tk.Frame(dlg)
-		replace_frame.pack(fill=tk.X, padx=8, pady=4)
-		tk.Label(replace_frame, text="Replace:").pack(side=tk.LEFT)
-		replace_var = tk.StringVar()
-		replace_entry = tk.Entry(replace_frame, textvariable=replace_var)
-		replace_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4,0))
-
-		# Options frame
-		options_frame = tk.Frame(dlg)
-		options_frame.pack(fill=tk.X, padx=8, pady=4)
-		match_case = tk.BooleanVar(value=False)
-		tk.Checkbutton(options_frame, text="Match case", variable=match_case).pack(side=tk.LEFT)
-
-		def do_replace() -> None:
-			search_text = search_var.get()
-			replace_text = replace_var.get()
-			if not search_text:
-				messagebox.showwarning("Replace", "Please enter text to find")
-				return
-
-			content = self.text.get("1.0", tk.END)
-			if match_case.get():
-				new_content = content.replace(search_text, replace_text)
-			else:
-				new_content = re.sub(re.escape(search_text), replace_text, content, flags=re.IGNORECASE)
-
-			if new_content != content:
-				self.text.delete("1.0", tk.END)
-				self.text.insert("1.0", new_content)
-				self.highlight_keywords()
-				messagebox.showinfo("Replace", "Replacement completed")
-			else:
-				messagebox.showinfo("Replace", "No matches found")
-
-		# Buttons frame
-		btn_frame = tk.Frame(dlg)
-		btn_frame.pack(fill=tk.X, pady=(8,8), padx=8)
-		replace_btn = tk.Button(btn_frame, text="Replace All", width=10, command=do_replace)
-		cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=dlg.destroy)
-		replace_btn.pack(side=tk.RIGHT, padx=(4,0))
-		cancel_btn.pack(side=tk.RIGHT)
-
-	# ---------- highlighting ----------
-	def clear_highlight_tags(self) -> None:
-		for tag in list(self.text.tag_names()):
-			self.text.tag_delete(tag)
-
-	def highlight_keywords(self) -> None:
-		# remove previous tags
-		self.clear_highlight_tags()
-		content = self.text.get("1.0", tk.END)
-		if not content:
-			return
-
-		for key, color in self.keyword_colors.items():
-			try:
-				# create tag
-				tag_name = f"kw_{key}"
-				self.text.tag_configure(tag_name, background=color)
-				# find occurrences using Python regex (word-boundary, ignore case)
-				pattern = re.compile(r"\b" + re.escape(key) + r"\b", flags=re.IGNORECASE)
-				for m in pattern.finditer(content):
-					start_idx = f"1.0+{m.start()}c"
-					end_idx = f"1.0+{m.end()}c"
-					self.text.tag_add(tag_name, start_idx, end_idx)
-			except Exception:
-				# ignore tag errors
-				continue
-
-
-
-def main() -> None:
-	if TkinterDnD:
-		root = TkinterDnD.Tk()
-	else:
-		root = tk.Tk()
-	app = LogViewerApp(root)
-	root.geometry("900x600")
-	root.mainloop()
-
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        root.title("Embedded Log Viewer (Regex Replace)")
+        root.geometry("1100x700")
+
+        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        self.keyword_colors: Dict[str, str] = DEFAULT_CONFIG["colors"].copy()
+        # (search, replace, match_case, use_regex)
+        self.replace_patterns: List[Tuple[str, str, bool, bool]] = []
+
+        self._build_ui()
+        self._bind_shortcuts()
+        
+        if os.path.exists(self.config_path):
+            try:
+                self.load_config(self.config_path)
+            except Exception as e:
+                print(f"Failed to load config: {e}", file=sys.stderr)
+
+    def _build_ui(self) -> None:
+        # --- Menu ---
+        menubar = tk.Menu(self.root)
+        
+        filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Open...", accelerator="Ctrl+O", command=self.open_file)
+        filemenu.add_command(label="Reload", accelerator="F5", command=self.reload_file)
+        filemenu.add_separator()
+        filemenu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=filemenu)
+
+        editmenu = tk.Menu(menubar, tearoff=0)
+        editmenu.add_command(label="Find...", accelerator="Ctrl+F", command=self.open_find_dialog)
+        editmenu.add_command(label="Find Next", accelerator="F3", command=self.find_next)
+        menubar.add_cascade(label="Edit", menu=editmenu)
+
+        configmenu = tk.Menu(menubar, tearoff=0)
+        configmenu.add_command(label="Load Config...", command=self.load_config_dialog)
+        configmenu.add_command(label="Save Config...", command=self.save_config_dialog)
+        configmenu.add_separator()
+        configmenu.add_command(label="Edit Keywords (Highlight)...", command=self.edit_keywords_dialog)
+        configmenu.add_command(label="Edit Replace Patterns...", command=self.edit_replace_patterns_dialog)
+        menubar.add_cascade(label="Config", menu=configmenu)
+
+        self.root.config(menu=menubar)
+
+        # --- Toolbar ---
+        toolbar = tk.Frame(self.root)
+        toolbar.pack(fill=tk.X, padx=5, pady=2)
+        tk.Label(toolbar, text="Filter:").pack(side=tk.LEFT)
+        self.filter_var = tk.StringVar()
+        self.filter_entry = tk.Entry(toolbar, textvariable=self.filter_var)
+        self.filter_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.filter_entry.bind('<Return>', lambda e: self.apply_filter())
+        tk.Button(toolbar, text="Apply", command=self.apply_filter).pack(side=tk.LEFT)
+        tk.Button(toolbar, text="Reset", command=self.reset_filter).pack(side=tk.LEFT, padx=2)
+
+        # --- Text Area ---
+        frame = tk.Frame(self.root)
+        frame.pack(fill=tk.BOTH, expand=True)
+        self.vsb = tk.Scrollbar(frame, orient=tk.VERTICAL)
+        self.hsb = tk.Scrollbar(frame, orient=tk.HORIZONTAL)
+        self.text = tk.Text(frame, wrap=tk.NONE, undo=False, maxundo=0,
+                            yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
+        self.linenumbers = LineNumberCanvas(frame, self.text, width=45, bg='#f0f0f0')
+
+        self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
+        self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.vsb.config(command=self._on_vsb_scroll)
+        self.hsb.config(command=self.text.xview)
+        
+        # Events
+        self.text.bind('<KeyRelease>', lambda e: self.linenumbers.redraw())
+        self.text.bind('<MouseWheel>', self._on_mousewheel)
+        self.text.bind('<Button-4>', self._on_mousewheel)
+        self.text.bind('<Button-5>', self._on_mousewheel)
+        
+        if DND_FILES and hasattr(self.text, 'drop_target_register'):
+            self.text.drop_target_register(DND_FILES)
+            self.text.dnd_bind('<<Drop>>', self._on_drop_file)
+
+        self.status_var = tk.StringVar(value="Ready")
+        tk.Label(self.root, textvariable=self.status_var, anchor=tk.W, relief=tk.SUNKEN).pack(fill=tk.X, side=tk.BOTTOM)
+
+        # Internal State
+        self.current_file_path = None
+        self.original_content = ""
+        self.last_search_keyword = ""
+
+    def _bind_shortcuts(self):
+        self.root.bind('<Control-o>', lambda e: self.open_file())
+        self.root.bind('<Control-f>', lambda e: self.open_find_dialog())
+        self.root.bind('<F3>', lambda e: self.find_next())
+        self.root.bind('<F5>', lambda e: self.reload_file())
+
+    def _on_vsb_scroll(self, *args):
+        self.text.yview(*args)
+        self.linenumbers.redraw()
+
+    def _on_mousewheel(self, event):
+        self.text.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.linenumbers.redraw()
+        return "break"
+
+    def _on_drop_file(self, event):
+        path = event.data
+        if path.startswith('{') and path.endswith('}'): path = path[1:-1]
+        self._open_file_path(path)
+
+    # --- File Ops ---
+    def open_file(self):
+        path = filedialog.askopenfilename()
+        if path: self._open_file_path(path)
+
+    def reload_file(self):
+        if self.current_file_path:
+            self._open_file_path(self.current_file_path)
+
+    def _open_file_path(self, path: str):
+        self.current_file_path = path
+        encodings = ['utf-8', 'cp932', 'shift_jis', 'latin-1']
+        data = None
+        used_enc = ""
+
+        for enc in encodings:
+            try:
+                with open(path, "r", encoding=enc) as f:
+                    data = f.read()
+                    used_enc = enc
+                    break
+            except UnicodeDecodeError:
+                continue
+        
+        if data is None:
+            with open(path, "r", encoding='utf-8', errors='replace') as f:
+                data = f.read()
+                used_enc = "utf-8(replace)"
+
+        # Apply Replacements
+        if self.replace_patterns:
+            data = self._apply_replacements(data)
+
+        self.original_content = data
+        self.text.delete("1.0", tk.END)
+        self.text.insert("1.0", data)
+        self.status_var.set(f"Opened: {path} [{used_enc}]")
+        
+        self.linenumbers.redraw()
+        self.highlight_keywords()
+
+    def _apply_replacements(self, content: str) -> str:
+        """置換ルールを適用し、Original(Replaced)形式で返す"""
+        import re
+        matches = []
+        for entry in self.replace_patterns:
+            # 互換性維持: 3要素ならRegex=Falseとみなす
+            if len(entry) == 4:
+                search, replace, match_case, use_regex = entry
+            else:
+                search, replace, match_case = entry
+                use_regex = False
+
+            flags = 0 if match_case else re.IGNORECASE
+            try:
+                if use_regex:
+                    pattern = re.compile(search, flags)
+                else:
+                    pattern = re.compile(re.escape(search), flags)
+
+                for m in pattern.finditer(content):
+                    # 置換後文字列の生成
+                    if use_regex:
+                        try:
+                            # \1 などを展開する
+                            repl_text = m.expand(replace)
+                        except re.error:
+                            repl_text = replace
+                    else:
+                        repl_text = replace
+                    
+                    matches.append((m.start(), m.end(), m.group(0), repl_text))
+            except re.error:
+                continue
+
+        if not matches: return content
+
+        # 重なりを除去しつつ結合
+        matches.sort(key=lambda x: x[0])
+        
+        out = []
+        pos = 0
+        for s, e, orig, repl in matches:
+            if s < pos: continue
+            out.append(content[pos:s])
+            # 変更が見やすいように Original(Replaced) 形式にする
+            # 改行が含まれると見づらくなるので、簡易的に1行に収まる場合のみ等の調整もアリだが
+            # ここではそのまま結合する
+            out.append(f"{orig}({repl})")
+            pos = e
+        out.append(content[pos:])
+        return "".join(out)
+
+    # --- Filter & Highlight ---
+    def apply_filter(self):
+        query = self.filter_var.get()
+        if not query or not self.original_content: return
+        
+        lines = self.original_content.splitlines()
+        filtered = [line for line in lines if query.lower() in line.lower()]
+        
+        self.text.delete("1.0", tk.END)
+        self.text.insert("1.0", "\n".join(filtered))
+        self.linenumbers.redraw()
+        self.highlight_keywords()
+        self.status_var.set(f"Filter: '{query}' ({len(filtered)} lines)")
+
+    def reset_filter(self):
+        if not self.original_content: return
+        self.filter_var.set("")
+        self.text.delete("1.0", tk.END)
+        self.text.insert("1.0", self.original_content)
+        self.linenumbers.redraw()
+        self.highlight_keywords()
+        self.status_var.set("Filter reset")
+
+    def highlight_keywords(self):
+        for tag in self.text.tag_names():
+            if tag.startswith("kw_"): self.text.tag_delete(tag)
+
+        count_var = tk.IntVar()
+        for key, color in self.keyword_colors.items():
+            if not key: continue
+            
+            tag_name = f"kw_{abs(hash(key))}"
+            self.text.tag_configure(tag_name, background=color)
+            
+            start_pos = "1.0"
+            while True:
+                try:
+                    pos = self.text.search(key, start_pos, stopindex=tk.END, 
+                                           nocase=True, regexp=True, count=count_var)
+                except tk.TclError:
+                    break
+
+                if not pos: break
+                
+                match_len = count_var.get()
+                if match_len == 0:
+                    start_pos = f"{pos}+1c"
+                    continue
+
+                end_pos = f"{pos}+{match_len}c"
+                self.text.tag_add(tag_name, pos, end_pos)
+                start_pos = end_pos
+
+    # --- Find ---
+    def open_find_dialog(self):
+        k = simpledialog.askstring("Find", "Text to find:")
+        if k:
+            self.last_search_keyword = k
+            self.find_next(True)
+
+    def find_next(self, start_first=False):
+        if not self.last_search_keyword: return
+        start = "1.0" if start_first else f"{self.text.index(tk.INSERT)}+1c"
+        pos = self.text.search(self.last_search_keyword, start, stopindex=tk.END, nocase=True)
+        if pos:
+            self.text.mark_set(tk.INSERT, pos)
+            self.text.see(pos)
+            end = f"{pos}+{len(self.last_search_keyword)}c"
+            self.text.tag_remove("found", "1.0", tk.END)
+            self.text.tag_add("found", pos, end)
+            self.text.tag_config("found", background="yellow", foreground="black")
+            self.text.focus_set()
+        else:
+            messagebox.showinfo("Find", "No more matches found.")
+
+    # --- Config Editors ---
+    def edit_keywords_dialog(self):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Edit Keywords")
+        
+        header = tk.Frame(dlg)
+        header.pack(padx=10, pady=(10,0), fill=tk.X)
+        tk.Label(header, text="Regex Pattern").pack(side=tk.LEFT, padx=(5, 80))
+        tk.Label(header, text="Color").pack(side=tk.LEFT)
+
+        canvas = tk.Canvas(dlg, borderwidth=0)
+        frame = tk.Frame(canvas)
+        vsb = tk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True, padx=10, pady=5)
+        canvas.create_window((4,4), window=frame, anchor="nw")
+
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        frame.bind("<Configure>", on_frame_configure)
+
+        entries = []
+
+        def add_row(k="", c="#ffffff"):
+            row = tk.Frame(frame)
+            row.pack(fill=tk.X, pady=2)
+            kv, cv = tk.StringVar(value=k), tk.StringVar(value=c)
+            tk.Entry(row, textvariable=kv, width=25).pack(side=tk.LEFT)
+            tk.Entry(row, textvariable=cv, width=10).pack(side=tk.LEFT, padx=5)
+            tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get())[1] or cv.get())).pack(side=tk.LEFT)
+            tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv)))).pack(side=tk.LEFT, padx=5)
+            entries.append((kv, cv))
+
+        for k, v in self.keyword_colors.items(): add_row(k, v)
+        
+        btn_frame = tk.Frame(dlg)
+        btn_frame.pack(fill=tk.X, pady=10)
+        tk.Button(btn_frame, text="Add Row", command=add_row).pack(side=tk.LEFT, padx=10)
+        
+        def save():
+            self.keyword_colors = {k.get(): c.get() for k, c in entries if k.get()}
+            self.highlight_keywords()
+            dlg.destroy()
+        
+        tk.Button(btn_frame, text="OK", command=save, width=10).pack(side=tk.RIGHT, padx=10)
+
+    def edit_replace_patterns_dialog(self):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Edit Replace Patterns")
+        frame = tk.Frame(dlg)
+        frame.pack(padx=10, pady=10)
+        entries = []
+
+        tk.Label(frame, text="Find (Regex)").grid(row=0, column=0)
+        tk.Label(frame, text="Replace").grid(row=0, column=1)
+        tk.Label(frame, text="Case").grid(row=0, column=2)
+        tk.Label(frame, text="Regex").grid(row=0, column=3)
+
+        def add_row(s="", r="", m=False, rg=True): # Default regex=True
+            sv, rv = tk.StringVar(value=s), tk.StringVar(value=r)
+            mv, rgv = tk.BooleanVar(value=m), tk.BooleanVar(value=rg)
+            
+            row_idx = len(entries) + 1
+            tk.Entry(frame, textvariable=sv).grid(row=row_idx, column=0)
+            tk.Entry(frame, textvariable=rv).grid(row=row_idx, column=1)
+            tk.Checkbutton(frame, variable=mv).grid(row=row_idx, column=2)
+            tk.Checkbutton(frame, variable=rgv).grid(row=row_idx, column=3)
+            
+            entries.append((sv, rv, mv, rgv))
+
+        # 既存データのロード
+        for entry in self.replace_patterns:
+            if len(entry) == 4:
+                add_row(*entry)
+            else:
+                # 古い設定(3要素)の場合はRegex=False扱いにするか、デフォルトに合わせるか
+                # ここでは安全に False にしておく
+                add_row(entry[0], entry[1], entry[2], False)
+
+        tk.Button(dlg, text="Add", command=add_row).pack()
+
+        def save():
+            new_patterns = []
+            for s, r, m, rg in entries:
+                if s.get():
+                    new_patterns.append((s.get(), r.get(), m.get(), rg.get()))
+            self.replace_patterns = new_patterns
+            messagebox.showinfo("Saved", "Reload file to apply changes.")
+            dlg.destroy()
+        tk.Button(dlg, text="OK", command=save).pack(pady=5)
+
+    def load_config_dialog(self):
+        path = filedialog.askopenfilename(filetypes=[("JSON","*.json")])
+        if path: self.load_config(path)
+
+    def save_config_dialog(self):
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON","*.json")])
+        if path: self.save_config(path)
+
+    def load_config(self, path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.keyword_colors = data.get("colors", {})
+        
+        # Load replace patterns with backward compatibility
+        loaded_patterns = data.get("replace_patterns", [])
+        self.replace_patterns = []
+        for p in loaded_patterns:
+            # p can be dict or list depending on version? 
+            # Current save format is list of dicts.
+            if isinstance(p, dict):
+                self.replace_patterns.append((
+                    p.get("search", ""),
+                    p.get("replace", ""),
+                    p.get("match_case", False),
+                    p.get("use_regex", False) # Default to false for old configs
+                ))
+
+        self.highlight_keywords()
+
+    def save_config(self, path):
+        data = {
+            "colors": self.keyword_colors,
+            "replace_patterns": [
+                {"search":s, "replace":r, "match_case":m, "use_regex":rg} 
+                for s,r,m,rg in self.replace_patterns
+            ],
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+def main():
+    root = ROOT_CLASS()
+    app = LogViewerApp(root)
+    root.mainloop()
 
 if __name__ == "__main__":
-	main()
+    main()
