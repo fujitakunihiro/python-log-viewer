@@ -1,16 +1,17 @@
 """
-Embedded Log Viewer v9 (Unified Design Edition)
+Embedded Log Viewer v11 (Instant Apply Edition)
+
+【変更点】
+- Edit Replace Patterns で「OK」を押した際、メッセージを出さずに即座に再読み込みして反映するように修正
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
 2. 行番号表示
 3. フィルタ (簡易grep)
-4. キーワードハイライト (正規表現対応, 色設定GUI改善)
-5. 文字列置換 (正規表現対応, グループ参照対応, 設定GUI改善)
+4. キーワードハイライト (正規表現対応, 入力支援ボタン付き)
+5. 文字列置換 (正規表現対応, グループ参照 \1 \2 対応)
 6. 検索機能 (Ctrl+F)
 7. 設定保存 (JSON)
-
-※ Edit Keywords と Edit Replace Patterns のデザインを統一しました。
 """
 
 from __future__ import annotations
@@ -123,7 +124,7 @@ class LogViewerApp:
         tk.Button(toolbar, text="Apply", command=self.apply_filter).pack(side=tk.LEFT)
         tk.Button(toolbar, text="Reset", command=self.reset_filter).pack(side=tk.LEFT, padx=2)
 
-        # --- Main Text Area ---
+        # --- Text Area ---
         frame = tk.Frame(self.root)
         frame.pack(fill=tk.BOTH, expand=True)
         
@@ -252,7 +253,6 @@ class LogViewerApp:
         if not matches: return content
 
         matches.sort(key=lambda x: x[0])
-        
         out = []
         pos = 0
         for s, e, orig, repl in matches:
@@ -340,43 +340,62 @@ class LogViewerApp:
         else:
             messagebox.showinfo("Find", "No more matches found.")
 
-    # --- Configuration Dialogs (Unified Design) ---
-    
-    # 1. Edit Keywords (Design updated to match Replace Patterns)
+    # --- Configuration Helper: Regex Presets ---
+    def create_preset_menu(self, parent_btn, entry_widget):
+        menu = tk.Menu(self.root, tearoff=0)
+        
+        presets = [
+            ("数字 (例: 123)", r"\d+"),
+            ("16進数 (例: 0xA1)", r"0x[0-9A-Fa-f]+"),
+            ("時刻 (例: 12:34:56)", r"\d{2}:\d{2}:\d{2}"),
+            ("日付 (例: 2023/01/01)", r"\d{4}/\d{2}/\d{2}"),
+            ("IPアドレス", r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"),
+            ("[]の中身 (例: [INFO])", r"\[.*?\]"),
+            ("''の中身 (例: 'val')", r"'.*?'"),
+            ("行の先頭", r"^"),
+            ("行の末尾", r"$"),
+            ("任意の文字列 (ワイルドカード *)", r".*"),
+        ]
+
+        def insert_text(text):
+            entry_widget.insert(tk.INSERT, text)
+
+        for label, regex in presets:
+            menu.add_command(label=label, command=lambda t=regex: insert_text(t))
+        
+        try:
+            menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
+        finally:
+            menu.grab_release()
+
+    # --- Configuration Dialogs (Unified) ---
     def edit_keywords_dialog(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("Edit Keywords")
-        dlg.geometry("650x400") # 幅合わせ
+        dlg.geometry("700x450")
 
-        # メインコンテナ
         container = tk.Frame(dlg)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # --- 左側: リスト ---
         left_frame = tk.Frame(container, relief=tk.GROOVE, borderwidth=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # ヘッダー
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        tk.Label(header_frame, text="Regex Pattern", width=35, anchor="w").pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Color", width=15, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Regex Pattern", width=30, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT)
 
-        # スクロールエリア
         canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = tk.Frame(canvas)
-
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
         def on_frame_configure(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
         scrollable_frame.bind("<Configure>", on_frame_configure)
-
         def on_canvas_configure(event):
             canvas.itemconfig(canvas_window, width=event.width)
         canvas.bind("<Configure>", on_canvas_configure)
@@ -389,25 +408,23 @@ class LogViewerApp:
             
             kv, cv = tk.StringVar(value=k), tk.StringVar(value=c)
             
-            # Entry配置
-            tk.Entry(row, textvariable=kv, width=35).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Entry(row, textvariable=cv, width=10).pack(side=tk.LEFT, padx=(0, 5))
+            entry_k = tk.Entry(row, textvariable=kv, width=28)
+            entry_k.pack(side=tk.LEFT, padx=(0, 2))
             
-            # Color Picker
+            btn_help = tk.Button(row, text="▼", width=2, 
+                                 command=lambda: self.create_preset_menu(btn_help, entry_k))
+            btn_help.pack(side=tk.LEFT, padx=(0, 5))
+            
+            tk.Entry(row, textvariable=cv, width=10).pack(side=tk.LEFT, padx=(0, 2))
             tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get())[1] or cv.get())).pack(side=tk.LEFT, padx=2)
-            
-            # Delete Button
             tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv)))).pack(side=tk.RIGHT)
-            
             entries.append((kv, cv))
 
         for k, v in self.keyword_colors.items(): add_row(k, v)
         if not entries: add_row()
 
-        # --- 右側: ボタン ---
         right_frame = tk.Frame(container)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-
         tk.Button(right_frame, text="Add Row", command=add_row, width=10, height=2).pack(side=tk.TOP, pady=5)
         
         def save():
@@ -415,44 +432,38 @@ class LogViewerApp:
             self.highlight_keywords()
             dlg.destroy()
         
-        # OKボタン (下揃え)
         tk.Frame(right_frame).pack(fill=tk.Y, expand=True)
         tk.Button(right_frame, text="OK", command=save, width=10, height=2, bg="#dddddd").pack(side=tk.BOTTOM, pady=5)
 
-    # 2. Edit Replace Patterns
     def edit_replace_patterns_dialog(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("Edit Replace Patterns")
-        dlg.geometry("750x400")
+        dlg.geometry("800x450")
 
         container = tk.Frame(dlg)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # --- 左側: リスト ---
         left_frame = tk.Frame(container, relief=tk.GROOVE, borderwidth=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        tk.Label(header_frame, text="Find (Regex)", width=22, anchor="w").pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Replace", width=22, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Find (Regex)", width=25, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Replace", width=20, anchor="w").pack(side=tk.LEFT)
         tk.Label(header_frame, text="Case", width=5).pack(side=tk.LEFT)
         tk.Label(header_frame, text="Regex", width=5).pack(side=tk.LEFT)
         
         canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = tk.Frame(canvas)
-
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
         def on_frame_configure(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
         scrollable_frame.bind("<Configure>", on_frame_configure)
-
         def on_canvas_configure(event):
             canvas.itemconfig(canvas_window, width=event.width)
         canvas.bind("<Configure>", on_canvas_configure)
@@ -466,13 +477,18 @@ class LogViewerApp:
             sv, rv = tk.StringVar(value=s), tk.StringVar(value=r)
             mv, rgv = tk.BooleanVar(value=m), tk.BooleanVar(value=rg)
             
-            tk.Entry(row, textvariable=sv, width=25).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Entry(row, textvariable=rv, width=25).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Checkbutton(row, variable=mv).pack(side=tk.LEFT, padx=10)
-            tk.Checkbutton(row, variable=rgv).pack(side=tk.LEFT, padx=10)
+            entry_s = tk.Entry(row, textvariable=sv, width=25)
+            entry_s.pack(side=tk.LEFT, padx=(0, 2))
+            
+            btn_help = tk.Button(row, text="▼", width=2, 
+                                 command=lambda: self.create_preset_menu(btn_help, entry_s))
+            btn_help.pack(side=tk.LEFT, padx=(0, 5))
+
+            tk.Entry(row, textvariable=rv, width=20).pack(side=tk.LEFT, padx=(0, 5))
+            tk.Checkbutton(row, variable=mv).pack(side=tk.LEFT, padx=5)
+            tk.Checkbutton(row, variable=rgv).pack(side=tk.LEFT, padx=5)
             
             tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((sv, rv, mv, rgv)))).pack(side=tk.RIGHT)
-            
             entries.append((sv, rv, mv, rgv))
 
         for entry in self.replace_patterns:
@@ -480,14 +496,10 @@ class LogViewerApp:
                 add_row(*entry)
             else:
                 add_row(entry[0], entry[1], entry[2], False)
+        if not entries: add_row()
 
-        if not entries:
-            add_row()
-
-        # --- 右側: ボタン ---
         right_frame = tk.Frame(container)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-
         tk.Button(right_frame, text="Add Row", command=add_row, width=10, height=2).pack(side=tk.TOP, pady=5)
         
         def save():
@@ -496,8 +508,13 @@ class LogViewerApp:
                 if s.get():
                     new_patterns.append((s.get(), r.get(), m.get(), rg.get()))
             self.replace_patterns = new_patterns
-            messagebox.showinfo("Saved", "Settings saved.\nReload file (F5) to apply replacement changes.")
+            
+            # メッセージボックスを出さずに閉じる
             dlg.destroy()
+            
+            # 即時リロードして反映
+            if self.current_file_path:
+                self.reload_file()
         
         tk.Frame(right_frame).pack(fill=tk.Y, expand=True)
         tk.Button(right_frame, text="OK", command=save, width=10, height=2, bg="#dddddd").pack(side=tk.BOTTOM, pady=5)
@@ -526,7 +543,6 @@ class LogViewerApp:
                     p.get("match_case", False),
                     p.get("use_regex", False)
                 ))
-
         self.highlight_keywords()
 
     def save_config(self, path):

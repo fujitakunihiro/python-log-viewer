@@ -6,9 +6,10 @@
   },
   "replace_patterns": [
     {
-      "search": "FUJITA",
+      "search": ".*Temp=\\d+",
       "replace": "KUIHIRO",
-      "match_case": false
+      "match_case": false,
+      "use_regex": true
     }
   ]
 }
