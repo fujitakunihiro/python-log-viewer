@@ -1,15 +1,16 @@
 """
-Embedded Log Viewer v11 (Instant Apply Edition)
+Embedded Log Viewer v14 (Auto Color Cycle Edition)
 
 【変更点】
-- Edit Replace Patterns で「OK」を押した際、メッセージを出さずに即座に再読み込みして反映するように修正
+- Edit Keywordsで「Add Row」を押した際、白(#ffffff)ではなく、
+  黄色・緑・水色などの「見やすい色」が順番に自動入力されるように修正。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
 2. 行番号表示
 3. フィルタ (簡易grep)
-4. キーワードハイライト (正規表現対応, 入力支援ボタン付き)
-5. 文字列置換 (正規表現対応, グループ参照 \1 \2 対応)
+4. キーワードハイライト (正規表現対応, 入力支援ボタン, 色自動選択)
+5. 文字列置換 (正規表現対応, グループ参照 \1 \2 対応, 即時反映)
 6. 検索機能 (Ctrl+F)
 7. 設定保存 (JSON)
 """
@@ -35,11 +36,11 @@ except ImportError:
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
     "colors": {
-        "ERROR": "#ffcccc",
+        "ERROR": "#ffcccc",   # 赤背景
         "FAIL": "#ffcccc",
-        "WARN": "#ffebcc",
-        "INFO": "#ccffcc",
-        r"\[\d+\]": "#e0e0e0" 
+        "WARN": "#ffebcc",    # オレンジ背景
+        "INFO": "#ccffcc",    # 緑背景
+        r"\[\d+\]": "#e0e0e0" # [123] のような数字
     },
     "replace_patterns": []
 }
@@ -64,6 +65,7 @@ class LineNumberCanvas(tk.Canvas):
                 break
             y = dline[1]
             linenum = str(i).split(".")[0]
+            # 行番号を描画 (右寄せ)
             self.create_text(40, y, anchor="ne", text=linenum, fill="#666666")
             i = self.text_widget.index(f"{i}+1line")
 
@@ -73,13 +75,19 @@ class LogViewerApp:
         root.title("Embedded Log Viewer")
         root.geometry("1100x700")
 
+        # 設定ファイルのパス決定
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        
+        # 設定変数の初期化
         self.keyword_colors: Dict[str, str] = DEFAULT_CONFIG["colors"].copy()
+        # replace_patterns: List[Tuple[str, str, bool, bool]]
         self.replace_patterns: List[Tuple[str, str, bool, bool]] = []
 
+        # UI構築
         self._build_ui()
         self._bind_shortcuts()
         
+        # 設定ロード
         if os.path.exists(self.config_path):
             try:
                 self.load_config(self.config_path)
@@ -90,6 +98,7 @@ class LogViewerApp:
         # --- Menu ---
         menubar = tk.Menu(self.root)
         
+        # File Menu
         filemenu = tk.Menu(menubar, tearoff=0)
         filemenu.add_command(label="Open...", accelerator="Ctrl+O", command=self.open_file)
         filemenu.add_command(label="Reload", accelerator="F5", command=self.reload_file)
@@ -97,11 +106,13 @@ class LogViewerApp:
         filemenu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=filemenu)
 
+        # Edit Menu
         editmenu = tk.Menu(menubar, tearoff=0)
         editmenu.add_command(label="Find...", accelerator="Ctrl+F", command=self.open_find_dialog)
         editmenu.add_command(label="Find Next", accelerator="F3", command=self.find_next)
         menubar.add_cascade(label="Edit", menu=editmenu)
 
+        # Config Menu
         configmenu = tk.Menu(menubar, tearoff=0)
         configmenu.add_command(label="Load Config...", command=self.load_config_dialog)
         configmenu.add_command(label="Save Config...", command=self.save_config_dialog)
@@ -112,7 +123,7 @@ class LogViewerApp:
 
         self.root.config(menu=menubar)
 
-        # --- Toolbar ---
+        # --- Toolbar (Filter) ---
         toolbar = tk.Frame(self.root)
         toolbar.pack(fill=tk.X, padx=5, pady=2)
         tk.Label(toolbar, text="Filter:").pack(side=tk.LEFT)
@@ -124,26 +135,32 @@ class LogViewerApp:
         tk.Button(toolbar, text="Apply", command=self.apply_filter).pack(side=tk.LEFT)
         tk.Button(toolbar, text="Reset", command=self.reset_filter).pack(side=tk.LEFT, padx=2)
 
-        # --- Text Area ---
+        # --- Main Text Area ---
         frame = tk.Frame(self.root)
         frame.pack(fill=tk.BOTH, expand=True)
         
+        # スクロールバー
         self.vsb = tk.Scrollbar(frame, orient=tk.VERTICAL)
         self.hsb = tk.Scrollbar(frame, orient=tk.HORIZONTAL)
         
+        # テキストウィジェット
         self.text = tk.Text(frame, wrap=tk.NONE, undo=False, maxundo=0,
                             yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
         
+        # 行番号キャンバス
         self.linenumbers = LineNumberCanvas(frame, self.text, width=45, bg='#f0f0f0')
 
+        # 配置 (Layout)
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.hsb.pack(side=tk.BOTTOM, fill=tk.X)
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # スクロール連動
         self.vsb.config(command=self._on_vsb_scroll)
         self.hsb.config(command=self.text.xview)
         
+        # イベントバインド
         self.text.bind('<KeyRelease>', lambda e: self.linenumbers.redraw())
         self.text.bind('<MouseWheel>', self._on_mousewheel)
         self.text.bind('<Button-4>', self._on_mousewheel)
@@ -157,7 +174,7 @@ class LogViewerApp:
         tk.Label(self.root, textvariable=self.status_var, anchor=tk.W, relief=tk.SUNKEN).pack(fill=tk.X, side=tk.BOTTOM)
 
         self.current_file_path = None
-        self.original_content = ""
+        self.original_content = "" 
         self.last_search_keyword = ""
 
     def _bind_shortcuts(self):
@@ -342,26 +359,49 @@ class LogViewerApp:
 
     # --- Configuration Helper: Regex Presets ---
     def create_preset_menu(self, parent_btn, entry_widget):
+        """正規表現入力支援メニューを表示"""
         menu = tk.Menu(self.root, tearoff=0)
         
-        presets = [
-            ("数字 (例: 123)", r"\d+"),
+        presets_groups = [
+            ("--- 数値・値 ---", None),
+            ("整数 (例: 123)", r"\d+"),
             ("16進数 (例: 0xA1)", r"0x[0-9A-Fa-f]+"),
+            ("小数/符号付 (例: -12.5)", r"[-+]?\d+(\.\d+)?"),
+            
+            ("--- ネットワーク・ID ---", None),
+            ("IPアドレス", r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"),
+            ("MACアドレス (例: AA:BB:CC...)", r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"),
+            
+            ("--- 時刻・日付 ---", None),
             ("時刻 (例: 12:34:56)", r"\d{2}:\d{2}:\d{2}"),
             ("日付 (例: 2023/01/01)", r"\d{4}/\d{2}/\d{2}"),
-            ("IPアドレス", r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"),
+
+            ("--- 文字列・構造 ---", None),
             ("[]の中身 (例: [INFO])", r"\[.*?\]"),
             ("''の中身 (例: 'val')", r"'.*?'"),
+            ("Key=Value (例: Err=1)", r"\w+\s*=\s*\S+"),
+            ("スペース/タブ", r"\s+"),
+
+            ("--- グループ・論理 (置換用) ---", None),
+            ("グループ化 (...)", r"()"),
+            ("いずれか (A|B)", r"|"),
+
+            ("--- 位置・ワイルドカード ---", None),
             ("行の先頭", r"^"),
             ("行の末尾", r"$"),
-            ("任意の文字列 (ワイルドカード *)", r".*"),
+            ("任意の文字列 (*)", r".*"),
         ]
 
         def insert_text(text):
-            entry_widget.insert(tk.INSERT, text)
+            if text:
+                entry_widget.insert(tk.INSERT, text)
 
-        for label, regex in presets:
-            menu.add_command(label=label, command=lambda t=regex: insert_text(t))
+        for label, regex in presets_groups:
+            if regex is None:
+                menu.add_separator()
+                menu.add_command(label=label, state="disabled")
+            else:
+                menu.add_command(label=label, command=lambda t=regex: insert_text(t))
         
         try:
             menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
@@ -402,10 +442,24 @@ class LogViewerApp:
 
         entries = []
 
-        def add_row(k="", c="#ffffff"):
+        # 自動配色のためのプリセット色（淡いハイライト色）
+        preset_colors = [
+            "#ffff99", # 黄
+            "#ccffcc", # 緑
+            "#ccffff", # 水色
+            "#ffcc99", # オレンジ
+            "#ff99cc", # ピンク
+            "#e0e0e0", # グレー
+        ]
+
+        def add_row(k="", c=None):
             row = tk.Frame(scrollable_frame)
             row.pack(fill=tk.X, pady=2, padx=5)
             
+            # 色が指定されていない（新規追加）場合は自動ローテーション
+            if c is None:
+                c = preset_colors[len(entries) % len(preset_colors)]
+
             kv, cv = tk.StringVar(value=k), tk.StringVar(value=c)
             
             entry_k = tk.Entry(row, textvariable=kv, width=28)
@@ -416,7 +470,12 @@ class LogViewerApp:
             btn_help.pack(side=tk.LEFT, padx=(0, 5))
             
             tk.Entry(row, textvariable=cv, width=10).pack(side=tk.LEFT, padx=(0, 2))
-            tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get())[1] or cv.get())).pack(side=tk.LEFT, padx=2)
+            
+            # parent=dlg でカラーピッカーを最前面に
+            tk.Button(row, text="Color", 
+                      command=lambda: cv.set(colorchooser.askcolor(cv.get(), parent=dlg)[1] or cv.get())
+                      ).pack(side=tk.LEFT, padx=2)
+            
             tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv)))).pack(side=tk.RIGHT)
             entries.append((kv, cv))
 
@@ -438,7 +497,7 @@ class LogViewerApp:
     def edit_replace_patterns_dialog(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("Edit Replace Patterns")
-        dlg.geometry("800x450")
+        dlg.geometry("850x450")
 
         container = tk.Frame(dlg)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -509,10 +568,7 @@ class LogViewerApp:
                     new_patterns.append((s.get(), r.get(), m.get(), rg.get()))
             self.replace_patterns = new_patterns
             
-            # メッセージボックスを出さずに閉じる
             dlg.destroy()
-            
-            # 即時リロードして反映
             if self.current_file_path:
                 self.reload_file()
         
