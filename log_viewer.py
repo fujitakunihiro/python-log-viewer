@@ -1,9 +1,11 @@
 """
-Log Viewer v34 (Split Ratio 6:4 Edition)
+Log Viewer v35 (Perfect Header Alignment Edition)
 
 【変更点】
-- メイン画面の分割比率を「左 6 : 右 4」に調整しました。
-  (ウィンドウ幅 1200px に対して、左720px : 右480px)
+- Edit Filter (Keywords) 画面のレイアウトを微調整しました。
+  - ヘッダーラベル ("Regex Pattern", "Color", "Comment") の位置を、
+    下の入力欄の開始位置に正確に合わせるため、スペーサーを配置しました。
+  - ウィンドウ幅を広げ (1100px)、右側の "Add Row" ボタンが見切れないようにしました。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
@@ -144,7 +146,7 @@ class LogViewerApp:
         self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # 左側: ログ (幅720px = 60%)
+        # 左側: ログ (60%)
         left_frame = tk.Frame(self.paned_window)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=720) 
 
@@ -159,7 +161,7 @@ class LogViewerApp:
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
 
-        # 右側: コメント (幅480px = 40%)
+        # 右側: コメント (40%)
         right_frame = tk.Frame(self.paned_window)
         self.paned_window.add(right_frame, minsize=100, stretch="always", width=480) 
 
@@ -503,7 +505,7 @@ class LogViewerApp:
         finally:
             menu.grab_release()
 
-    # --- Config Dialogs (Modal) ---
+    # --- Config Dialogs (Modal with Aligned Labels) ---
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref is not None and self.keywords_dlg_ref.winfo_exists():
             self.keywords_dlg_ref.lift()
@@ -512,7 +514,7 @@ class LogViewerApp:
         dlg = tk.Toplevel(self.root)
         self.keywords_dlg_ref = dlg
         dlg.title("Edit Filter")
-        dlg.geometry("950x450")
+        dlg.geometry("1100x450") # 幅を拡大
         dlg.transient(self.root)
         dlg.grab_set()
 
@@ -522,17 +524,28 @@ class LogViewerApp:
         left_frame = tk.Frame(container, relief=tk.GROOVE, borderwidth=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # --- ヘッダー位置合わせ ---
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        # 左側コントロール分(118px)のスペーサー
-        tk.Frame(header_frame, width=118).pack(side=tk.LEFT)
         
-        # ラベル配置（パディング調整）
-        # Regex Pattern: 入力欄のpadx=(5, 2) に合わせる
-        tk.Label(header_frame, text="Regex Pattern", width=45, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
-        # Color: ▼ボタン等の幅分を考慮して位置合わせ
-        tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(38,0))
-        tk.Label(header_frame, text="Comment", width=40, anchor="w").pack(side=tk.LEFT, padx=10)
+        # 1. 左側ボタン群(Check,Up,Down,Del)の幅分のスペーサー: 約130-135px
+        tk.Frame(header_frame, width=135).pack(side=tk.LEFT)
+        
+        # 2. "Regex Pattern" ラベル (Entry幅32 + padx分)
+        # Entry(32)は約200px超。ラベル幅で大まかに合わせる
+        tk.Label(header_frame, text="Regex Pattern", width=30, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 3. [▼]ボタン分のスペーサー: 約30px
+        tk.Frame(header_frame, width=35).pack(side=tk.LEFT)
+        
+        # 4. "Color" ラベル (Entry幅8 + padx分)
+        tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(0,0))
+        
+        # 5. [Color]ボタン分のスペーサー: 約55px
+        tk.Frame(header_frame, width=55).pack(side=tk.LEFT)
+        
+        # 6. "Comment" ラベル
+        tk.Label(header_frame, text="Comment", width=20, anchor="w").pack(side=tk.LEFT, padx=(5,0))
 
         canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
@@ -561,19 +574,16 @@ class LogViewerApp:
 
                 # 左側コントロール群
                 tk.Checkbutton(row, variable=en).pack(side=tk.LEFT, padx=2)
-                
                 btn_up = tk.Button(row, text="↑", width=2, command=lambda idx=i: move_up(idx))
                 btn_up.pack(side=tk.LEFT, padx=(2,0))
                 if i == 0: btn_up.config(state="disabled")
-
                 btn_down = tk.Button(row, text="↓", width=2, command=lambda idx=i: move_down(idx))
                 btn_down.pack(side=tk.LEFT, padx=(0,2))
                 if i == len(entries) - 1: btn_down.config(state="disabled")
-
                 tk.Button(row, text="Del", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
                 # 入力フィールド
-                entry_k = tk.Entry(row, textvariable=kv, width=42)
+                entry_k = tk.Entry(row, textvariable=kv, width=32)
                 entry_k.pack(side=tk.LEFT, padx=(5, 2))
                 
                 btn_help = tk.Button(row, text="▼", width=2, command=lambda e=entry_k: self.create_preset_menu(btn_help, e))
@@ -638,7 +648,7 @@ class LogViewerApp:
         dlg = tk.Toplevel(self.root)
         self.replace_dlg_ref = dlg
         dlg.title("Edit Replace Patterns")
-        dlg.geometry("900x450")
+        dlg.geometry("950x450")
         dlg.transient(self.root)
         dlg.grab_set()
 
@@ -651,16 +661,14 @@ class LogViewerApp:
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
         
-        # Spacer for left controls
-        tk.Frame(header_frame, width=118).pack(side=tk.LEFT)
+        # Spacer for left controls (Check+Up+Down) - Del is on right
+        tk.Frame(header_frame, width=90).pack(side=tk.LEFT)
         
-        # Find Label (padx調整)
         tk.Label(header_frame, text="Find (Regex)", width=35, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
         
-        # Spacer for ▼ button area (約30px)
+        # Spacer for ▼ button area
         tk.Frame(header_frame, width=30).pack(side=tk.LEFT)
         
-        # Replace Label
         tk.Label(header_frame, text="Replace", width=30, anchor="w").pack(side=tk.LEFT)
         
         canvas = tk.Canvas(left_frame, highlightthickness=0)
@@ -690,16 +698,12 @@ class LogViewerApp:
                 
                 # 左側コントロール
                 tk.Checkbutton(row, variable=en).pack(side=tk.LEFT, padx=2)
-                
                 btn_up = tk.Button(row, text="↑", width=2, command=lambda idx=i: move_up(idx))
                 btn_up.pack(side=tk.LEFT, padx=(2,0))
                 if i == 0: btn_up.config(state="disabled")
-
                 btn_down = tk.Button(row, text="↓", width=2, command=lambda idx=i: move_down(idx))
                 btn_down.pack(side=tk.LEFT, padx=(0,2))
                 if i == len(entries) - 1: btn_down.config(state="disabled")
-
-                tk.Button(row, text="Del", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
                 # 入力
                 entry_s = tk.Entry(row, textvariable=sv, width=35)
@@ -709,6 +713,8 @@ class LogViewerApp:
                 btn_help.pack(side=tk.LEFT, padx=(0, 5))
                 
                 tk.Entry(row, textvariable=rv, width=30).pack(side=tk.LEFT, padx=(0, 5))
+
+                tk.Button(row, text="Del", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
         def add_row(s="", r="", enabled=True):
             entries.append((tk.BooleanVar(value=enabled), tk.StringVar(value=s), tk.StringVar(value=r)))
@@ -770,21 +776,17 @@ class LogViewerApp:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # Keywords
         if "keywords" in data and isinstance(data["keywords"], list):
             self.keywords_config = data["keywords"]
         elif "colors" in data and isinstance(data["colors"], dict):
-            # Old format
             self.keywords_config = []
             for k, v in data["colors"].items():
                 self.keywords_config.append({"pattern": k, "color": v, "comment": "", "enabled": True})
         
-        # Replace Patterns
         raw_patterns = data.get("replace_patterns", [])
         self.replace_patterns_config = []
         for p in raw_patterns:
             if isinstance(p, dict):
-                # New dict format or intermediate dict format
                 self.replace_patterns_config.append({
                     "search": p.get("search", ""),
                     "replace": p.get("replace", ""),
@@ -792,7 +794,6 @@ class LogViewerApp:
                     "use_regex": True,
                     "enabled": p.get("enabled", True)
                 })
-            # Old tuple support removed for simplicity in this version, assumes dict structure from recent saves
         
         self.apply_display_update()
 
