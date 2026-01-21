@@ -25,8 +25,9 @@ import json
 import os
 import sys
 import re
-import html # HTMLエスケープ用
+import html 
 import tkinter as tk
+import ctypes  # <--- この行を必ず追加してください！
 from tkinter import colorchooser, filedialog, messagebox, simpledialog
 from typing import Dict, List, Tuple, Optional
 
@@ -302,7 +303,7 @@ class LogViewerApp:
         out.append(content[pos:])
         return "".join(out)
 
-    # --- Excel Export Logic (HTML) ---
+# --- Excel Export Logic (HTML) ---
     def export_to_excel(self):
         """現在表示中のログを色とコメント付きでHTMLファイルとして保存（Excelで開ける形式）"""
         if not self.text.get("1.0", "end-1c").strip():
@@ -319,26 +320,17 @@ class LogViewerApp:
             return
 
         try:
-            # 現在表示されているテキストを取得 (改行でリスト化)
-            # end-1c で最後の余計な改行を除去
+            # --- 保存処理の実行 ---
             log_lines = self.text.get("1.0", "end-1c").splitlines()
             comment_lines = self.comment_text.get("1.0", "end-1c").splitlines()
 
-            # HTMLヘッダ作成 (Excelが読みやすいスタイル定義)
             html_content = [
-                '<html>',
-                '<head>',
-                '<meta charset="utf-8">', # UTF-8 BOM付きで保存するのでExcelでも文字化けしない
-                '<style>',
-                '  table { border-collapse: collapse; width: 100%; font-family: Consolas, monospace; }',
-                '  th, td { border: 1px solid #999; padding: 4px; text-align: left; vertical-align: top; }',
-                '  th { background-color: #ddd; }',
-                '</style>',
-                '</head>',
-                '<body>',
-                '<table>',
-                '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead>',
-                '<tbody>'
+                '<html><head><meta charset="utf-8">',
+                '<style>table { border-collapse: collapse; width: 100%; font-family: Consolas, monospace; }',
+                'th, td { border: 1px solid #999; padding: 4px; text-align: left; vertical-align: top; }',
+                'th { background-color: #ddd; }</style></head>',
+                '<body><table>',
+                '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead><tbody>'
             ]
 
             # フィルタ用コンパイル済み正規表現リスト（色判定用）
@@ -348,46 +340,39 @@ class LogViewerApp:
                 color = item.get("color", "#ffffff")
                 if pat_str:
                     try:
-                        p = re.compile(pat_str, re.IGNORECASE)
-                        check_list.append((p, color))
-                    except re.error:
-                        pass
+                        check_list.append((re.compile(pat_str, re.IGNORECASE), color))
+                    except re.error: pass
 
-            # 行ごとの処理
             for i, line in enumerate(log_lines):
-                # 対応するコメントを取得（行数が一致しない場合の安全策）
                 cmt = comment_lines[i] if i < len(comment_lines) else ""
-                
-                # 背景色を決定
                 bg_color = "#ffffff"
                 for pat, color in check_list:
                     if pat.search(line):
                         bg_color = color
-                        break # 最初に見つかった色を採用
+                        break 
                 
-                # HTMLエスケープ（<, >, & 等を無害化）
                 safe_line = html.escape(line)
                 safe_cmt = html.escape(cmt)
-
                 html_content.append(
-                    f'<tr style="background-color: {bg_color}">'
-                    f'<td>{i+1}</td>'
-                    f'<td style="white-space: pre-wrap;">{safe_line}</td>'
-                    f'<td>{safe_cmt}</td>'
-                    f'</tr>'
+                    f'<tr style="background-color: {bg_color}"><td>{i+1}</td>'
+                    f'<td style="white-space: pre-wrap;">{safe_line}</td><td>{safe_cmt}</td></tr>'
                 )
 
             html_content.append('</tbody></table></body></html>')
 
-            # BOM付きUTF-8で保存 (Excel対策)
+            # BOM付きUTF-8で保存
             with open(path, "w", encoding="utf-8-sig") as f:
                 f.write("\n".join(html_content))
 
-            messagebox.showinfo("Export", f"保存しました。\nExcelで開いて確認してください。\n{path}")
+            # --- 追加：保存完了後の確認と自動起動 ---
+            msg = f"保存しました。\n今すぐExcel（ブラウザ）で開いて確認しますか？\n\n場所: {path}"
+            # MB_YESNO = 4, MB_ICONQUESTION = 32
+            # IDYES = 6
+            if ctypes.windll.user32.MessageBoxW(0, msg, "Export Complete", 4 | 32) == 6:
+                os.startfile(path)
 
         except Exception as e:
             messagebox.showerror("Error", f"エクスポート中にエラーが発生しました:\n{e}")
-
     # --- Filter & View Update Logic ---
     def toggle_keyword_filter(self):
         self.use_keyword_filter = not self.use_keyword_filter
@@ -538,7 +523,6 @@ class LogViewerApp:
         finally:
             menu.grab_release()
 
-    # --- Config Dialogs (Modal) ---
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref is not None and self.keywords_dlg_ref.winfo_exists():
             self.keywords_dlg_ref.lift()
@@ -557,10 +541,12 @@ class LogViewerApp:
         left_frame = tk.Frame(container, relief=tk.GROOVE, borderwidth=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # --- ヘッダーの幅調整 ---
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        tk.Label(header_frame, text="Regex Pattern", width=35, anchor="w").pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(35,0))
+        # Regex Patternを広く(35->45)
+        tk.Label(header_frame, text="Regex Pattern", width=45, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(38,0))
         tk.Label(header_frame, text="Comment", width=40, anchor="w").pack(side=tk.LEFT, padx=10)
 
         canvas = tk.Canvas(left_frame, highlightthickness=0)
@@ -590,7 +576,9 @@ class LogViewerApp:
             cv = tk.StringVar(value=c)
             cmtv = tk.StringVar(value=cmt)
 
-            entry_k = tk.Entry(row, textvariable=kv, width=32)
+            # --- 各入力欄の幅と余白を微調整 ---
+            # Regex PatternのEntryを広げる (32->42)
+            entry_k = tk.Entry(row, textvariable=kv, width=42)
             entry_k.pack(side=tk.LEFT, padx=(0, 2))
             
             btn_help = tk.Button(row, text="▼", width=2, command=lambda: self.create_preset_menu(btn_help, entry_k))
@@ -599,9 +587,11 @@ class LogViewerApp:
             tk.Entry(row, textvariable=cv, width=8).pack(side=tk.LEFT, padx=(0, 2))
             tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get(), parent=dlg)[1] or cv.get())).pack(side=tk.LEFT, padx=2)
             
-            tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(10, 5))
+            # Commentの横余白を詰め、Delボタンとの距離を短縮
+            tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(8, 2))
 
-            tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.RIGHT)
+            # Delボタンを右端ではなく、Commentの直後に配置
+            tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.LEFT, padx=2)
             entries.append((kv, cv, cmtv))
 
         for item in self.keywords_config:
@@ -625,7 +615,7 @@ class LogViewerApp:
         
         tk.Frame(right_frame).pack(fill=tk.Y, expand=True)
         tk.Button(right_frame, text="OK", command=save, width=10, height=2, bg="#dddddd").pack(side=tk.BOTTOM, pady=5)
-
+    
     def edit_replace_patterns_dialog(self):
         if self.replace_dlg_ref is not None and self.replace_dlg_ref.winfo_exists():
             self.replace_dlg_ref.lift()
