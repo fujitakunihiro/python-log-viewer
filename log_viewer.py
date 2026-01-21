@@ -1,11 +1,10 @@
 """
-Embedded Log Viewer v24 (Excel Export Edition)
+Embedded Log Viewer v27 (6:4 Split & Trash Icon Edition)
 
 【変更点】
-- Fileメニューに「Export to Excel (HTML)...」を追加しました。
-  - 現在表示中のログ（フィルタ結果）を、色とコメント付きで保存します。
-  - 保存形式はHTMLですが、Excelで開くことで色付きの表として閲覧可能です。
-  - 追加ライブラリ不要（標準機能のみ）で動作します。
+- 画面分割の初期比率を「左6 : 右4」に調整しました。
+  (ウィンドウ幅 1200px に対して、左720px : 右480px)
+- 設定画面の「Del」ボタンを「🗑」(ゴミ箱アイコン) に変更しました。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
@@ -13,10 +12,11 @@ Embedded Log Viewer v24 (Excel Export Edition)
 3. 画面分割表示 (左: ログ本文 / 右: コメント)
 4. フィルタ機能 (FilterボタンでON/OFF切替)
 5. フィルタ設定 (正規表現, 色, コメント)
+   - [▼]ボタンによる正規表現入力支援
 6. 文字列置換 (正規表現対応, グループ参照, 即時反映)
-7. Excel形式での保存 (色・コメント保持)
+7. Excel形式での保存 (HTML形式を利用し、色・コメントを保持して保存)
 8. 検索機能 (Ctrl+F)
-9. 設定保存 (JSON)
+9. 設定保存 (JSON, 単一ファイル運用)
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ import json
 import os
 import sys
 import re
-import html 
+import html
+import ctypes
 import tkinter as tk
-import ctypes  # <--- この行を必ず追加してください！
 from tkinter import colorchooser, filedialog, messagebox, simpledialog
 from typing import Dict, List, Tuple, Optional
 
@@ -112,7 +112,6 @@ class LogViewerApp:
         filemenu.add_command(label="Open...", accelerator="Ctrl+O", command=self.open_file)
         filemenu.add_command(label="Reload", accelerator="F5", command=self.reload_file)
         filemenu.add_separator()
-        # 新機能: Excel保存
         filemenu.add_command(label="Export to Excel (HTML)...", command=self.export_to_excel)
         filemenu.add_separator()
         filemenu.add_command(label="Exit", command=self.root.quit)
@@ -149,9 +148,9 @@ class LogViewerApp:
         self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # --- 左側: ログ表示エリア ---
+        # --- 左側: ログ表示エリア (初期幅 720px = 60%) ---
         left_frame = tk.Frame(self.paned_window)
-        self.paned_window.add(left_frame, minsize=400, stretch="always")
+        self.paned_window.add(left_frame, minsize=100, stretch="always", width=720) 
 
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
@@ -165,9 +164,9 @@ class LogViewerApp:
         
         self.hsb_log.config(command=self.text.xview)
 
-        # --- 右側: コメント表示エリア ---
+        # --- 右側: コメント表示エリア (初期幅 480px = 40%) ---
         right_frame = tk.Frame(self.paned_window)
-        self.paned_window.add(right_frame, minsize=200, stretch="never")
+        self.paned_window.add(right_frame, minsize=100, stretch="always", width=480) 
 
         self.hsb_cmt = tk.Scrollbar(right_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
@@ -187,7 +186,6 @@ class LogViewerApp:
 
         self.vsb.config(command=sync_yview)
 
-        # マウスホイール同期
         def on_mousewheel(event):
             delta = int(-1*(event.delta/120)) if event.delta else 0
             if event.num == 4: delta = -1
@@ -303,7 +301,7 @@ class LogViewerApp:
         out.append(content[pos:])
         return "".join(out)
 
-# --- Excel Export Logic (HTML) ---
+    # --- Excel Export Logic (HTML) ---
     def export_to_excel(self):
         """現在表示中のログを色とコメント付きでHTMLファイルとして保存（Excelで開ける形式）"""
         if not self.text.get("1.0", "end-1c").strip():
@@ -320,7 +318,6 @@ class LogViewerApp:
             return
 
         try:
-            # --- 保存処理の実行 ---
             log_lines = self.text.get("1.0", "end-1c").splitlines()
             comment_lines = self.comment_text.get("1.0", "end-1c").splitlines()
 
@@ -333,7 +330,6 @@ class LogViewerApp:
                 '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead><tbody>'
             ]
 
-            # フィルタ用コンパイル済み正規表現リスト（色判定用）
             check_list = []
             for item in self.keywords_config:
                 pat_str = item.get("pattern", "")
@@ -360,19 +356,19 @@ class LogViewerApp:
 
             html_content.append('</tbody></table></body></html>')
 
-            # BOM付きUTF-8で保存
             with open(path, "w", encoding="utf-8-sig") as f:
                 f.write("\n".join(html_content))
 
-            # --- 追加：保存完了後の確認と自動起動 ---
             msg = f"保存しました。\n今すぐExcel（ブラウザ）で開いて確認しますか？\n\n場所: {path}"
-            # MB_YESNO = 4, MB_ICONQUESTION = 32
-            # IDYES = 6
-            if ctypes.windll.user32.MessageBoxW(0, msg, "Export Complete", 4 | 32) == 6:
-                os.startfile(path)
+            if sys.platform == 'win32':
+                if ctypes.windll.user32.MessageBoxW(0, msg, "Export Complete", 4 | 32) == 6:
+                    os.startfile(path)
+            else:
+                messagebox.showinfo("Export Complete", f"保存しました。\n{path}")
 
         except Exception as e:
             messagebox.showerror("Error", f"エクスポート中にエラーが発生しました:\n{e}")
+
     # --- Filter & View Update Logic ---
     def toggle_keyword_filter(self):
         self.use_keyword_filter = not self.use_keyword_filter
@@ -523,6 +519,7 @@ class LogViewerApp:
         finally:
             menu.grab_release()
 
+    # --- Config Dialogs (Modal) ---
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref is not None and self.keywords_dlg_ref.winfo_exists():
             self.keywords_dlg_ref.lift()
@@ -541,10 +538,8 @@ class LogViewerApp:
         left_frame = tk.Frame(container, relief=tk.GROOVE, borderwidth=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # --- ヘッダーの幅調整 ---
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        # Regex Patternを広く(35->45)
         tk.Label(header_frame, text="Regex Pattern", width=45, anchor="w").pack(side=tk.LEFT)
         tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(38,0))
         tk.Label(header_frame, text="Comment", width=40, anchor="w").pack(side=tk.LEFT, padx=10)
@@ -576,8 +571,6 @@ class LogViewerApp:
             cv = tk.StringVar(value=c)
             cmtv = tk.StringVar(value=cmt)
 
-            # --- 各入力欄の幅と余白を微調整 ---
-            # Regex PatternのEntryを広げる (32->42)
             entry_k = tk.Entry(row, textvariable=kv, width=42)
             entry_k.pack(side=tk.LEFT, padx=(0, 2))
             
@@ -587,11 +580,10 @@ class LogViewerApp:
             tk.Entry(row, textvariable=cv, width=8).pack(side=tk.LEFT, padx=(0, 2))
             tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get(), parent=dlg)[1] or cv.get())).pack(side=tk.LEFT, padx=2)
             
-            # Commentの横余白を詰め、Delボタンとの距離を短縮
-            tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(8, 2))
+            tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(10, 5))
 
-            # Delボタンを右端ではなく、Commentの直後に配置
-            tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.LEFT, padx=2)
+            # ゴミ箱ボタン
+            tk.Button(row, text="🗑", width=3, command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.LEFT, padx=2)
             entries.append((kv, cv, cmtv))
 
         for item in self.keywords_config:
@@ -670,7 +662,8 @@ class LogViewerApp:
             tk.Entry(row, textvariable=rv, width=20).pack(side=tk.LEFT, padx=(0, 5))
             tk.Checkbutton(row, variable=mv).pack(side=tk.LEFT, padx=5)
             tk.Checkbutton(row, variable=rgv).pack(side=tk.LEFT, padx=5)
-            tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((sv, rv, mv, rgv)))).pack(side=tk.RIGHT)
+            # ゴミ箱ボタン
+            tk.Button(row, text="🗑", width=3, command=lambda: (row.destroy(), entries.remove((sv, rv, mv, rgv)))).pack(side=tk.RIGHT)
             entries.append((sv, rv, mv, rgv))
 
         for entry in self.replace_patterns:
