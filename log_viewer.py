@@ -1,22 +1,22 @@
 """
-Embedded Log Viewer v20 (Split View with Comments)
+Embedded Log Viewer v24 (Excel Export Edition)
 
 【変更点】
-- メイン画面を左右に分割 (PanedWindow) しました。
-  - 左側: ログ本文
-  - 右側: マッチしたキーワードの「Comment」を表示
-- 左右のスクロールを完全同期させました。
-- 境界線をドラッグして表示幅を調整可能です。
+- Fileメニューに「Export to Excel (HTML)...」を追加しました。
+  - 現在表示中のログ（フィルタ結果）を、色とコメント付きで保存します。
+  - 保存形式はHTMLですが、Excelで開くことで色付きの表として閲覧可能です。
+  - 追加ライブラリ不要（標準機能のみ）で動作します。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
 2. 行番号表示
-3. 画面分割表示 (ログ / コメント)
-4. キーワードフィルタ (Keyword FilterボタンでON/OFF切替)
-5. キーワードハイライト & コメント抽出
+3. 画面分割表示 (左: ログ本文 / 右: コメント)
+4. フィルタ機能 (FilterボタンでON/OFF切替)
+5. フィルタ設定 (正規表現, 色, コメント)
 6. 文字列置換 (正規表現対応, グループ参照, 即時反映)
-7. 検索機能 (Ctrl+F)
-8. 設定保存 (JSON)
+7. Excel形式での保存 (色・コメント保持)
+8. 検索機能 (Ctrl+F)
+9. 設定保存 (JSON)
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import re
+import html # HTMLエスケープ用
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, simpledialog
 from typing import Dict, List, Tuple, Optional
@@ -80,9 +81,11 @@ class LogViewerApp:
 
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         
+        # 設定データ
         self.keywords_config: List[Dict[str, str]] = [x.copy() for x in DEFAULT_CONFIG["keywords"]]
         self.replace_patterns: List[Tuple[str, str, bool, bool]] = []
 
+        # 状態変数
         self.use_keyword_filter = False
         self.keywords_dlg_ref: Optional[tk.Toplevel] = None
         self.replace_dlg_ref: Optional[tk.Toplevel] = None
@@ -108,6 +111,9 @@ class LogViewerApp:
         filemenu.add_command(label="Open...", accelerator="Ctrl+O", command=self.open_file)
         filemenu.add_command(label="Reload", accelerator="F5", command=self.reload_file)
         filemenu.add_separator()
+        # 新機能: Excel保存
+        filemenu.add_command(label="Export to Excel (HTML)...", command=self.export_to_excel)
+        filemenu.add_separator()
         filemenu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=filemenu)
 
@@ -120,7 +126,7 @@ class LogViewerApp:
         configmenu.add_command(label="Load Config...", command=self.load_config_dialog)
         configmenu.add_command(label="Save Config...", command=self.save_config_dialog)
         configmenu.add_separator()
-        configmenu.add_command(label="Edit Keywords (Filter/Highlight)...", command=self.edit_keywords_dialog)
+        configmenu.add_command(label="Edit Filter...", command=self.edit_keywords_dialog)
         configmenu.add_command(label="Edit Replace Patterns...", command=self.edit_replace_patterns_dialog)
         menubar.add_cascade(label="Config", menu=configmenu)
 
@@ -130,16 +136,15 @@ class LogViewerApp:
         toolbar = tk.Frame(self.root)
         toolbar.pack(fill=tk.X, padx=5, pady=5)
         
-        self.btn_kw_filter = tk.Button(toolbar, text="Keyword Filter: OFF", width=20,
+        # フィルタ切り替えボタン
+        self.btn_kw_filter = tk.Button(toolbar, text="Filter: OFF", width=15,
                                        command=self.toggle_keyword_filter, relief=tk.RAISED)
         self.btn_kw_filter.pack(side=tk.LEFT)
 
         # --- Main Layout (PanedWindow) ---
-        # 垂直スクロールバー（共通）
         self.vsb = tk.Scrollbar(self.root, orient=tk.VERTICAL)
         self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 左右分割コンテナ
         self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
@@ -183,7 +188,6 @@ class LogViewerApp:
 
         # マウスホイール同期
         def on_mousewheel(event):
-            # Windows/Mac/Linuxでdeltaの扱いが違うが、簡易的に統一処理
             delta = int(-1*(event.delta/120)) if event.delta else 0
             if event.num == 4: delta = -1
             if event.num == 5: delta = 1
@@ -298,13 +302,99 @@ class LogViewerApp:
         out.append(content[pos:])
         return "".join(out)
 
+    # --- Excel Export Logic (HTML) ---
+    def export_to_excel(self):
+        """現在表示中のログを色とコメント付きでHTMLファイルとして保存（Excelで開ける形式）"""
+        if not self.text.get("1.0", "end-1c").strip():
+            messagebox.showwarning("Export", "保存するデータがありません。")
+            return
+
+        # ファイル保存ダイアログ
+        path = filedialog.asksaveasfilename(
+            title="Export to Excel (HTML)",
+            defaultextension=".html",
+            filetypes=[("HTML File (Excel readable)", "*.html"), ("All Files", "*.*")]
+        )
+        if not path:
+            return
+
+        try:
+            # 現在表示されているテキストを取得 (改行でリスト化)
+            # end-1c で最後の余計な改行を除去
+            log_lines = self.text.get("1.0", "end-1c").splitlines()
+            comment_lines = self.comment_text.get("1.0", "end-1c").splitlines()
+
+            # HTMLヘッダ作成 (Excelが読みやすいスタイル定義)
+            html_content = [
+                '<html>',
+                '<head>',
+                '<meta charset="utf-8">', # UTF-8 BOM付きで保存するのでExcelでも文字化けしない
+                '<style>',
+                '  table { border-collapse: collapse; width: 100%; font-family: Consolas, monospace; }',
+                '  th, td { border: 1px solid #999; padding: 4px; text-align: left; vertical-align: top; }',
+                '  th { background-color: #ddd; }',
+                '</style>',
+                '</head>',
+                '<body>',
+                '<table>',
+                '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead>',
+                '<tbody>'
+            ]
+
+            # フィルタ用コンパイル済み正規表現リスト（色判定用）
+            check_list = []
+            for item in self.keywords_config:
+                pat_str = item.get("pattern", "")
+                color = item.get("color", "#ffffff")
+                if pat_str:
+                    try:
+                        p = re.compile(pat_str, re.IGNORECASE)
+                        check_list.append((p, color))
+                    except re.error:
+                        pass
+
+            # 行ごとの処理
+            for i, line in enumerate(log_lines):
+                # 対応するコメントを取得（行数が一致しない場合の安全策）
+                cmt = comment_lines[i] if i < len(comment_lines) else ""
+                
+                # 背景色を決定
+                bg_color = "#ffffff"
+                for pat, color in check_list:
+                    if pat.search(line):
+                        bg_color = color
+                        break # 最初に見つかった色を採用
+                
+                # HTMLエスケープ（<, >, & 等を無害化）
+                safe_line = html.escape(line)
+                safe_cmt = html.escape(cmt)
+
+                html_content.append(
+                    f'<tr style="background-color: {bg_color}">'
+                    f'<td>{i+1}</td>'
+                    f'<td style="white-space: pre-wrap;">{safe_line}</td>'
+                    f'<td>{safe_cmt}</td>'
+                    f'</tr>'
+                )
+
+            html_content.append('</tbody></table></body></html>')
+
+            # BOM付きUTF-8で保存 (Excel対策)
+            with open(path, "w", encoding="utf-8-sig") as f:
+                f.write("\n".join(html_content))
+
+            messagebox.showinfo("Export", f"保存しました。\nExcelで開いて確認してください。\n{path}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"エクスポート中にエラーが発生しました:\n{e}")
+
     # --- Filter & View Update Logic ---
     def toggle_keyword_filter(self):
         self.use_keyword_filter = not self.use_keyword_filter
         if self.use_keyword_filter:
-            self.btn_kw_filter.config(text="Keyword Filter: ON", relief=tk.SUNKEN, bg="#aaccff")
+            self.btn_kw_filter.config(text="Filter: ON", relief=tk.SUNKEN, bg="#aaccff")
         else:
-            self.btn_kw_filter.config(text="Keyword Filter: OFF", relief=tk.RAISED, bg="SystemButtonFace")
+            self.btn_kw_filter.config(text="Filter: OFF", relief=tk.RAISED, bg="SystemButtonFace")
         self.apply_display_update()
 
     def apply_display_update(self):
@@ -315,8 +405,6 @@ class LogViewerApp:
         use_kw = self.use_keyword_filter
         lines = self.original_content.splitlines()
         
-        # コンパイル済みパターンとコメントのペアリスト作成
-        # [(pattern_obj, comment_text), ...]
         check_list = []
         for item in self.keywords_config:
             pat_str = item.get("pattern", "")
@@ -335,38 +423,31 @@ class LogViewerApp:
             matched_comment = ""
             is_match = False
             
-            # マッチ確認とコメント抽出
             for pat, cmt in check_list:
                 if pat.search(line):
                     is_match = True
                     if cmt:
-                        # 複数のキーワードにマッチする場合、最初に見つかったコメントを採用（または連結も可）
                         matched_comment = cmt
                         break 
             
-            # フィルタリング判定
             if use_kw and not is_match:
                 continue
 
             filtered_lines.append(line)
             comment_lines.append(matched_comment)
 
-        # 画面描画 (Log)
         self.text.delete("1.0", tk.END)
         self.text.insert("1.0", "\n".join(filtered_lines))
         
-        # 画面描画 (Comment)
         self.comment_text.delete("1.0", tk.END)
         self.comment_text.insert("1.0", "\n".join(comment_lines))
 
         self.linenumbers.redraw()
-        
-        # ハイライト再適用
         self.highlight_keywords()
         
         count = len(filtered_lines)
         status_txt = f"Display: {count} lines"
-        if use_kw: status_txt += " | Keyword Filter: ON"
+        if use_kw: status_txt += " | Filter: ON"
         self.status_var.set(status_txt)
 
     def highlight_keywords(self):
@@ -465,8 +546,8 @@ class LogViewerApp:
 
         dlg = tk.Toplevel(self.root)
         self.keywords_dlg_ref = dlg
-        dlg.title("Edit Keywords (Filter & Highlight & Comment)")
-        dlg.geometry("850x450")
+        dlg.title("Edit Filter")
+        dlg.geometry("950x450")
         dlg.transient(self.root)
         dlg.grab_set()
 
@@ -478,9 +559,9 @@ class LogViewerApp:
 
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        tk.Label(header_frame, text="Regex Pattern", width=25, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Regex Pattern", width=35, anchor="w").pack(side=tk.LEFT)
         tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(35,0))
-        tk.Label(header_frame, text="Comment", width=20, anchor="w").pack(side=tk.LEFT, padx=10)
+        tk.Label(header_frame, text="Comment", width=40, anchor="w").pack(side=tk.LEFT, padx=10)
 
         canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
@@ -509,7 +590,7 @@ class LogViewerApp:
             cv = tk.StringVar(value=c)
             cmtv = tk.StringVar(value=cmt)
 
-            entry_k = tk.Entry(row, textvariable=kv, width=25)
+            entry_k = tk.Entry(row, textvariable=kv, width=32)
             entry_k.pack(side=tk.LEFT, padx=(0, 2))
             
             btn_help = tk.Button(row, text="▼", width=2, command=lambda: self.create_preset_menu(btn_help, entry_k))
@@ -518,7 +599,7 @@ class LogViewerApp:
             tk.Entry(row, textvariable=cv, width=8).pack(side=tk.LEFT, padx=(0, 2))
             tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get(), parent=dlg)[1] or cv.get())).pack(side=tk.LEFT, padx=2)
             
-            tk.Entry(row, textvariable=cmtv, width=20).pack(side=tk.LEFT, padx=(10, 5))
+            tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(10, 5))
 
             tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.RIGHT)
             entries.append((kv, cv, cmtv))
