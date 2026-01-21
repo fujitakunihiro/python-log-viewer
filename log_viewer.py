@@ -1,10 +1,11 @@
 """
-Embedded Log Viewer v27 (6:4 Split & Trash Icon Edition)
+Embedded Log Viewer v29 (Layout Fix Edition)
 
 【変更点】
-- 画面分割の初期比率を「左6 : 右4」に調整しました。
-  (ウィンドウ幅 1200px に対して、左720px : 右480px)
-- 設定画面の「Del」ボタンを「🗑」(ゴミ箱アイコン) に変更しました。
+- 「Edit Replace Patterns」画面のレイアウトを修正しました。
+  - 削除ボタンを Replace 入力欄のすぐ右横に移動しました。
+  - 削除ボタンの表示を「🗑」から視認性の高い「Del」に変更しました。
+  - ヘッダーに「Action」列を追加して位置を合わせました。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
@@ -148,9 +149,9 @@ class LogViewerApp:
         self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # --- 左側: ログ表示エリア (初期幅 720px = 60%) ---
+        # --- 左側: ログ表示エリア ---
         left_frame = tk.Frame(self.paned_window)
-        self.paned_window.add(left_frame, minsize=100, stretch="always", width=720) 
+        self.paned_window.add(left_frame, minsize=400, stretch="always", width=720) 
 
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
@@ -164,7 +165,7 @@ class LogViewerApp:
         
         self.hsb_log.config(command=self.text.xview)
 
-        # --- 右側: コメント表示エリア (初期幅 480px = 40%) ---
+        # --- 右側: コメント表示エリア ---
         right_frame = tk.Frame(self.paned_window)
         self.paned_window.add(right_frame, minsize=100, stretch="always", width=480) 
 
@@ -268,22 +269,15 @@ class LogViewerApp:
                 search, replace, match_case = entry
                 use_regex = False
 
-            flags = 0 if match_case else re.IGNORECASE
+            # Replace Patternsでは常にRegex=True, Case=Falseとして扱う
+            flags = re.IGNORECASE
             try:
-                if use_regex:
-                    pattern = re.compile(search, flags)
-                else:
-                    pattern = re.compile(re.escape(search), flags)
-
+                pattern = re.compile(search, flags)
                 for m in pattern.finditer(content):
-                    if use_regex:
-                        try:
-                            repl_text = m.expand(replace)
-                        except re.error:
-                            repl_text = replace
-                    else:
+                    try:
+                        repl_text = m.expand(replace)
+                    except re.error:
                         repl_text = replace
-                    
                     matches.append((m.start(), m.end(), m.group(0), repl_text))
             except re.error:
                 continue
@@ -303,12 +297,10 @@ class LogViewerApp:
 
     # --- Excel Export Logic (HTML) ---
     def export_to_excel(self):
-        """現在表示中のログを色とコメント付きでHTMLファイルとして保存（Excelで開ける形式）"""
         if not self.text.get("1.0", "end-1c").strip():
             messagebox.showwarning("Export", "保存するデータがありません。")
             return
 
-        # ファイル保存ダイアログ
         path = filedialog.asksaveasfilename(
             title="Export to Excel (HTML)",
             defaultextension=".html",
@@ -379,7 +371,6 @@ class LogViewerApp:
         self.apply_display_update()
 
     def apply_display_update(self):
-        """表示更新：フィルタ適用とコメント生成を行う"""
         if not self.original_content: 
             return
 
@@ -496,7 +487,7 @@ class LogViewerApp:
             ("小数/符号付 (例: -12.5)", r"[-+]?\d+(\.\d+)?"),
             ("--- ネットワーク・ID ---", None),
             ("IPアドレス", r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"),
-            ("MACアドレス", r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"),
+            ("MACアドレス (例: AA:BB:CC...)", r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"),
             ("--- 文字列・構造 ---", None),
             ("[]の中身 (例: [INFO])", r"\[.*?\]"),
             ("Key=Value (例: Err=1)", r"\w+\s*=\s*\S+"),
@@ -582,8 +573,7 @@ class LogViewerApp:
             
             tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(10, 5))
 
-            # ゴミ箱ボタン
-            tk.Button(row, text="🗑", width=3, command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.LEFT, padx=2)
+            tk.Button(row, text="Del", width=3, command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.LEFT, padx=2)
             entries.append((kv, cv, cmtv))
 
         for item in self.keywords_config:
@@ -628,10 +618,10 @@ class LogViewerApp:
 
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        tk.Label(header_frame, text="Find (Regex)", width=25, anchor="w").pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Replace", width=20, anchor="w").pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Case", width=5).pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Regex", width=5).pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Find (Regex)", width=35, anchor="w").pack(side=tk.LEFT)
+        tk.Label(header_frame, text="Replace", width=30, anchor="w").pack(side=tk.LEFT)
+        # Action列
+        tk.Label(header_frame, text="Action", width=6, anchor="w").pack(side=tk.LEFT, padx=5)
         
         canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
@@ -653,17 +643,21 @@ class LogViewerApp:
         def add_row(s="", r="", m=False, rg=True):
             row = tk.Frame(scrollable_frame)
             row.pack(fill=tk.X, pady=2, padx=5)
+            
+            # デフォルト値 (Regex=True, Case=False)
             sv, rv = tk.StringVar(value=s), tk.StringVar(value=r)
-            mv, rgv = tk.BooleanVar(value=m), tk.BooleanVar(value=rg)
-            entry_s = tk.Entry(row, textvariable=sv, width=25)
+            mv, rgv = tk.BooleanVar(value=False), tk.BooleanVar(value=True)
+
+            entry_s = tk.Entry(row, textvariable=sv, width=35)
             entry_s.pack(side=tk.LEFT, padx=(0, 2))
+            
             btn_help = tk.Button(row, text="▼", width=2, command=lambda: self.create_preset_menu(btn_help, entry_s))
             btn_help.pack(side=tk.LEFT, padx=(0, 5))
-            tk.Entry(row, textvariable=rv, width=20).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Checkbutton(row, variable=mv).pack(side=tk.LEFT, padx=5)
-            tk.Checkbutton(row, variable=rgv).pack(side=tk.LEFT, padx=5)
-            # ゴミ箱ボタン
-            tk.Button(row, text="🗑", width=3, command=lambda: (row.destroy(), entries.remove((sv, rv, mv, rgv)))).pack(side=tk.RIGHT)
+            
+            tk.Entry(row, textvariable=rv, width=30).pack(side=tk.LEFT, padx=(0, 5))
+            
+            # 削除ボタン (Replaceの右横)
+            tk.Button(row, text="Del", width=4, command=lambda: (row.destroy(), entries.remove((sv, rv, mv, rgv)))).pack(side=tk.LEFT, padx=2)
             entries.append((sv, rv, mv, rgv))
 
         for entry in self.replace_patterns:
