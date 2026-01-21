@@ -1,0 +1,17 @@
+[10:00:00.100] [INFO] System Boot: Ver 1.2.3
+[10:00:00.150] [INFO] Init Hardware... OK
+[10:00:00.200] [INFO] Connecting to WiFi...
+[10:00:01.500] [INFO] WiFi Connected. IP=192.168.1.105
+[10:00:02.000] [DEBUG] SensorRead: Temp=25.0 Hum=60.0 Batt=4.20
+[10:00:03.000] [DEBUG] SensorRead: Temp=25.2 Hum=60.1 Batt=4.19
+[10:00:04.000] [DEBUG] SensorRead: Temp=25.5 Hum=60.2 Batt=4.19
+[10:00:05.000] [DEBUG] SensorRead: Temp=26.1 Hum=60.5 Batt=4.18
+[10:00:06.000] [WARN] CPU Load High: Load=85%
+[10:00:07.000] [DEBUG] SensorRead: Temp=28.4 Hum=61.0 Batt=4.18
+[10:00:08.000] [DEBUG] SensorRead: Temp=32.1 Hum=62.0 Batt=4.17
+[10:00:09.000] [DEBUG] SensorRead: Temp=38.5 Hum=63.5 Batt=4.16
+[10:00:10.000] [ERROR] SensorRead: Timeout connecting to I2C device
+[10:00:11.000] [WARN] Temp=45.2 Warning: High Temperature!
+[10:00:12.000] [DEBUG] SensorRead: Temp=48.1 Hum=65.0 Batt=4.15
+[10:00:13.000] [ERROR] Thermal Shutdown Initiated. Temp=55.0
+[10:00:13.500] [INFO] System Halting...
