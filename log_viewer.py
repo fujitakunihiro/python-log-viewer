@@ -1,12 +1,9 @@
 """
-Log Viewer v31 (Left Controls & Toggle Enable Edition)
+Log Viewer v34 (Split Ratio 6:4 Edition)
 
 【変更点】
-- ウィンドウタイトルを "Log Viewer" に変更しました。
-- 設定画面 (Edit Filter, Edit Replace Patterns) のレイアウトを一新しました。
-  - 各行の左側に「有効/無効チェックボックス」「並び替え(↑↓)」「削除(Del)」を配置しました。
-  - これにより、設定のON/OFF切り替えや順序変更がスムーズに行えます。
-- 設定データの構造を拡張し、各設定に "enabled" (有効/無効) フラグを持たせました。
+- メイン画面の分割比率を「左 6 : 右 4」に調整しました。
+  (ウィンドウ幅 1200px に対して、左720px : 右480px)
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
@@ -78,16 +75,14 @@ class LineNumberCanvas(tk.Canvas):
 class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Log Viewer") # タイトル変更
+        self.root.title("Log Viewer")
         self.root.geometry("1200x700")
 
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         
-        # 設定データ (List[Dict])
         self.keywords_config: List[Dict[str, Any]] = [x.copy() for x in DEFAULT_CONFIG["keywords"]]
         self.replace_patterns_config: List[Dict[str, Any]] = []
 
-        # 状態変数
         self.use_keyword_filter = False
         self.keywords_dlg_ref: Optional[tk.Toplevel] = None
         self.replace_dlg_ref: Optional[tk.Toplevel] = None
@@ -137,6 +132,7 @@ class LogViewerApp:
         toolbar = tk.Frame(self.root)
         toolbar.pack(fill=tk.X, padx=5, pady=5)
         
+        # フィルタ切り替えボタン
         self.btn_kw_filter = tk.Button(toolbar, text="Filter: OFF", width=15,
                                        command=self.toggle_keyword_filter, relief=tk.RAISED)
         self.btn_kw_filter.pack(side=tk.LEFT)
@@ -148,9 +144,9 @@ class LogViewerApp:
         self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # 左側: ログ (広め)
+        # 左側: ログ (幅720px = 60%)
         left_frame = tk.Frame(self.paned_window)
-        self.paned_window.add(left_frame, minsize=400, stretch="always", width=1000) 
+        self.paned_window.add(left_frame, minsize=100, stretch="always", width=720) 
 
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
@@ -163,9 +159,9 @@ class LogViewerApp:
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
 
-        # 右側: コメント (狭め)
+        # 右側: コメント (幅480px = 40%)
         right_frame = tk.Frame(self.paned_window)
-        self.paned_window.add(right_frame, minsize=50, stretch="never", width=150) 
+        self.paned_window.add(right_frame, minsize=100, stretch="always", width=480) 
 
         self.hsb_cmt = tk.Scrollbar(right_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
@@ -258,15 +254,11 @@ class LogViewerApp:
     def _apply_replacements(self, content: str) -> str:
         matches = []
         for item in self.replace_patterns_config:
-            # 有効無効チェック
-            if not item.get("enabled", True):
-                continue
+            if not item.get("enabled", True): continue
             
             search = item.get("search", "")
             replace = item.get("replace", "")
-            use_regex = item.get("use_regex", True) # Default True
             
-            # 常にRegex=True, Case=False で動作
             flags = re.IGNORECASE
             try:
                 pattern = re.compile(search, flags)
@@ -318,7 +310,6 @@ class LogViewerApp:
                 '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead><tbody>'
             ]
 
-            # フィルタ用コンパイル
             check_list = []
             for item in self.keywords_config:
                 if not item.get("enabled", True): continue
@@ -385,7 +376,8 @@ class LogViewerApp:
                 try:
                     p = re.compile(pat_str, re.IGNORECASE)
                     check_list.append((p, cmt))
-                except re.error: pass
+                except re.error:
+                    pass
 
         filtered_lines = []
         comment_lines = []
@@ -488,7 +480,7 @@ class LogViewerApp:
             ("小数/符号付 (例: -12.5)", r"[-+]?\d+(\.\d+)?"),
             ("--- ネットワーク・ID ---", None),
             ("IPアドレス", r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"),
-            ("MACアドレス", r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"),
+            ("MACアドレス (例: AA:BB:CC...)", r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"),
             ("--- 文字列・構造 ---", None),
             ("[]の中身 (例: [INFO])", r"\[.*?\]"),
             ("Key=Value (例: Err=1)", r"\w+\s*=\s*\S+"),
@@ -511,7 +503,7 @@ class LogViewerApp:
         finally:
             menu.grab_release()
 
-    # --- Config Dialogs (Modal with Left Controls) ---
+    # --- Config Dialogs (Modal) ---
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref is not None and self.keywords_dlg_ref.winfo_exists():
             self.keywords_dlg_ref.lift()
@@ -520,7 +512,7 @@ class LogViewerApp:
         dlg = tk.Toplevel(self.root)
         self.keywords_dlg_ref = dlg
         dlg.title("Edit Filter")
-        dlg.geometry("1000x450")
+        dlg.geometry("950x450")
         dlg.transient(self.root)
         dlg.grab_set()
 
@@ -530,12 +522,15 @@ class LogViewerApp:
         left_frame = tk.Frame(container, relief=tk.GROOVE, borderwidth=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # ヘッダー (左側のコントロール分だけインデント)
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        # Control(Check+Up+Down+Del)の幅分だけ空ける(約80px)
-        tk.Frame(header_frame, width=80).pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Regex Pattern", width=35, anchor="w").pack(side=tk.LEFT)
+        # 左側コントロール分(118px)のスペーサー
+        tk.Frame(header_frame, width=118).pack(side=tk.LEFT)
+        
+        # ラベル配置（パディング調整）
+        # Regex Pattern: 入力欄のpadx=(5, 2) に合わせる
+        tk.Label(header_frame, text="Regex Pattern", width=45, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
+        # Color: ▼ボタン等の幅分を考慮して位置合わせ
         tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(38,0))
         tk.Label(header_frame, text="Comment", width=40, anchor="w").pack(side=tk.LEFT, padx=10)
 
@@ -578,7 +573,7 @@ class LogViewerApp:
                 tk.Button(row, text="Del", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
                 # 入力フィールド
-                entry_k = tk.Entry(row, textvariable=kv, width=32)
+                entry_k = tk.Entry(row, textvariable=kv, width=42)
                 entry_k.pack(side=tk.LEFT, padx=(5, 2))
                 
                 btn_help = tk.Button(row, text="▼", width=2, command=lambda e=entry_k: self.create_preset_menu(btn_help, e))
@@ -655,9 +650,17 @@ class LogViewerApp:
 
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        # Control area
-        tk.Frame(header_frame, width=80).pack(side=tk.LEFT)
-        tk.Label(header_frame, text="Find (Regex)", width=35, anchor="w").pack(side=tk.LEFT)
+        
+        # Spacer for left controls
+        tk.Frame(header_frame, width=118).pack(side=tk.LEFT)
+        
+        # Find Label (padx調整)
+        tk.Label(header_frame, text="Find (Regex)", width=35, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Spacer for ▼ button area (約30px)
+        tk.Frame(header_frame, width=30).pack(side=tk.LEFT)
+        
+        # Replace Label
         tk.Label(header_frame, text="Replace", width=30, anchor="w").pack(side=tk.LEFT)
         
         canvas = tk.Canvas(left_frame, highlightthickness=0)
