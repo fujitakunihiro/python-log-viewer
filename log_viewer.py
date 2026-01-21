@@ -1,19 +1,22 @@
 """
-Embedded Log Viewer v19 (Comment Field Added)
+Embedded Log Viewer v20 (Split View with Comments)
 
 【変更点】
-- 「Edit Keywords」画面に「Comment」欄を追加しました。
-- 設定データの持ち方を変更し、パターン・色・コメントをセットで管理するようにしました。
-- 古い設定ファイル(v18以前)も読み込めるよう互換性を維持しています。
+- メイン画面を左右に分割 (PanedWindow) しました。
+  - 左側: ログ本文
+  - 右側: マッチしたキーワードの「Comment」を表示
+- 左右のスクロールを完全同期させました。
+- 境界線をドラッグして表示幅を調整可能です。
 
 【機能一覧】
 1. ファイル読み込み (Shift-JIS/UTF-8自動判別, DnD対応)
 2. 行番号表示
-3. キーワードフィルタ (Keyword FilterボタンでON/OFF切替)
-4. キーワードハイライト (正規表現, 色, コメント入力対応)
-5. 文字列置換 (正規表現対応, グループ参照, 即時反映)
-6. 検索機能 (Ctrl+F)
-7. 設定保存 (JSON)
+3. 画面分割表示 (ログ / コメント)
+4. キーワードフィルタ (Keyword FilterボタンでON/OFF切替)
+5. キーワードハイライト & コメント抽出
+6. 文字列置換 (正規表現対応, グループ参照, 即時反映)
+7. 検索機能 (Ctrl+F)
+8. 設定保存 (JSON)
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import sys
 import re
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, simpledialog
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional
 
 # --- DnD Support (Optional) ---
 try:
@@ -36,19 +39,18 @@ except ImportError:
     HAS_DND = False
 
 # --- Default Configuration ---
-# 新しい形式: リストの中に辞書を入れる
 DEFAULT_CONFIG = {
     "keywords": [
-        {"pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "Critical Errors"},
-        {"pattern": "WARN",       "color": "#ffebcc", "comment": "Warnings"},
-        {"pattern": "INFO",       "color": "#ccffcc", "comment": "Information"},
-        {"pattern": r"\[\d+\]",   "color": "#e0e0e0", "comment": "Timestamps/IDs"}
+        {"pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "重大なエラー発生"},
+        {"pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ"},
+        {"pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ"},
+        {"pattern": r"\[\d+\]",   "color": "#e0e0e0", "comment": "タイムスタンプ"}
     ],
     "replace_patterns": []
 }
 
 class LineNumberCanvas(tk.Canvas):
-    """テキストウィジェットに同期して行番号を描画するキャンバス"""
+    """行番号を描画するキャンバス"""
     def __init__(self, master, text_widget, **kwargs):
         super().__init__(master, **kwargs)
         self.text_widget = text_widget
@@ -74,20 +76,20 @@ class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         root.title("Embedded Log Viewer")
-        root.geometry("1100x700")
+        root.geometry("1200x700")
 
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         
-        # データ構造: [{"pattern": str, "color": str, "comment": str}, ...]
         self.keywords_config: List[Dict[str, str]] = [x.copy() for x in DEFAULT_CONFIG["keywords"]]
-        
-        # replace_patterns: List[Tuple[search, replace, match_case, use_regex]]
         self.replace_patterns: List[Tuple[str, str, bool, bool]] = []
 
-        # 状態変数
         self.use_keyword_filter = False
         self.keywords_dlg_ref: Optional[tk.Toplevel] = None
         self.replace_dlg_ref: Optional[tk.Toplevel] = None
+
+        self.current_file_path = None
+        self.original_content = "" 
+        self.last_search_keyword = ""
 
         self._build_ui()
         self._bind_shortcuts()
@@ -132,56 +134,86 @@ class LogViewerApp:
                                        command=self.toggle_keyword_filter, relief=tk.RAISED)
         self.btn_kw_filter.pack(side=tk.LEFT)
 
-        # --- Main Text Area ---
-        frame = tk.Frame(self.root)
-        frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.vsb = tk.Scrollbar(frame, orient=tk.VERTICAL)
-        self.hsb = tk.Scrollbar(frame, orient=tk.HORIZONTAL)
-        
-        self.text = tk.Text(frame, wrap=tk.NONE, undo=False, maxundo=0,
-                            yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
-        
-        self.linenumbers = LineNumberCanvas(frame, self.text, width=45, bg='#f0f0f0')
-
-        self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
+        # --- Main Layout (PanedWindow) ---
+        # 垂直スクロールバー（共通）
+        self.vsb = tk.Scrollbar(self.root, orient=tk.VERTICAL)
         self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        self.hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 左右分割コンテナ
+        self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
+        self.paned_window.pack(fill=tk.BOTH, expand=True)
+
+        # --- 左側: ログ表示エリア ---
+        left_frame = tk.Frame(self.paned_window)
+        self.paned_window.add(left_frame, minsize=400, stretch="always")
+
+        self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
+        self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.text = tk.Text(left_frame, wrap=tk.NONE, undo=False, maxundo=0,
+                            yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set)
+        
+        self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg='#f0f0f0')
+        self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.vsb.config(command=self._on_vsb_scroll)
-        self.hsb.config(command=self.text.xview)
         
+        self.hsb_log.config(command=self.text.xview)
+
+        # --- 右側: コメント表示エリア ---
+        right_frame = tk.Frame(self.paned_window)
+        self.paned_window.add(right_frame, minsize=200, stretch="never")
+
+        self.hsb_cmt = tk.Scrollbar(right_frame, orient=tk.HORIZONTAL)
+        self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.comment_text = tk.Text(right_frame, wrap=tk.NONE, undo=False, maxundo=0,
+                                    yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_cmt.set,
+                                    bg="#fcfcfc", fg="#0000aa")
+        self.comment_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.hsb_cmt.config(command=self.comment_text.xview)
+
+        # --- スクロール同期設定 ---
+        def sync_yview(*args):
+            self.text.yview(*args)
+            self.comment_text.yview(*args)
+            self.linenumbers.redraw()
+
+        self.vsb.config(command=sync_yview)
+
+        # マウスホイール同期
+        def on_mousewheel(event):
+            # Windows/Mac/Linuxでdeltaの扱いが違うが、簡易的に統一処理
+            delta = int(-1*(event.delta/120)) if event.delta else 0
+            if event.num == 4: delta = -1
+            if event.num == 5: delta = 1
+            
+            self.text.yview_scroll(delta, "units")
+            self.comment_text.yview_scroll(delta, "units")
+            self.linenumbers.redraw()
+            return "break"
+
+        for widget in [self.text, self.comment_text]:
+            widget.bind('<MouseWheel>', on_mousewheel)
+            widget.bind('<Button-4>', on_mousewheel)
+            widget.bind('<Button-5>', on_mousewheel)
+
         self.text.bind('<KeyRelease>', lambda e: self.linenumbers.redraw())
-        self.text.bind('<MouseWheel>', self._on_mousewheel)
-        self.text.bind('<Button-4>', self._on_mousewheel)
-        self.text.bind('<Button-5>', self._on_mousewheel)
-        
-        if HAS_DND and hasattr(self.text, 'drop_target_register'):
-            self.text.drop_target_register(DND_FILES)
-            self.text.dnd_bind('<<Drop>>', self._on_drop_file)
 
+        # ステータスバー
         self.status_var = tk.StringVar(value="Ready")
         tk.Label(self.root, textvariable=self.status_var, anchor=tk.W, relief=tk.SUNKEN).pack(fill=tk.X, side=tk.BOTTOM)
 
-        self.current_file_path = None
-        self.original_content = "" 
-        self.last_search_keyword = ""
+        # DnD
+        if HAS_DND and hasattr(self.text, 'drop_target_register'):
+            self.text.drop_target_register(DND_FILES)
+            self.text.dnd_bind('<<Drop>>', self._on_drop_file)
 
     def _bind_shortcuts(self):
         self.root.bind('<Control-o>', lambda e: self.open_file())
         self.root.bind('<Control-f>', lambda e: self.open_find_dialog())
         self.root.bind('<F3>', lambda e: self.find_next())
         self.root.bind('<F5>', lambda e: self.reload_file())
-
-    def _on_vsb_scroll(self, *args):
-        self.text.yview(*args)
-        self.linenumbers.redraw()
-
-    def _on_mousewheel(self, event):
-        self.text.yview_scroll(int(-1*(event.delta/120)), "units")
-        self.linenumbers.redraw()
-        return "break"
 
     def _on_drop_file(self, event):
         path = event.data
@@ -275,47 +307,61 @@ class LogViewerApp:
             self.btn_kw_filter.config(text="Keyword Filter: OFF", relief=tk.RAISED, bg="SystemButtonFace")
         self.apply_display_update()
 
-    def reset_filter(self):
-        # 現状はテキストフィルタがないため、キーワードフィルタをOFFにする等の動作
-        # ここでは何もしないか、フィルタOFFにする
-        if self.use_keyword_filter:
-            self.toggle_keyword_filter()
-
     def apply_display_update(self):
+        """表示更新：フィルタ適用とコメント生成を行う"""
         if not self.original_content: 
             return
 
         use_kw = self.use_keyword_filter
         lines = self.original_content.splitlines()
         
-        kw_patterns = []
-        if use_kw:
-            # 辞書のリストから pattern を抽出してコンパイル
-            for item in self.keywords_config:
-                pat_str = item.get("pattern", "")
-                if pat_str:
-                    try:
-                        kw_patterns.append(re.compile(pat_str, re.IGNORECASE))
-                    except re.error:
-                        pass
+        # コンパイル済みパターンとコメントのペアリスト作成
+        # [(pattern_obj, comment_text), ...]
+        check_list = []
+        for item in self.keywords_config:
+            pat_str = item.get("pattern", "")
+            cmt = item.get("comment", "")
+            if pat_str:
+                try:
+                    p = re.compile(pat_str, re.IGNORECASE)
+                    check_list.append((p, cmt))
+                except re.error:
+                    pass
 
         filtered_lines = []
-        for line in lines:
-            if use_kw:
-                if not kw_patterns: 
-                    continue 
-                match_found = False
-                for pat in kw_patterns:
-                    if pat.search(line):
-                        match_found = True
-                        break
-                if not match_found:
-                    continue
-            filtered_lines.append(line)
+        comment_lines = []
 
+        for line in lines:
+            matched_comment = ""
+            is_match = False
+            
+            # マッチ確認とコメント抽出
+            for pat, cmt in check_list:
+                if pat.search(line):
+                    is_match = True
+                    if cmt:
+                        # 複数のキーワードにマッチする場合、最初に見つかったコメントを採用（または連結も可）
+                        matched_comment = cmt
+                        break 
+            
+            # フィルタリング判定
+            if use_kw and not is_match:
+                continue
+
+            filtered_lines.append(line)
+            comment_lines.append(matched_comment)
+
+        # 画面描画 (Log)
         self.text.delete("1.0", tk.END)
         self.text.insert("1.0", "\n".join(filtered_lines))
+        
+        # 画面描画 (Comment)
+        self.comment_text.delete("1.0", tk.END)
+        self.comment_text.insert("1.0", "\n".join(comment_lines))
+
         self.linenumbers.redraw()
+        
+        # ハイライト再適用
         self.highlight_keywords()
         
         count = len(filtered_lines)
@@ -329,7 +375,6 @@ class LogViewerApp:
 
         count_var = tk.IntVar()
         
-        # リストベースの設定からハイライト適用
         for item in self.keywords_config:
             pattern = item.get("pattern", "")
             color = item.get("color", "#ffffff")
@@ -412,7 +457,7 @@ class LogViewerApp:
         finally:
             menu.grab_release()
 
-    # --- Config Dialogs (Modified with Comment Field) ---
+    # --- Config Dialogs (Modal) ---
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref is not None and self.keywords_dlg_ref.winfo_exists():
             self.keywords_dlg_ref.lift()
@@ -420,8 +465,8 @@ class LogViewerApp:
 
         dlg = tk.Toplevel(self.root)
         self.keywords_dlg_ref = dlg
-        dlg.title("Edit Keywords (Filter & Highlight)")
-        dlg.geometry("850x450") # 少し幅広に
+        dlg.title("Edit Keywords (Filter & Highlight & Comment)")
+        dlg.geometry("850x450")
         dlg.transient(self.root)
         dlg.grab_set()
 
@@ -433,7 +478,6 @@ class LogViewerApp:
 
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
-        # ヘッダーラベル
         tk.Label(header_frame, text="Regex Pattern", width=25, anchor="w").pack(side=tk.LEFT)
         tk.Label(header_frame, text="Color", width=10, anchor="w").pack(side=tk.LEFT, padx=(35,0))
         tk.Label(header_frame, text="Comment", width=20, anchor="w").pack(side=tk.LEFT, padx=10)
@@ -465,28 +509,20 @@ class LogViewerApp:
             cv = tk.StringVar(value=c)
             cmtv = tk.StringVar(value=cmt)
 
-            # Pattern
             entry_k = tk.Entry(row, textvariable=kv, width=25)
             entry_k.pack(side=tk.LEFT, padx=(0, 2))
             
-            # Helper Btn
             btn_help = tk.Button(row, text="▼", width=2, command=lambda: self.create_preset_menu(btn_help, entry_k))
             btn_help.pack(side=tk.LEFT, padx=(0, 5))
             
-            # Color Entry
             tk.Entry(row, textvariable=cv, width=8).pack(side=tk.LEFT, padx=(0, 2))
-            # Color Picker Btn
             tk.Button(row, text="Color", command=lambda: cv.set(colorchooser.askcolor(cv.get(), parent=dlg)[1] or cv.get())).pack(side=tk.LEFT, padx=2)
             
-            # Comment Entry
             tk.Entry(row, textvariable=cmtv, width=20).pack(side=tk.LEFT, padx=(10, 5))
 
-            # Del Btn
             tk.Button(row, text="Del", command=lambda: (row.destroy(), entries.remove((kv,cv,cmtv)))).pack(side=tk.RIGHT)
-            
             entries.append((kv, cv, cmtv))
 
-        # 初期データのロード
         for item in self.keywords_config:
             add_row(item.get("pattern", ""), item.get("color", None), item.get("comment", ""))
         
@@ -497,17 +533,11 @@ class LogViewerApp:
         tk.Button(right_frame, text="Add Row", command=add_row, width=10, height=2).pack(side=tk.TOP, pady=5)
         
         def save():
-            # リスト[辞書]形式で保存
             new_config = []
             for kv, cv, cmtv in entries:
                 if kv.get():
-                    new_config.append({
-                        "pattern": kv.get(),
-                        "color": cv.get(),
-                        "comment": cmtv.get()
-                    })
+                    new_config.append({"pattern": kv.get(), "color": cv.get(), "comment": cmtv.get()})
             self.keywords_config = new_config
-            
             dlg.destroy()
             self.keywords_dlg_ref = None
             self.apply_display_update()
@@ -595,7 +625,7 @@ class LogViewerApp:
         tk.Frame(right_frame).pack(fill=tk.Y, expand=True)
         tk.Button(right_frame, text="OK", command=save, width=10, height=2, bg="#dddddd").pack(side=tk.BOTTOM, pady=5)
 
-    # --- Config I/O (Updated for list structure) ---
+    # --- Config I/O ---
     def load_config_dialog(self):
         path = filedialog.askopenfilename(filetypes=[("JSON","*.json")])
         if path: self.load_config(path)
@@ -607,11 +637,8 @@ class LogViewerApp:
     def load_config(self, path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
-        # v19以降の形式 (List[Dict])
         if "keywords" in data and isinstance(data["keywords"], list):
             self.keywords_config = data["keywords"]
-        # v18以前の形式 (Dict[str, str]) 互換性維持
         elif "colors" in data and isinstance(data["colors"], dict):
             self.keywords_config = []
             for k, v in data["colors"].items():
@@ -622,12 +649,11 @@ class LogViewerApp:
         for p in loaded_patterns:
             if isinstance(p, dict):
                 self.replace_patterns.append((p.get("search", ""), p.get("replace", ""), p.get("match_case", False), p.get("use_regex", False)))
-        
         self.apply_display_update()
 
     def save_config(self, path):
         data = {
-            "keywords": self.keywords_config, # リスト形式で保存
+            "keywords": self.keywords_config,
             "replace_patterns": [{"search":s, "replace":r, "match_case":m, "use_regex":rg} for s,r,m,rg in self.replace_patterns],
         }
         with open(path, "w", encoding="utf-8") as f:

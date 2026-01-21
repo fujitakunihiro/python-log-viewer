@@ -1,9 +1,21 @@
 {
-  "colors": {
-    "^.*ERROR.*$": "#ff0000",
-    "WARN": "#ff8800",
-    "INFO": "#008800"
-  },
+  "keywords": [
+    {
+      "pattern": "^.*ERROR.*$",
+      "color": "#ff0000",
+      "comment": "aaa"
+    },
+    {
+      "pattern": "WARN",
+      "color": "#ff8800",
+      "comment": "bbb"
+    },
+    {
+      "pattern": "INFO",
+      "color": "#008800",
+      "comment": "ccc"
+    }
+  ],
   "replace_patterns": [
     {
       "search": ".*Temp=[-+]?\\d+(\\.\\d+)?",
