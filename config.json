@@ -13,15 +13,15 @@
       "enabled": true
     },
     {
-      "pattern": ".*ERROR.*",
-      "color": "#ff0000",
-      "comment": "エラー",
+      "pattern": ".*System Halting.*",
+      "color": "#e0e0e0",
+      "comment": "システム終了",
       "enabled": true
     },
     {
-      "pattern": ".*WARN.*",
-      "color": "#ff8800",
-      "comment": "警告",
+      "pattern": ".*ERROR.*",
+      "color": "#ff0000",
+      "comment": "エラー",
       "enabled": true
     },
     {
@@ -31,9 +31,9 @@
       "enabled": true
     },
     {
-      "pattern": ".*System Halting.*",
-      "color": "#e0e0e0",
-      "comment": "システム終了",
+      "pattern": ".*WARN.*",
+      "color": "#ff8800",
+      "comment": "警告",
       "enabled": true
     }
   ],
