@@ -1,27 +1,49 @@
 {
   "keywords": [
     {
-      "pattern": "^.*ERROR.*$",
+      "pattern": ".*System Boot.*",
+      "color": "#ffcc99",
+      "comment": "システム起動",
+      "enabled": true
+    },
+    {
+      "pattern": ".*WiFi Connected.*",
+      "color": "#ff99cc",
+      "comment": "WIFI接続完了",
+      "enabled": true
+    },
+    {
+      "pattern": ".*ERROR.*",
       "color": "#ff0000",
-      "comment": "aaa"
+      "comment": "エラー",
+      "enabled": true
     },
     {
-      "pattern": "WARN",
+      "pattern": ".*WARN.*",
       "color": "#ff8800",
-      "comment": "bbb"
+      "comment": "警告",
+      "enabled": true
     },
     {
-      "pattern": "INFO",
+      "pattern": ".*INFO.*",
       "color": "#008800",
-      "comment": "ccc"
+      "comment": "情報",
+      "enabled": true
+    },
+    {
+      "pattern": ".*System Halting.*",
+      "color": "#e0e0e0",
+      "comment": "システム終了",
+      "enabled": true
     }
   ],
   "replace_patterns": [
     {
       "search": ".*Temp=[-+]?\\d+(\\.\\d+)?",
-      "replace": "KUIHIRO",
+      "replace": "温度",
       "match_case": false,
-      "use_regex": true
+      "use_regex": true,
+      "enabled": true
     }
   ]
 }
