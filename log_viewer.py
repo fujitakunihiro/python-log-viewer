@@ -661,8 +661,8 @@ class LogViewerApp:
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
         
-        # Spacer for left controls (Check+Up+Down) - Del is on right
-        tk.Frame(header_frame, width=90).pack(side=tk.LEFT)
+        # Spacer for left controls (Check+Up+Down+Del) - Edit Filterと同じ幅135pxに調整
+        tk.Frame(header_frame, width=135).pack(side=tk.LEFT)
         
         tk.Label(header_frame, text="Find (Regex)", width=35, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
         
@@ -704,6 +704,8 @@ class LogViewerApp:
                 btn_down = tk.Button(row, text="↓", width=2, command=lambda idx=i: move_down(idx))
                 btn_down.pack(side=tk.LEFT, padx=(0,2))
                 if i == len(entries) - 1: btn_down.config(state="disabled")
+                # Delボタンをここに移動 (Edit Filterと同じ配置)
+                tk.Button(row, text="Del", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
                 # 入力
                 entry_s = tk.Entry(row, textvariable=sv, width=35)
@@ -713,8 +715,6 @@ class LogViewerApp:
                 btn_help.pack(side=tk.LEFT, padx=(0, 5))
                 
                 tk.Entry(row, textvariable=rv, width=30).pack(side=tk.LEFT, padx=(0, 5))
-
-                tk.Button(row, text="Del", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
         def add_row(s="", r="", enabled=True):
             entries.append((tk.BooleanVar(value=enabled), tk.StringVar(value=s), tk.StringVar(value=r)))
