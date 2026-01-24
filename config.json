@@ -1,19 +1,19 @@
 {
   "keywords": [
     {
-      "pattern": ".*System Boot.*",
-      "color": "#ffcc99",
+      "pattern": ".*INFO.*System Boot.*",
+      "color": "#9efacc",
       "comment": "システム起動",
       "enabled": true
     },
     {
-      "pattern": ".*WiFi Connected.*",
+      "pattern": ".*INFO.*WiFi Connected.*",
       "color": "#ff99cc",
       "comment": "WIFI接続完了",
       "enabled": true
     },
     {
-      "pattern": ".*System Halting.*",
+      "pattern": ".*INFO.*System Halting.*",
       "color": "#e0e0e0",
       "comment": "システム終了",
       "enabled": true
@@ -25,15 +25,15 @@
       "enabled": true
     },
     {
-      "pattern": ".*INFO.*",
-      "color": "#008800",
-      "comment": "情報",
+      "pattern": ".*WARN.*",
+      "color": "#ff99cc",
+      "comment": "ワーニング",
       "enabled": true
     },
     {
-      "pattern": ".*WARN.*",
-      "color": "#ff8800",
-      "comment": "警告",
+      "pattern": ".*INFO.*",
+      "color": "#e0e0e0",
+      "comment": "情報",
       "enabled": true
     }
   ],
@@ -41,8 +41,6 @@
     {
       "search": ".*Temp=[-+]?\\d+(\\.\\d+)?",
       "replace": "温度",
-      "match_case": false,
-      "use_regex": true,
       "enabled": true
     }
   ]

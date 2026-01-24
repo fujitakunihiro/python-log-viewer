@@ -284,7 +284,44 @@ class LogViewerApp:
         if not path: return
 
         try:
-            # ... (HTML生成ロジックは変更なし) ...
+            log_lines = self.text.get("1.0", "end-1c").splitlines()
+            comment_lines = self.comment_text.get("1.0", "end-1c").splitlines()
+
+            html_content = [
+                '<html><head><meta charset="utf-8">',
+                '<style>table { border-collapse: collapse; width: 100%; font-family: Consolas, monospace; }',
+                'th, td { border: 1px solid #999; padding: 4px; text-align: left; vertical-align: top; }',
+                'th { background-color: #ddd; }</style></head>',
+                '<body><table>',
+                '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead><tbody>'
+            ]
+
+            check_list = []
+            for item in self.keywords_config:
+                if not item.get("enabled", True): continue
+                pat_str = item.get("pattern", "")
+                color = item.get("color", "#ffffff")
+                if pat_str:
+                    try:
+                        check_list.append((re.compile(pat_str, re.IGNORECASE), color))
+                    except re.error: pass
+
+            for i, line in enumerate(log_lines):
+                cmt = comment_lines[i] if i < len(comment_lines) else ""
+                bg_color = "#ffffff"
+                for pat, color in check_list:
+                    if pat.search(line):
+                        bg_color = color
+                        break 
+                
+                safe_line = html.escape(line)
+                safe_cmt = html.escape(cmt)
+                html_content.append(
+                    f'<tr style="background-color: {bg_color}"><td>{i+1}</td>'
+                    f'<td style="white-space: pre-wrap;">{safe_line}</td><td>{safe_cmt}</td></tr>'
+                )
+
+            html_content.append('</tbody></table></body></html>')
 
             with open(path, "w", encoding="utf-8-sig") as f:
                 f.write("\n".join(html_content))
@@ -462,7 +499,7 @@ class LogViewerApp:
 
         dlg = tk.Toplevel(self.root)
         self.keywords_dlg_ref = dlg
-        dlg.title("フィルタ設定の編集") # Edit Filter -> フィルタ設定の編集
+        dlg.title("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。") # Edit Filter -> フィルタ設定の編集
         dlg.geometry("1100x450") 
         dlg.transient(self.root)
         dlg.grab_set()
@@ -595,7 +632,7 @@ class LogViewerApp:
 
         dlg = tk.Toplevel(self.root)
         self.replace_dlg_ref = dlg
-        dlg.title("説明パターンの編集") # Edit Replace Patterns -> 説明パターンの編集
+        dlg.title("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。") # Edit Replace Patterns -> 説明パターンの編集
         dlg.geometry("950x450")
         dlg.transient(self.root)
         dlg.grab_set()
