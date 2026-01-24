@@ -109,7 +109,7 @@ class LogViewerApp:
         configmenu.add_command(label="設定保存...", command=self.save_config_dialog) # Save Config... -> 設定保存...
         configmenu.add_separator()
         configmenu.add_command(label="フィルタ設定の編集...", command=self.edit_keywords_dialog) # Edit Filter... -> フィルタ設定の編集...
-        configmenu.add_command(label="置換パターンの編集...", command=self.edit_replace_patterns_dialog) # Edit Replace Patterns... -> 置換パターンの編集...
+        configmenu.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog) # Edit Replace Patterns... -> 説明パターンの編集...
         menubar.add_cascade(label="設定", menu=configmenu) # Config -> 設定
 
         self.root.config(menu=menubar)
@@ -595,7 +595,7 @@ class LogViewerApp:
 
         dlg = tk.Toplevel(self.root)
         self.replace_dlg_ref = dlg
-        dlg.title("置換パターンの編集") # Edit Replace Patterns -> 置換パターンの編集
+        dlg.title("説明パターンの編集") # Edit Replace Patterns -> 説明パターンの編集
         dlg.geometry("950x450")
         dlg.transient(self.root)
         dlg.grab_set()
@@ -609,15 +609,15 @@ class LogViewerApp:
         header_frame = tk.Frame(left_frame)
         header_frame.pack(fill=tk.X, padx=5, pady=2)
         
-        # Spacer for left controls (Check+Up+Down+Del) - Edit Filterと同じ幅135pxに調整
+        # Spacer for left controls (Check+Up+Down+Del)
         tk.Frame(header_frame, width=135).pack(side=tk.LEFT)
         
-        tk.Label(header_frame, text="検索 (正規表現)", width=35, anchor="w").pack(side=tk.LEFT, padx=(5, 0)) # Find (Regex) -> 検索 (正規表現)
+        tk.Label(header_frame, text="正規表現パターン", width=35, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
         
         # Spacer for ▼ button area
         tk.Frame(header_frame, width=30).pack(side=tk.LEFT)
         
-        tk.Label(header_frame, text="置換", width=30, anchor="w").pack(side=tk.LEFT) # Replace -> 置換
+        tk.Label(header_frame, text="説明", width=40, anchor="w").pack(side=tk.LEFT)
         
         canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
@@ -640,7 +640,7 @@ class LogViewerApp:
             for widget in scrollable_frame.winfo_children():
                 widget.destroy()
             
-            for i, (en, sv, rv) in enumerate(entries):
+            for i, (en, pv, dv) in enumerate(entries):
                 row = tk.Frame(scrollable_frame)
                 row.pack(fill=tk.X, pady=2, padx=5)
                 
@@ -652,20 +652,20 @@ class LogViewerApp:
                 btn_down = tk.Button(row, text="↓", width=2, command=lambda idx=i: move_down(idx))
                 btn_down.pack(side=tk.LEFT, padx=(0,2))
                 if i == len(entries) - 1: btn_down.config(state="disabled")
-                # Delボタンをここに移動 (Edit Filterと同じ配置)
-                tk.Button(row, text="削除", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2) # Del -> 削除
+                tk.Button(row, text="削除", width=3, command=lambda idx=i: delete_row(idx)).pack(side=tk.LEFT, padx=2)
 
-                # 入力
-                entry_s = tk.Entry(row, textvariable=sv, width=35)
-                entry_s.pack(side=tk.LEFT, padx=(5, 2))
+                # 入力フィールド（パターン）
+                entry_p = tk.Entry(row, textvariable=pv, width=35)
+                entry_p.pack(side=tk.LEFT, padx=(5, 2))
                 
-                btn_help = tk.Button(row, text="▼", width=2, command=lambda e=entry_s: self.create_preset_menu(btn_help, e))
+                btn_help = tk.Button(row, text="▼", width=2, command=lambda e=entry_p: self.create_preset_menu(btn_help, e))
                 btn_help.pack(side=tk.LEFT, padx=(0, 5))
                 
-                tk.Entry(row, textvariable=rv, width=30).pack(side=tk.LEFT, padx=(0, 5))
+                # 説明フィールド
+                tk.Entry(row, textvariable=dv, width=40).pack(side=tk.LEFT, padx=(0, 5))
 
-        def add_row(s="", r="", enabled=True):
-            entries.append((tk.BooleanVar(value=enabled), tk.StringVar(value=s), tk.StringVar(value=r)))
+        def add_row(p="", d="", enabled=True):
+            entries.append((tk.BooleanVar(value=enabled), tk.StringVar(value=p), tk.StringVar(value=d)))
             refresh_rows()
 
         def delete_row(index):
@@ -689,15 +689,15 @@ class LogViewerApp:
 
         right_frame = tk.Frame(container)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-        tk.Button(right_frame, text="行を追加", command=lambda: add_row(), width=10, height=2).pack(side=tk.TOP, pady=5) # Add Row -> 行を追加
+        tk.Button(right_frame, text="行を追加", command=lambda: add_row(), width=10, height=2).pack(side=tk.TOP, pady=5)
         
         def save():
             new_patterns = []
-            for en, sv, rv in entries:
-                if sv.get():
+            for en, pv, dv in entries:
+                if pv.get():
                     new_patterns.append({
-                        "search": sv.get(),
-                        "replace": rv.get(),
+                        "search": pv.get(),
+                        "replace": dv.get(),
                         "enabled": en.get()
                     })
             self.replace_patterns_config = new_patterns
