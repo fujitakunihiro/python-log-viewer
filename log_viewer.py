@@ -577,7 +577,7 @@ class LogViewerApp:
                 tk.Entry(row, textvariable=cv, width=8).pack(side=tk.LEFT, padx=(0, 2))
                 tk.Button(row, text="色選択", command=lambda v=cv: v.set(colorchooser.askcolor(v.get(), parent=dlg)[1] or v.get())).pack(side=tk.LEFT, padx=2) # Color -> 色選択
                 
-                tk.Entry(row, textvariable=cmtv, width=40).pack(side=tk.LEFT, padx=(10, 5))
+                tk.Entry(row, textvariable=cmtv, width=80).pack(side=tk.LEFT, padx=(10, 5))
 
         def add_row(k="", c=None, cmt="", enabled=True):
             if c is None: c = preset_colors[len(entries) % len(preset_colors)]
@@ -699,7 +699,7 @@ class LogViewerApp:
                 btn_help.pack(side=tk.LEFT, padx=(0, 5))
                 
                 # 説明フィールド
-                tk.Entry(row, textvariable=dv, width=40).pack(side=tk.LEFT, padx=(0, 5))
+                tk.Entry(row, textvariable=dv, width=80).pack(side=tk.LEFT, padx=(0, 5))
 
         def add_row(p="", d="", enabled=True):
             entries.append((tk.BooleanVar(value=enabled), tk.StringVar(value=p), tk.StringVar(value=d)))
