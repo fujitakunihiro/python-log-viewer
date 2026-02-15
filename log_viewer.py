@@ -23,7 +23,7 @@ except ImportError:
 DEFAULT_CONFIG = {
     "keywords": [
         {"pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
-        {"pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 0},
+        {"pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
         {"pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0}
     ],
     "replace_patterns": []
@@ -140,7 +140,7 @@ class LogViewerApp:
         cid = self.notebook.select()
         return self.notebook.nametowidget(cid) if cid else None
 
-    # --- File/Merge Actions ---
+    # --- File/Merge ---
     def open_file(self):
         for p in filedialog.askopenfilenames(): self._open_file_path(p)
 
@@ -162,19 +162,56 @@ class LogViewerApp:
         tabs = [self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
         target_tabs = [t for t in tabs if not t.is_merged]
         if len(target_tabs) < 2: return
+        
         ts_len = simpledialog.askinteger("マージ", "時刻ソート用の先頭文字数:", initialvalue=19, minvalue=0)
         if ts_len is None: return
-        all_entries = []
+
+        # ブロック認識用のルール準備
+        kw_rules = []
+        for itm in self.keywords_config:
+            if itm.get("enabled", True):
+                try: kw_rules.append((re.compile(itm["pattern"], re.I), int(itm.get("extra_lines", 0))))
+                except: pass
+
+        all_blocks = [] # (sort_key, List[lines], filename)
+        
         for t in target_tabs:
             fn = os.path.basename(t.file_path)
-            for line in t.original_content.splitlines():
-                if line.strip(): all_entries.append((line[:ts_len], line, fn))
-        all_entries.sort(key=lambda x: x[0])
-        m_tab = LogTab(self.notebook, self, "Merged", "\n".join([x[1] for x in all_entries]), is_merged=True)
-        m_tab.source_files = [x[2] for x in all_entries]
+            lines = t.original_content.splitlines()
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if not line.strip():
+                    i += 1; continue
+                
+                # この行がどのブロックヘッダーに該当するか確認
+                extra = 0
+                for pat, ex in kw_rules:
+                    if pat.search(line):
+                        extra = ex
+                        break
+                
+                # ブロックの切り出し
+                block_lines = lines[i : i + extra + 1]
+                sort_key = line[:ts_len]
+                all_blocks.append((sort_key, block_lines, fn))
+                i += extra + 1
+
+        # ブロック単位でソート
+        all_blocks.sort(key=lambda x: x[0])
+
+        # フラット化
+        final_merged_lines = []
+        final_source_files = []
+        for _, b_lines, fname in all_blocks:
+            final_merged_lines.extend(b_lines)
+            final_source_files.extend([fname] * len(b_lines))
+
+        m_tab = LogTab(self.notebook, self, "Merged", "\n".join(final_merged_lines), is_merged=True)
+        m_tab.source_files = final_source_files
         self.notebook.add(m_tab, text="[マージ結果]"); self.notebook.select(m_tab); self.apply_display_update(m_tab)
 
-    # --- Core Logic (Display & Filter) ---
+    # --- Filter & Display ---
     def toggle_filter(self):
         self.use_keyword_filter = not self.use_keyword_filter
         self.btn_kw_filter.config(text=f"フィルタ: {'ON' if self.use_keyword_filter else 'OFF'}", bg="#bbdefb" if self.use_keyword_filter else "SystemButtonFace")
@@ -187,7 +224,7 @@ class LogViewerApp:
         
         orig_lines = data.splitlines()
         num_lines = len(orig_lines)
-        line_matches = [None] * num_lines
+        line_attrs = [None] * num_lines
         
         kw_rules = []
         for itm in self.keywords_config:
@@ -201,19 +238,18 @@ class LogViewerApp:
                     })
                 except: pass
 
-        # 行ごとのマッチング属性の決定 (+行 波及ロジック)
         for idx in range(num_lines):
             for rule in kw_rules:
                 if rule["regex"].search(orig_lines[idx]):
                     for j in range(idx, min(idx + rule["extra"] + 1, num_lines)):
-                        if line_matches[j] is None: line_matches[j] = rule
+                        if line_attrs[j] is None: line_attrs[j] = rule
                     break
 
         flines, fcmts, tag_info = [], [], []
         srcs = tab.source_files if tab.is_merged else [""] * num_lines
 
         for i in range(num_lines):
-            match = line_matches[i]
+            match = line_attrs[i]
             if self.use_keyword_filter and match is None: continue
             
             flines.append(orig_lines[i])
@@ -226,14 +262,12 @@ class LogViewerApp:
         tab.text.delete("1.0", tk.END); tab.text.insert("1.0", "\n".join(flines))
         tab.comment_text.delete("1.0", tk.END); tab.comment_text.insert("1.0", "\n".join(fcmts))
         
-        # ハイライト
         for tag in tab.text.tag_names():
             if tag.startswith("kw_"): tab.text.tag_delete(tag)
         for l_num, col in tag_info:
             tname = f"kw_{col.replace('#','')}"
             tab.text.tag_configure(tname, background=col)
             tab.text.tag_add(tname, f"{l_num}.0", f"{l_num}.end")
-        
         tab.linenumbers.redraw()
 
     def _apply_replacements(self, content: str) -> str:
@@ -243,147 +277,121 @@ class LogViewerApp:
                 except: pass
         return content
 
-    # --- Preset Menu ---
+    # --- UI Components ---
     def create_preset_menu(self, parent_btn, entry_widget):
         menu = tk.Menu(self.root, tearoff=0)
-        presets_groups = [
-            ("--- 数値・値 ---", None),
-            ("整数 (例: 123)", r"\d+"),
-            ("16進数 (例: 0xA1)", r"0x[0-9A-Fa-f]+"),
-            ("小数/符号付 (例: -12.5)", r"[-+]?\d+(\.\d+)?"),
-            ("--- ネットワーク・ID ---", None),
-            ("IPアドレス", r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"),
-            ("MACアドレス (例: AA:BB:CC...)", r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"),
-            ("--- 文字列・構造 ---", None),
-            ("[]の中身 (例: [INFO])", r"\[.*?\]"),
-            ("Key=Value (例: Err=1)", r"\w+\s*=\s*\S+"),
-            ("--- グループ・論理 ---", None),
-            ("グループ化 (グループ番号取得)", r"()"),
-            ("いずれか (A|B)", r"|"),
-            ("--- ワイルドカード ---", None),
-            ("任意の文字列 (.*)", r".*"),
-        ]
-        def ins(t):
-            if t: entry_widget.insert(tk.INSERT, t)
-        for label, regex in presets_groups:
-            if regex is None: menu.add_separator(); menu.add_command(label=label, state="disabled")
-            else: menu.add_command(label=label, command=lambda t=regex: ins(t))
+        presets = [("--- 数値 ---",None),("整数",r"\d+"),("16進",r"0x[0-9A-Fa-f]+"),("--- 通信 ---",None),("IP",r"\d{1,3}(\.\d{1,3}){3}"),("--- 構造 ---",None),("[]内",r"\[.*?\]"),("Key=Val",r"\w+=\S+")]
+        for l, r in presets:
+            if r is None: menu.add_separator(); menu.add_command(label=l, state="disabled")
+            else: menu.add_command(label=l, command=lambda t=r: entry_widget.insert(tk.INSERT, t))
         menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
 
-    # --- Edit Dialogs (UI 形式の復元) ---
+    # --- Dialogs (復元されたリッチUI) ---
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref and self.keywords_dlg_ref.winfo_exists(): self.keywords_dlg_ref.lift(); return
         dlg = tk.Toplevel(self.root); self.keywords_dlg_ref = dlg
-        dlg.title("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。")
+        dlg.title("フィルタ設定の編集")
         dlg.geometry("1150x500"); dlg.transient(self.root); dlg.grab_set()
+        
+        fr = tk.Frame(dlg); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1); l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Header
+        hdr = tk.Frame(l_fr); hdr.pack(fill=tk.X, padx=5, pady=2)
+        tk.Frame(hdr, width=135).pack(side=tk.LEFT)
+        tk.Label(hdr, text="正規表現パターン", width=30, anchor="w").pack(side=tk.LEFT, padx=5)
+        tk.Frame(hdr, width=35).pack(side=tk.LEFT)
+        tk.Label(hdr, text="色", width=10, anchor="w").pack(side=tk.LEFT)
+        tk.Frame(hdr, width=55).pack(side=tk.LEFT)
+        tk.Label(hdr, text="コメント", width=25, anchor="w").pack(side=tk.LEFT, padx=5)
+        tk.Label(hdr, text="+行", width=5, anchor="w").pack(side=tk.LEFT, padx=5)
 
-        container = tk.Frame(dlg); container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        left_fr = tk.Frame(container, relief=tk.GROOVE, borderwidth=1); left_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        header = tk.Frame(left_fr); header.pack(fill=tk.X, padx=5, pady=2)
-        tk.Frame(header, width=135).pack(side=tk.LEFT) # Spacer for checkbox/up/down/del
-        tk.Label(header, text="正規表現パターン", width=30, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
-        tk.Frame(header, width=35).pack(side=tk.LEFT) # ▼ btn space
-        tk.Label(header, text="色", width=10, anchor="w").pack(side=tk.LEFT)
-        tk.Frame(header, width=55).pack(side=tk.LEFT) # 色選択 btn space
-        tk.Label(header, text="コメント", width=25, anchor="w").pack(side=tk.LEFT, padx=(5,0))
-        tk.Label(header, text="+行", width=5, anchor="w").pack(side=tk.LEFT, padx=(5,0))
-
-        canvas = tk.Canvas(left_fr, highlightthickness=0); scr = tk.Scrollbar(left_fr, command=canvas.yview)
-        sf = tk.Frame(canvas); canvas.configure(yscrollcommand=scr.set)
-        scr.pack(side=tk.RIGHT, fill=tk.Y); canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        cv_win = canvas.create_window((0,0), window=sf, anchor="nw")
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cv_win, width=e.width))
+        cv = tk.Canvas(l_fr, highlightthickness=0); sc = tk.Scrollbar(l_fr, command=cv.yview)
+        sf = tk.Frame(cv); cv.configure(yscrollcommand=sc.set)
+        sc.pack(side=tk.RIGHT, fill=tk.Y); cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cv_win = cv.create_window((0,0), window=sf, anchor="nw")
+        sf.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>", lambda e: cv.itemconfig(cv_win, width=e.width))
 
         entries = []
         def refresh():
             for w in sf.winfo_children(): w.destroy()
-            for i, (en, kv, cv, cmtv, exv) in enumerate(entries):
-                row = tk.Frame(sf); row.pack(fill=tk.X, pady=2, padx=5)
-                tk.Checkbutton(row, variable=en).pack(side=tk.LEFT, padx=2)
-                up = tk.Button(row, text="↑", width=2, command=lambda idx=i: move(idx, -1)); up.pack(side=tk.LEFT)
-                dw = tk.Button(row, text="↓", width=2, command=lambda idx=i: move(idx, 1)); dw.pack(side=tk.LEFT)
+            for i, (en, kv, cvv, cmtv, exv) in enumerate(entries):
+                r = tk.Frame(sf); r.pack(fill=tk.X, pady=2, padx=5)
+                tk.Checkbutton(r, variable=en).pack(side=tk.LEFT)
+                up = tk.Button(r, text="↑", width=2, command=lambda idx=i: move(idx, -1)); up.pack(side=tk.LEFT)
+                dw = tk.Button(r, text="↓", width=2, command=lambda idx=i: move(idx, 1)); dw.pack(side=tk.LEFT)
                 if i==0: up.config(state="disabled")
                 if i==len(entries)-1: dw.config(state="disabled")
-                tk.Button(row, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
-                ek = tk.Entry(row, textvariable=kv, width=32); ek.pack(side=tk.LEFT, padx=(5, 2))
-                bh = tk.Button(row, text="▼", width=2, command=lambda b=None, e=ek: self.create_preset_menu(bh, ek)); bh.pack(side=tk.LEFT, padx=(0, 5))
-                tk.Entry(row, textvariable=cv, width=8).pack(side=tk.LEFT)
-                tk.Button(row, text="色選択", command=lambda v=cv: v.set(colorchooser.askcolor(v.get(), parent=dlg)[1] or v.get())).pack(side=tk.LEFT, padx=2)
-                tk.Entry(row, textvariable=cmtv, width=50).pack(side=tk.LEFT, padx=(10, 5))
-                tk.Entry(row, textvariable=exv, width=4).pack(side=tk.LEFT, padx=5)
+                tk.Button(r, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
+                e_k = tk.Entry(r, textvariable=kv, width=32); e_k.pack(side=tk.LEFT, padx=5)
+                b_h = tk.Button(r, text="▼", width=2, command=lambda b=None, e=e_k: self.create_preset_menu(b_h, e_k)); b_h.pack(side=tk.LEFT)
+                tk.Entry(r, textvariable=cvv, width=8).pack(side=tk.LEFT, padx=2)
+                tk.Button(r, text="色選択", command=lambda v=cvv: v.set(colorchooser.askcolor(v.get())[1] or v.get())).pack(side=tk.LEFT)
+                tk.Entry(r, textvariable=cmtv, width=50).pack(side=tk.LEFT, padx=10)
+                tk.Entry(r, textvariable=exv, width=4).pack(side=tk.LEFT)
 
-        def add(k="", c="#ffffff", cmt="", ex="0", en=True):
-            entries.append((tk.BooleanVar(value=en), tk.StringVar(value=k), tk.StringVar(value=c), tk.StringVar(value=cmt), tk.StringVar(value=str(ex)))); refresh()
+        def add(k="", c="#ffffff", m="", x="0", n=True):
+            entries.append((tk.BooleanVar(value=n), tk.StringVar(value=k), tk.StringVar(value=c), tk.StringVar(value=m), tk.StringVar(value=str(x)))); refresh()
         def delete(idx): del entries[idx]; refresh()
         def move(idx, d): entries[idx], entries[idx+d] = entries[idx+d], entries[idx]; refresh()
-
         for it in self.keywords_config: add(it.get("pattern"), it.get("color"), it.get("comment"), it.get("extra_lines", 0), it.get("enabled", True))
         if not entries: add()
-
-        rf = tk.Frame(container); rf.pack(side=tk.RIGHT, fill=tk.Y, padx=(10,0))
-        tk.Button(rf, text="行を追加", command=add, width=10, height=2).pack(pady=5)
+        
+        btn_fr = tk.Frame(fr); btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
+        tk.Button(btn_fr, text="行を追加", command=add, width=10).pack(pady=5)
         def save():
-            self.keywords_config = [{"pattern":kv.get(),"color":cv.get(),"comment":cmtv.get(),"extra_lines":exv.get(),"enabled":en.get()} for en,kv,cv,cmtv,exv in entries if kv.get()]
+            self.keywords_config = [{"pattern":kv.get(),"color":cvv.get(),"comment":cmtv.get(),"extra_lines":exv.get(),"enabled":en.get()} for en,kv,cvv,cmtv,exv in entries if kv.get()]
             dlg.destroy(); t = self.get_current_tab(); 
             if t: self.apply_display_update(t)
-        tk.Button(rf, text="OK", command=save, width=10, height=2, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
+        tk.Button(btn_fr, text="OK", command=save, width=10, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
 
     def edit_replace_patterns_dialog(self):
         if self.replace_dlg_ref and self.replace_dlg_ref.winfo_exists(): self.replace_dlg_ref.lift(); return
         dlg = tk.Toplevel(self.root); self.replace_dlg_ref = dlg
-        dlg.title("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。")
-        dlg.geometry("950x450"); dlg.transient(self.root); dlg.grab_set()
-
-        container = tk.Frame(dlg); container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        left_fr = tk.Frame(container, relief=tk.GROOVE, borderwidth=1); left_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        header = tk.Frame(left_fr); header.pack(fill=tk.X, padx=5, pady=2)
-        tk.Frame(header, width=135).pack(side=tk.LEFT) # Spacer
-        tk.Label(header, text="正規表現パターン", width=35, anchor="w").pack(side=tk.LEFT, padx=(5, 0))
-        tk.Frame(header, width=30).pack(side=tk.LEFT) # ▼ spacer
-        tk.Label(header, text="説明", width=40, anchor="w").pack(side=tk.LEFT)
-
-        canvas = tk.Canvas(left_fr, highlightthickness=0); scr = tk.Scrollbar(left_fr, command=canvas.yview)
-        sf = tk.Frame(canvas); canvas.configure(yscrollcommand=scr.set)
-        scr.pack(side=tk.RIGHT, fill=tk.Y); canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        cv_win = canvas.create_window((0,0), window=sf, anchor="nw")
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cv_win, width=e.width))
-
+        dlg.title("説明パターンの編集")
+        dlg.geometry("950x450"); dlg.grab_set()
+        fr = tk.Frame(dlg); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1); l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        hdr = tk.Frame(l_fr); hdr.pack(fill=tk.X, padx=5, pady=2)
+        tk.Frame(hdr, width=135).pack(side=tk.LEFT)
+        tk.Label(hdr, text="正規表現パターン", width=35, anchor="w").pack(side=tk.LEFT, padx=5)
+        tk.Frame(hdr, width=30).pack(side=tk.LEFT)
+        tk.Label(hdr, text="説明", width=40, anchor="w").pack(side=tk.LEFT)
+        cv = tk.Canvas(l_fr, highlightthickness=0); sc = tk.Scrollbar(l_fr, command=cv.yview)
+        sf = tk.Frame(cv); cv.configure(yscrollcommand=sc.set)
+        sc.pack(side=tk.RIGHT, fill=tk.Y); cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cv_win = cv.create_window((0,0), window=sf, anchor="nw")
+        sf.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>", lambda e: cv.itemconfig(cv_win, width=e.width))
         entries = []
         def refresh():
             for w in sf.winfo_children(): w.destroy()
             for i, (en, pv, dv) in enumerate(entries):
-                row = tk.Frame(sf); row.pack(fill=tk.X, pady=2, padx=5)
-                tk.Checkbutton(row, variable=en).pack(side=tk.LEFT, padx=2)
-                up = tk.Button(row, text="↑", width=2, command=lambda idx=i: move(idx, -1)); up.pack(side=tk.LEFT)
-                dw = tk.Button(row, text="↓", width=2, command=lambda idx=i: move(idx, 1)); dw.pack(side=tk.LEFT)
+                r = tk.Frame(sf); r.pack(fill=tk.X, pady=2, padx=5)
+                tk.Checkbutton(r, variable=en).pack(side=tk.LEFT)
+                up = tk.Button(r, text="↑", width=2, command=lambda idx=i: move(idx, -1)); up.pack(side=tk.LEFT)
+                dw = tk.Button(r, text="↓", width=2, command=lambda idx=i: move(idx, 1)); dw.pack(side=tk.LEFT)
                 if i==0: up.config(state="disabled")
                 if i==len(entries)-1: dw.config(state="disabled")
-                tk.Button(row, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
-                ep = tk.Entry(row, textvariable=pv, width=35); ep.pack(side=tk.LEFT, padx=(5, 2))
-                bh = tk.Button(row, text="▼", width=2, command=lambda b=None, e=ep: self.create_preset_menu(bh, ep)); bh.pack(side=tk.LEFT, padx=(0, 5))
-                tk.Entry(row, textvariable=dv, width=60).pack(side=tk.LEFT, padx=(0, 5))
-
-        def add(p="", d="", en=True):
-            entries.append((tk.BooleanVar(value=en), tk.StringVar(value=p), tk.StringVar(value=d))); refresh()
+                tk.Button(r, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
+                e_p = tk.Entry(r, textvariable=pv, width=35); e_p.pack(side=tk.LEFT, padx=5)
+                b_h = tk.Button(r, text="▼", width=2, command=lambda b=None, e=e_p: self.create_preset_menu(b_h, e_p)); b_h.pack(side=tk.LEFT)
+                tk.Entry(r, textvariable=dv, width=60).pack(side=tk.LEFT, padx=10)
+        def add(p="", d="", n=True): entries.append((tk.BooleanVar(value=n), tk.StringVar(value=p), tk.StringVar(value=d))); refresh()
         def delete(idx): del entries[idx]; refresh()
         def move(idx, d): entries[idx], entries[idx+d] = entries[idx+d], entries[idx]; refresh()
-
         for it in self.replace_patterns_config: add(it.get("search"), it.get("replace"), it.get("enabled", True))
         if not entries: add()
-
-        rf = tk.Frame(container); rf.pack(side=tk.RIGHT, fill=tk.Y, padx=(10,0))
-        tk.Button(rf, text="行を追加", command=add, width=10, height=2).pack(pady=5)
+        btn_fr = tk.Frame(fr); btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
+        tk.Button(btn_fr, text="行を追加", command=add, width=10).pack(pady=5)
         def save():
             self.replace_patterns_config = [{"search":pv.get(),"replace":dv.get(),"enabled":en.get()} for en,pv,dv in entries if pv.get()]
             dlg.destroy(); t = self.get_current_tab(); 
-            if t: self._open_file_path(t.file_path) if not t.is_merged else self.apply_display_update(t)
-        tk.Button(rf, text="OK", command=save, width=10, height=2, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
+            if t: self.apply_display_update(t)
+        tk.Button(btn_fr, text="OK", command=save, width=10, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
 
-    # --- Config I/O ---
+    # --- IO & Find & Export ---
     def load_config_dialog(self):
         p = filedialog.askopenfilename(filetypes=[("JSON", "*.json")]); 
         if p: self.load_config(p)
@@ -396,20 +404,6 @@ class LogViewerApp:
             d = json.load(f); self.keywords_config = d.get("keywords", []); self.replace_patterns_config = d.get("replace_patterns", [])
         t = self.get_current_tab(); 
         if t: self.apply_display_update(t)
-
-    # --- Find & Export ---
-    def open_find_dialog(self):
-        k = simpledialog.askstring("検索", "検索文字列:"); 
-        if k: self.last_search_keyword = k; self.find_next(True)
-    def find_next(self, first=False):
-        tab = self.get_current_tab()
-        if not tab or not self.last_search_keyword: return
-        start = "1.0" if first else f"{tab.text.index(tk.INSERT)}+1c"
-        pos = tab.text.search(self.last_search_keyword, start, nocase=True)
-        if pos:
-            tab.text.mark_set(tk.INSERT, pos); tab.text.see(pos)
-            tab.text.tag_remove("found", "1.0", tk.END); tab.text.tag_add("found", pos, f"{pos}+{len(self.last_search_keyword)}c")
-            tab.text.tag_config("found", background="yellow"); tab.text.focus_set()
 
     def export_to_excel(self):
         tab = self.get_current_tab()
