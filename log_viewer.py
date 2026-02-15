@@ -64,7 +64,6 @@ class LogTab(tk.Frame):
         left_frame = tk.Frame(self.paned_window)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=800)
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
-        # --- タイポ修正箇所 (Pride= を削除) ---
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         self.text = tk.Text(left_frame, wrap=tk.NONE, yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set)
         self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg='#f0f0f0')
@@ -167,6 +166,7 @@ class LogViewerApp:
         ts_len = simpledialog.askinteger("マージ", "時刻ソート用の先頭文字数:", initialvalue=19, minvalue=0)
         if ts_len is None: return
 
+        # ブロック認識用のルール準備
         kw_rules = []
         for itm in self.keywords_config:
             if itm.get("enabled", True):
@@ -180,16 +180,19 @@ class LogViewerApp:
             lines = t.original_content.splitlines()
             if not lines: continue
 
-            # 有効時刻の補完ロジック
+            # 1. 有効な時刻を抽出・補完する (空白時刻の行が先頭に行くのを防ぐ)
             effective_ts = []
             last_valid_ts = ""
             for line in lines:
                 ts_part = line[:ts_len]
-                if ts_part.strip(): last_valid_ts = ts_part
+                # 修正: 先頭が空白の行は、時刻ではなく詳細行とみなして、直前の時刻を継続させる
+                if ts_part.strip() and len(line) > 0 and not line[0].isspace():
+                    last_valid_ts = ts_part
                 effective_ts.append(last_valid_ts)
             
-            first_valid_ts = next((ts for ts in effective_ts if ts), "00:00:00")
-            effective_ts = [ts if ts else first_valid_ts for ts in effective_ts]
+            # 先頭が空白だった場合のバックフィル
+            first_valid_ts = next((t for t in effective_ts if t), "0"*ts_len)
+            effective_ts = [t if t else first_valid_ts for t in effective_ts]
 
             i = 0
             while i < len(lines):
@@ -197,6 +200,7 @@ class LogViewerApp:
                 if not line.strip():
                     i += 1; continue
                 
+                # ブロック分割判定
                 extra = 0
                 for pat, ex in kw_rules:
                     if pat.search(line):
@@ -204,13 +208,24 @@ class LogViewerApp:
                         break
                 
                 block_lines = lines[i : i + extra + 1]
-                sort_key = effective_ts[i]
-                all_blocks.append((sort_key, block_lines, fn))
+                sort_key = effective_ts[i] # 補完された時刻をソートキーにする
+                
+                # 2. 時刻文字列を持たない行(インデント行など)が、設定行数を超えて続いている場合の処理
+                # 直前のブロックと同じファイル由来なら、直前のブロックに結合させて「1かたまり」にする
+                is_header_timestamp_empty = (len(line) > 0 and line[0].isspace())
+                
+                if is_header_timestamp_empty and all_blocks and all_blocks[-1][2] == fn:
+                    all_blocks[-1][1].extend(block_lines)
+                else:
+                    all_blocks.append((sort_key, block_lines, fn))
+                
                 i += extra + 1
 
+        # ソート (補完された時刻キーを使うため、インデント行も正しい位置に来る)
         all_blocks.sort(key=lambda x: x[0])
 
-        final_merged_lines, final_source_files = [], []
+        final_merged_lines = []
+        final_source_files = []
         for _, b_lines, fname in all_blocks:
             final_merged_lines.extend(b_lines)
             final_source_files.extend([fname] * len(b_lines))
@@ -246,6 +261,7 @@ class LogViewerApp:
                     })
                 except: pass
 
+        # 行ごとのマッチング属性の決定
         for idx in range(num_lines):
             for rule in kw_rules:
                 if rule["regex"].search(orig_lines[idx]):
@@ -285,10 +301,10 @@ class LogViewerApp:
                 except: pass
         return content
 
-    # --- Preset Menu ---
+    # --- UI Components ---
     def create_preset_menu(self, parent_btn, entry_widget):
         menu = tk.Menu(self.root, tearoff=0)
-        presets = [("--- 数値 ---",None),("整数",r"\d+"),("16進",r"0x[0-9A-Fa-f]+"),("--- 通信 ---",None),("IP",r"\d{1,3}(\.\d{1,3}){3}"),("--- 構造 ---",None),("[]内",r"\[.*?\]"),("Key=Val",r"\w+=\S+")]
+        presets = [("--- 数値 ---",None),("整数",r"\d+"),("16進",r"0x[0-9A-Fa-f]+"),("IP",r"\d{1,3}(\.\d{1,3}){3}"),("[]内",r"\[.*?\]"),("Key=Val",r"\w+=\S+")]
         for l, r in presets:
             if r is None: menu.add_separator(); menu.add_command(label=l, state="disabled")
             else: menu.add_command(label=l, command=lambda t=r: entry_widget.insert(tk.INSERT, t))
@@ -298,12 +314,11 @@ class LogViewerApp:
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref and self.keywords_dlg_ref.winfo_exists(): self.keywords_dlg_ref.lift(); return
         dlg = tk.Toplevel(self.root); self.keywords_dlg_ref = dlg
-        dlg.title("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。")
+        dlg.title("フィルタ設定の編集")
         dlg.geometry("1150x500"); dlg.transient(self.root); dlg.grab_set()
         
         fr = tk.Frame(dlg); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1); l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
         hdr = tk.Frame(l_fr); hdr.pack(fill=tk.X, padx=5, pady=2)
         tk.Frame(hdr, width=135).pack(side=tk.LEFT)
         tk.Label(hdr, text="正規表現パターン", width=30, anchor="w").pack(side=tk.LEFT, padx=5)
@@ -356,7 +371,7 @@ class LogViewerApp:
     def edit_replace_patterns_dialog(self):
         if self.replace_dlg_ref and self.replace_dlg_ref.winfo_exists(): self.replace_dlg_ref.lift(); return
         dlg = tk.Toplevel(self.root); self.replace_dlg_ref = dlg
-        dlg.title("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。")
+        dlg.title("説明パターンの編集")
         dlg.geometry("950x450"); dlg.grab_set()
         fr = tk.Frame(dlg); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1); l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -398,6 +413,7 @@ class LogViewerApp:
             if t: self.apply_display_update(t)
         tk.Button(btn_fr, text="OK", command=save, width=10, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
 
+    # --- IO & Export ---
     def load_config_dialog(self):
         p = filedialog.askopenfilename(filetypes=[("JSON", "*.json")]); 
         if p: self.load_config(p)
@@ -406,10 +422,12 @@ class LogViewerApp:
         if p:
             with open(p, "w", encoding="utf-8") as f: json.dump({"keywords":self.keywords_config, "replace_patterns":self.replace_patterns_config}, f, indent=2, ensure_ascii=False)
     def load_config(self, p):
-        with open(p, "r", encoding="utf-8") as f:
-            d = json.load(f); self.keywords_config = d.get("keywords", []); self.replace_patterns_config = d.get("replace_patterns", [])
-        t = self.get_current_tab(); 
-        if t: self.apply_display_update(t)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f); self.keywords_config = d.get("keywords", []); self.replace_patterns_config = d.get("replace_patterns", [])
+            t = self.get_current_tab(); 
+            if t: self.apply_display_update(t)
+        except: pass
 
     def export_to_excel(self):
         tab = self.get_current_tab()
