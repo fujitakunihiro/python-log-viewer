@@ -314,7 +314,7 @@ class LogViewerApp:
     def edit_keywords_dialog(self):
         if self.keywords_dlg_ref and self.keywords_dlg_ref.winfo_exists(): self.keywords_dlg_ref.lift(); return
         dlg = tk.Toplevel(self.root); self.keywords_dlg_ref = dlg
-        dlg.title("フィルタ設定の編集")
+        dlg.title("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。マッチ行の下XX行も併せて抽出する指定もできます。") # Edit Filter -> フィルタ設定の編集
         dlg.geometry("1150x500"); dlg.transient(self.root); dlg.grab_set()
         
         fr = tk.Frame(dlg); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -371,7 +371,7 @@ class LogViewerApp:
     def edit_replace_patterns_dialog(self):
         if self.replace_dlg_ref and self.replace_dlg_ref.winfo_exists(): self.replace_dlg_ref.lift(); return
         dlg = tk.Toplevel(self.root); self.replace_dlg_ref = dlg
-        dlg.title("説明パターンの編集")
+        dlg.title("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。") # Edit Replace Patterns -> 説明パターンの編集
         dlg.geometry("950x450"); dlg.grab_set()
         fr = tk.Frame(dlg); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1); l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
