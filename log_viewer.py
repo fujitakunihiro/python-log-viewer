@@ -88,6 +88,7 @@ class LogTab(tk.Frame):
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         self.text = tk.Text(left_frame, wrap=tk.NONE, yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set)
         
+        # 選択時の色設定
         self.text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.text.tag_config("found", background="#0000cd", foreground="white")
 
@@ -627,10 +628,19 @@ class LogViewerApp:
                     d = {f: item[f].get() for f in fields}
                     d["enabled"] = item["enabled"].get()
                     new_cfg.append(d)
+            
             setattr(self, f"{key}_config", new_cfg)
             dlg.destroy()
-            t = self.get_current_tab()
-            if t: self.apply_display_update(t)
+            
+            # Apply to ALL open tabs
+            for tab_id in self.notebook.tabs():
+                try:
+                    widget = self.notebook.nametowidget(tab_id)
+                    if isinstance(widget, LogTab):
+                        self.apply_display_update(widget)
+                except Exception as e:
+                    print(f"Error updating tab: {e}")
+
         tk.Button(btn_fr, text="OK", command=save, width=10, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
 
     # --- IO ---
