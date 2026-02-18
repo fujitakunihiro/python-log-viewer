@@ -1,47 +1,42 @@
 {
   "keywords": [
     {
-      "pattern": ".*INFO.*System Boot.*",
-      "color": "#9efacc",
-      "comment": "システム起動",
-      "enabled": true
-    },
-    {
-      "pattern": ".*INFO.*WiFi Connected.*",
-      "color": "#ff99cc",
-      "comment": "WIFI接続完了",
-      "enabled": true
-    },
-    {
-      "pattern": ".*INFO.*System Halting.*",
-      "color": "#e0e0e0",
-      "comment": "システム終了",
-      "enabled": true
-    },
-    {
       "pattern": ".*ERROR.*",
-      "color": "#ff0000",
-      "comment": "エラー",
+      "color": "#ffcccc",
+      "comment": "重大なエラー発生",
+      "enabled": true,
+      "extra_lines": 0
+    },
+    {
+      "pattern": "WARN",
+      "color": "#ffebcc",
+      "comment": "警告メッセージ",
+      "enabled": true,
+      "extra_lines": 2
+    },
+    {
+      "pattern": "INFO",
+      "color": "#ccffcc",
+      "comment": "正常動作ログ",
+      "enabled": true,
+      "extra_lines": 0
+    }
+  ],
+  "sections": [
+    {
+      "name": "初期化処理",
+      "start": "START_INIT",
+      "end": "END_INIT",
+      "color": "#e3f2fd",
       "enabled": true
     },
     {
-      "pattern": ".*WARN.*",
-      "color": "#ff99cc",
-      "comment": "ワーニング",
-      "enabled": true
-    },
-    {
-      "pattern": ".*INFO.*",
-      "color": "#e0e0e0",
-      "comment": "情報",
+      "name": "通信セッション",
+      "start": "Connect",
+      "end": "Disconnect",
+      "color": "#f3e5f5",
       "enabled": true
     }
   ],
-  "replace_patterns": [
-    {
-      "search": ".*Temp=[-+]?\\d+(\\.\\d+)?",
-      "replace": "温度",
-      "enabled": true
-    }
-  ]
+  "replace_patterns": []
 }
