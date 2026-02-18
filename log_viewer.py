@@ -88,9 +88,7 @@ class LogTab(tk.Frame):
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         self.text = tk.Text(left_frame, wrap=tk.NONE, yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set)
         
-        # 修正: 選択時の色設定 (文字を黒、背景を薄い水色に)
         self.text.tag_configure("sel", background="#cce8ff", foreground="black")
-        
         self.text.tag_config("found", background="#0000cd", foreground="white")
 
         self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg='#f0f0f0')
@@ -107,7 +105,6 @@ class LogTab(tk.Frame):
         
         self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg="#fcfcfc", fg="#0000aa",
                                     yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_cmt.set)
-        # 修正: 選択時の色設定
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
         
         self.comment_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -118,7 +115,6 @@ class LogTab(tk.Frame):
             st_frame = tk.Frame(self.paned_window)
             self.paned_window.add(st_frame, minsize=50, stretch="always", width=120)
             
-            # 修正: ヘッダー名を「○○の区間」に変更
             header_label = f"{fname}の区間"
             tk.Label(st_frame, text=header_label, bg="#dcedc8", relief=tk.RAISED, font=("MS UI Gothic", 9, "bold")).pack(side=tk.TOP, fill=tk.X)
 
@@ -127,7 +123,6 @@ class LogTab(tk.Frame):
             st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#f8f8f8", fg="#333333",
                               yscrollcommand=self.vsb.set, xscrollcommand=hsb.set)
             
-            # 修正: 選択時の色設定
             st_text.tag_configure("sel", background="#cce8ff", foreground="black")
             
             st_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -555,8 +550,8 @@ class LogViewerApp:
         if "pattern" in fields: tk.Label(hdr, text="正規表現", width=25, anchor="w").pack(side=tk.LEFT)
         if "search" in fields: tk.Label(hdr, text="検索文字列", width=25, anchor="w").pack(side=tk.LEFT)
         if "name" in fields: tk.Label(hdr, text="区間名", width=15, anchor="w").pack(side=tk.LEFT)
-        if "start" in fields: tk.Label(hdr, text="開始パターン", width=15, anchor="w").pack(side=tk.LEFT)
-        if "end" in fields: tk.Label(hdr, text="終了パターン", width=15, anchor="w").pack(side=tk.LEFT)
+        if "start" in fields: tk.Label(hdr, text="開始パターン(正規表現)", width=20, anchor="w").pack(side=tk.LEFT)
+        if "end" in fields: tk.Label(hdr, text="終了パターン(正規表現)", width=20, anchor="w").pack(side=tk.LEFT)
         
         if "color" in fields: tk.Label(hdr, text="色", width=10).pack(side=tk.LEFT, padx=15)
         if "replace" in fields: tk.Label(hdr, text="置換/説明", width=30).pack(side=tk.LEFT, padx=5)
@@ -585,18 +580,19 @@ class LogViewerApp:
 
                 if "pattern" in fields:
                     ep = tk.Entry(r, textvariable=item["pattern"], width=25); ep.pack(side=tk.LEFT, padx=2)
-                    tk.Button(r, text="▼", width=2, command=lambda b=None, e=ep: self.create_preset_menu(b, e)).pack(side=tk.LEFT)
+                    # Removed helper btn
+
                 if "search" in fields:
                     ep = tk.Entry(r, textvariable=item["search"], width=25); ep.pack(side=tk.LEFT, padx=2)
-                    tk.Button(r, text="▼", width=2, command=lambda b=None, e=ep: self.create_preset_menu(b, e)).pack(side=tk.LEFT)
+                    # Removed helper btn
                 
                 if "name" in fields: tk.Entry(r, textvariable=item["name"], width=15).pack(side=tk.LEFT, padx=2)
                 if "start" in fields:
-                    es = tk.Entry(r, textvariable=item["start"], width=15); es.pack(side=tk.LEFT, padx=2)
-                    tk.Button(r, text="▼", width=2, command=lambda b=None, e=es: self.create_preset_menu(b, e)).pack(side=tk.LEFT)
+                    es = tk.Entry(r, textvariable=item["start"], width=20); es.pack(side=tk.LEFT, padx=2)
+                    # Removed helper btn
                 if "end" in fields:
-                    ee = tk.Entry(r, textvariable=item["end"], width=15); ee.pack(side=tk.LEFT, padx=2)
-                    tk.Button(r, text="▼", width=2, command=lambda b=None, e=ee: self.create_preset_menu(b, e)).pack(side=tk.LEFT)
+                    ee = tk.Entry(r, textvariable=item["end"], width=20); ee.pack(side=tk.LEFT, padx=2)
+                    # Removed helper btn
                 
                 if "color" in fields:
                     tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
@@ -663,19 +659,66 @@ class LogViewerApp:
         p = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML", "*.html")])
         if not p: return
         try:
-            l, c = tab.text.get("1.0", "end-1c").splitlines(), tab.comment_text.get("1.0", "end-1c").splitlines()
-            colors = ["#ffffff"] * len(l)
+            l = tab.text.get("1.0", "end-1c").splitlines()
+            c = tab.comment_text.get("1.0", "end-1c").splitlines()
             
-            if tab.is_merged: srcs = tab.line_source_map
-            else: srcs = [os.path.basename(tab.file_path)] * len(l)
-
-            s_rules = []
+            srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
+            if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
+            
+            # --- Status Calculation (Same as Display Logic) ---
+            section_rules = []
             for s in self.sections_config:
-                if s["enabled"]:
-                    fp = s.get("file_pattern", ".*") or ".*"
-                    try: s_rules.append({"s": re.compile(s["start"], re.I), "e": re.compile(s["end"], re.I), "c": s["color"], "fp": re.compile(fp, re.I)})
+                if s.get("enabled", True):
+                    try: 
+                        fp = s.get("file_pattern", ".*") or ".*"
+                        section_rules.append({
+                            "start": re.compile(s["start"], re.I),
+                            "end": re.compile(s["end"], re.I),
+                            "name": s["name"],
+                            "color": s["color"],
+                            "file_pat_re": re.compile(fp, re.I)
+                        })
                     except: pass
+
+            active_states = {fn: None for fn in tab.source_file_names}
+            status_buffers = {fn: [] for fn in tab.source_file_names}
             
+            for i, line in enumerate(l):
+                line_src = srcs[i]
+                for fn in tab.source_file_names:
+                    rule_to_display = None
+                    display_text = ""
+                    
+                    if fn == line_src:
+                        if active_states[fn]:
+                            if active_states[fn]["end"].search(line):
+                                rule_to_display = active_states[fn]
+                                display_text = f"{rule_to_display['name']} (終了)"
+                                active_states[fn] = None 
+                            else:
+                                rule_to_display = active_states[fn]
+                                display_text = rule_to_display['name']
+                        if not rule_to_display and not active_states[fn]:
+                            for rule in section_rules:
+                                if rule["file_pat_re"].search(fn) and rule["start"].search(line):
+                                    rule_to_display = rule
+                                    display_text = f"{rule['name']} (開始)"
+                                    active_states[fn] = rule
+                                    if rule["end"].search(line):
+                                        display_text = f"{rule['name']} (開始/終了)"
+                                        active_states[fn] = None
+                                    break
+                    elif active_states[fn]:
+                        rule_to_display = active_states[fn]
+                        display_text = rule_to_display['name']
+                    
+                    if rule_to_display:
+                        status_buffers[fn].append((display_text, rule_to_display["color"]))
+                    else:
+                        status_buffers[fn].append(("", "#ffffff"))
+
+            # --- Keyword Color Calculation ---
+            colors = ["#ffffff"] * len(l)
             k_rules = []
             for it in self.keywords_config:
                 if it["enabled"]:
@@ -688,11 +731,31 @@ class LogViewerApp:
                         for j in range(i, min(i+ext+1, len(l))): colors[j] = col
                         break
 
+            # --- HTML Build ---
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
-            h.append('<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th></tr></thead><tbody>')
+            
+            # Header
+            header_row = '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th>'
+            for fn in tab.source_file_names:
+                header_row += f'<th>{html.escape(fn)}の区間</th>'
+            header_row += '</tr></thead><tbody>'
+            h.append(header_row)
+            
+            # Body
             for i, line in enumerate(l):
                 cm = c[i] if i < len(c) else ""
-                h.append(f'<tr style="background:{colors[i]}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td></tr>')
+                row_html = f'<tr style="background:{colors[i]}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
+                
+                # Status Columns
+                for fn in tab.source_file_names:
+                    txt, col = status_buffers[fn][i]
+                    # 背景色がある場合のみstyle属性付与
+                    bg_style = f' style="background:{col}"' if col != "#ffffff" else ""
+                    row_html += f'<td{bg_style}>{html.escape(txt)}</td>'
+                
+                row_html += '</tr>'
+                h.append(row_html)
+
             with open(p, "w", encoding="utf-8-sig") as f: f.write("\n".join(h) + "</tbody></table></body></html>")
             messagebox.showinfo("完了", "保存しました")
         except Exception as e: messagebox.showerror("Error", str(e))
