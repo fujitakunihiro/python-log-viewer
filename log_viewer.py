@@ -34,9 +34,9 @@ DEFAULT_CONFIG = {
         {"pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0}
     ],
     "sections": [
-        {"name": "初期化(Server)", "start": "SRV_INIT_START", "end": "SRV_INIT_DONE", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
-        {"name": "初期化(Client)", "start": "CLI_BOOT",       "end": "CLI_READY",     "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
-        {"name": "通信処理",       "start": "CONNECT",        "end": "DISCONNECT",    "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
+        {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
+        {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
+        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns": [],
     "analysis_rules": [
@@ -107,7 +107,6 @@ class LogTab(tk.Frame):
         self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg='#f0f0f0')
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         
-        # --- 時間差を表示するテキストカラムを追加 ---
         self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#f8f8f8", fg="#555555", yscrollcommand=self.vsb.set)
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
@@ -142,7 +141,6 @@ class LogTab(tk.Frame):
             hsb.config(command=st_text.xview)
             self.status_texts[fname] = st_text
             
-        # timediff_text もスクロール同期の対象に含める
         all_texts = [self.text, self.timediff_text, self.comment_text] + list(self.status_texts.values())
         
         def sync_yview(*args):
@@ -472,7 +470,7 @@ class LogViewerApp:
             self.analysis_rules_config = new_rules
             self.analysis_time_pattern = e_ts.get()
             
-            # フィルタ設定(キーワード)への自動追加ロジック
+            # フィルタ設定への自動追加ロジック
             existing_patterns = set(kw.get("pattern", "") for kw in self.keywords_config)
             
             for rule in new_rules:
@@ -766,7 +764,9 @@ class LogViewerApp:
                         
                     section_rules.append({
                         "start": re.compile(s["start"], re.I),
+                        "start_wait": s.get("start_wait", False),
                         "end": re.compile(end_pat, re.I),
+                        "end_wait": s.get("end_wait", False),
                         "name": s["name"],
                         "color": s["color"],
                         "file_pat_re": re.compile(fp, re.I),
@@ -791,46 +791,91 @@ class LogViewerApp:
         active_states = {fn: None for fn in tab.source_file_names}
         status_buffers = {fn: [] for fn in tab.source_file_names}
         
+        re_vsync = re.compile(VSYNC_REGEX, re.I)
+
         for i, line in enumerate(lines):
             line_src = srcs[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
+            is_vsync_line = (re_vsync.search(line) is not None) or is_virtual_line
 
             for fn in tab.source_file_names:
                 rule_to_display = None
                 display_text = ""
                 
-                if active_states[fn]:
-                    rule = active_states[fn]["rule"]
-                    start_idx = active_states[fn]["start_idx"]
-                    is_end_match = rule["end"].search(line)
+                state_info = active_states[fn]
+                
+                if state_info:
+                    rule = state_info["rule"]
+                    state = state_info["state"]
                     
-                    if is_end_match and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                        rule_to_display = rule
-                        display_text = f"{rule_to_display['name']} (終了)"
-                        
-                        ts_start = timestamps[start_idx]
-                        ts_end = timestamps[i]
-                        if ts_start is not None and ts_end is not None:
-                            diff_ms = (ts_end - ts_start) * 1000.0
-                            old_txt, col = status_buffers[fn][start_idx]
-                            status_buffers[fn][start_idx] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
+                    if state == "START_PENDING":
+                        if is_vsync_line:
+                            state_info["state"] = "ACTIVE"
+                            state_info["start_idx"] = i
+                            rule_to_display = rule
+                            display_text = f"{rule['name']} (開始)"
+                    
+                    elif state == "ACTIVE":
+                        is_end_match = rule["end"].search(line)
+                        if is_end_match and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
+                            if rule["end_wait"]:
+                                state_info["state"] = "END_PENDING"
+                                rule_to_display = rule
+                                display_text = rule['name']
+                            else:
+                                rule_to_display = rule
+                                display_text = f"{rule['name']} (終了)"
+                                
+                                ts_start = timestamps[state_info["start_idx"]]
+                                ts_end = timestamps[i]
+                                if ts_start is not None and ts_end is not None:
+                                    diff_ms = (ts_end - ts_start) * 1000.0
+                                    old_txt, col = status_buffers[fn][state_info["start_idx"]]
+                                    status_buffers[fn][state_info["start_idx"]] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
+                                    
+                                active_states[fn] = None
+                        else:
+                            rule_to_display = rule
+                            display_text = rule['name']
                             
-                        active_states[fn] = None 
-                    else:
-                        rule_to_display = rule
-                        display_text = rule_to_display['name']
-                        
-                if not rule_to_display and not active_states[fn]:
+                    elif state == "END_PENDING":
+                        if is_vsync_line:
+                            ts_start = timestamps[state_info["start_idx"]]
+                            ts_end = timestamps[i]
+                            if ts_start is not None and ts_end is not None:
+                                diff_ms = (ts_end - ts_start) * 1000.0
+                                old_txt, col = status_buffers[fn][state_info["start_idx"]]
+                                status_buffers[fn][state_info["start_idx"]] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
+                                
+                            active_states[fn] = None
+                        else:
+                            rule_to_display = rule
+                            display_text = rule['name']
+
+                if not rule_to_display and active_states[fn] is None:
                     if fn == line_src: 
                         for rule in section_rules:
                             if rule["file_pat_re"].search(fn) and rule["start"].search(line):
-                                rule_to_display = rule
-                                display_text = f"{rule['name']} (開始)"
-                                active_states[fn] = {"rule": rule, "start_idx": i}
-                                
-                                if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                                    display_text = f"{rule['name']} (開始/終了) [0.0ms]"
-                                    active_states[fn] = None
+                                if rule["start_wait"]:
+                                    active_states[fn] = {
+                                        "state": "START_PENDING",
+                                        "rule": rule,
+                                        "start_idx": -1
+                                    }
+                                else:
+                                    active_states[fn] = {
+                                        "state": "ACTIVE",
+                                        "rule": rule,
+                                        "start_idx": i
+                                    }
+                                    rule_to_display = rule
+                                    display_text = f"{rule['name']} (開始)"
+                                    
+                                    if not rule["end_wait"] and rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
+                                        display_text = f"{rule['name']} (開始/終了) [0.0ms]"
+                                        active_states[fn] = None
+                                    elif rule["end_wait"] and rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
+                                        active_states[fn]["state"] = "END_PENDING"
                                 break
 
                 if rule_to_display: 
@@ -861,7 +906,6 @@ class LogViewerApp:
                             line_attrs[j]["priority"] = 20
                     break
 
-        re_vsync = re.compile(VSYNC_REGEX, re.I)
         visible_mapping = {}
         is_visible = [True] * len(lines)
         display_line_count = 1
@@ -1046,7 +1090,7 @@ class LogViewerApp:
         self._edit_dlg("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。", "replace_patterns", ["search","replace"])
         
     def edit_sections_dialog(self): 
-        self._edit_dlg("区間設定の編集 ※ファイル毎に開始～終了パターンを定義して色分けします。", "sections", ["file_pattern", "name", "start", "end", "color"])
+        self._edit_dlg("区間設定の編集 ※ファイル毎に開始～終了パターンを定義して色分けします。", "sections", ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "color"])
 
     def _edit_dlg(self, title, key, fields):
         ref_attr = f"{key}_dlg_ref"
@@ -1074,8 +1118,11 @@ class LogViewerApp:
         if "pattern" in fields: tk.Label(hdr, text="正規表現", width=25, anchor="w").pack(side=tk.LEFT)
         if "search" in fields: tk.Label(hdr, text="検索文字列", width=25, anchor="w").pack(side=tk.LEFT)
         if "name" in fields: tk.Label(hdr, text="区間名", width=15, anchor="w").pack(side=tk.LEFT)
-        if "start" in fields: tk.Label(hdr, text="開始パターン(正規表現)", width=20, anchor="w").pack(side=tk.LEFT)
-        if "end" in fields: tk.Label(hdr, text="終了パターン(正規表現)", width=20, anchor="w").pack(side=tk.LEFT)
+        
+        if "start" in fields: tk.Label(hdr, text="開始パターン", width=15, anchor="w").pack(side=tk.LEFT)
+        if "start_wait" in fields: tk.Label(hdr, text="V待", width=4).pack(side=tk.LEFT)
+        if "end" in fields: tk.Label(hdr, text="終了パターン", width=15, anchor="w").pack(side=tk.LEFT)
+        if "end_wait" in fields: tk.Label(hdr, text="V待", width=4).pack(side=tk.LEFT)
         
         if "color" in fields: tk.Label(hdr, text="色", width=10).pack(side=tk.LEFT, padx=15)
         if "replace" in fields: tk.Label(hdr, text="置換/説明", width=30).pack(side=tk.LEFT, padx=5)
@@ -1111,12 +1158,18 @@ class LogViewerApp:
                     tk.Entry(r, textvariable=item["search"], width=25).pack(side=tk.LEFT, padx=2)
                 if "name" in fields:
                     tk.Entry(r, textvariable=item["name"], width=15).pack(side=tk.LEFT, padx=2)
+                    
                 if "start" in fields:
-                    tk.Entry(r, textvariable=item["start"], width=20).pack(side=tk.LEFT, padx=2)
+                    tk.Entry(r, textvariable=item["start"], width=15).pack(side=tk.LEFT, padx=2)
+                if "start_wait" in fields:
+                    tk.Checkbutton(r, variable=item["start_wait"]).pack(side=tk.LEFT, padx=2)
+                    
                 if "end" in fields:
-                    tk.Entry(r, textvariable=item["end"], width=20).pack(side=tk.LEFT, padx=2)
+                    tk.Entry(r, textvariable=item["end"], width=15).pack(side=tk.LEFT, padx=2)
                     if key == "sections":
-                         tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                         tk.Button(r, text="<V>", width=3, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                if "end_wait" in fields:
+                    tk.Checkbutton(r, variable=item["end_wait"]).pack(side=tk.LEFT, padx=2)
                 
                 if "color" in fields:
                     tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
@@ -1131,7 +1184,11 @@ class LogViewerApp:
 
         def add(data=None):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
-            for f in fields: item[f] = tk.StringVar(value=str(data.get(f, "0" if f=="extra_lines" else "")) if data else ("0" if f=="extra_lines" else ""))
+            for f in fields:
+                if f in ["start_wait", "end_wait"]:
+                    item[f] = tk.BooleanVar(value=data.get(f, False) if data else False)
+                else:
+                    item[f] = tk.StringVar(value=str(data.get(f, "0" if f=="extra_lines" else "")) if data else ("0" if f=="extra_lines" else ""))
             entries.append(item)
             refresh()
             
@@ -1243,7 +1300,6 @@ class LogViewerApp:
                         is_end_match = active_states[fn]["end"].search(line)
                         if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]): 
                             rule_to_display = active_states[fn]
-                            # 時間差は既にGUI出力時に計算されて上書きされているのでそのまま使う
                             display_text = f"{rule_to_display['name']} (終了)"
                             active_states[fn] = None 
                         else: 
@@ -1261,7 +1317,6 @@ class LogViewerApp:
                                     active_states[fn] = None
                                 break
                     
-                    # 既にGUI側で `[xx.xms]` と書き込まれた文字列を取得する
                     gui_txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
                     status_buffers[fn].append((gui_txt, rule_to_display["color"] if rule_to_display else "#ffffff"))
                     
