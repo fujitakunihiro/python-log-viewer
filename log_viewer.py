@@ -517,12 +517,17 @@ class LogViewerApp:
                             diff_ms = (ev['ts'] - trig['ts']) * 1000.0 if (ev['ts'] > 0 and trig['ts'] > 0) else 0.0
                             prefix = f"[{rule['name']}]" if rule['name'] else ""
                             ts_str = f" (+{diff_ms:.1f}ms)" if diff_ms >= 0 else ""
-                            msg_cmd = f"{prefix}--> 指示: L{ev['line']+1}{ts_str}"
+                            
+                            # 指示行には「--> 適用: L(Apply)」
+                            msg_cmd = f"{prefix}--> 適用: [[REF:{ev['line']}]]{ts_str}"
                             old_c = tab.analysis_comments.get(trig['line'], "")
                             tab.analysis_comments[trig['line']] = (old_c + " " + msg_cmd).strip()
-                            msg_vsync = f"{prefix}<-- 適用: L{trig['line']+1}"
+                            
+                            # 適用行には「<-- 指示: L(Trigger)」
+                            msg_vsync = f"{prefix}<-- 指示: [[REF:{trig['line']}]]"
                             old_v = tab.analysis_comments.get(ev['line'], "")
                             tab.analysis_comments[ev['line']] = (old_v + " " + msg_vsync).strip()
+                            
                             count += 1
                         pending_triggers = []
 
@@ -736,7 +741,6 @@ class LogViewerApp:
                 
                 if active_states[fn]:
                     is_end_match = active_states[fn]["end"].search(line)
-                    # 終了条件にマッチし、かつ「対象ファイルのログ」または「V-Sync終了条件」または「仮想行」なら終了
                     if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]):
                         rule_to_display = active_states[fn]
                         display_text = f"{rule_to_display['name']} (終了)"
@@ -746,14 +750,13 @@ class LogViewerApp:
                         display_text = rule_to_display['name']
                         
                 if not rule_to_display and not active_states[fn]:
-                    if fn == line_src: # 区間の開始は必ず自分自身のファイルのログで行う
+                    if fn == line_src: 
                         for rule in section_rules:
                             if rule["file_pat_re"].search(fn) and rule["start"].search(line):
                                 rule_to_display = rule
                                 display_text = f"{rule['name']} (開始)"
                                 active_states[fn] = rule
                                 
-                                # 1行で開始と終了が同時に成立する場合
                                 if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
                                     display_text = f"{rule['name']} (開始/終了)"
                                     active_states[fn] = None
@@ -787,39 +790,68 @@ class LogViewerApp:
                             line_attrs[j]["priority"] = 20
                     break
 
+        # 1st pass: 表示対象の判定と表示行番号（表示上の連番）のマッピング
+        re_vsync = re.compile(VSYNC_REGEX, re.I)
+        visible_mapping = {}
+        is_visible = [True] * len(lines)
+        display_line_count = 1
+        
+        for i in range(len(lines)):
+            if not self.show_vsync_lines and VSYNC_MARKER in lines[i]:
+                is_visible[i] = False
+            else:
+                attr = line_attrs[i]
+                if self.use_keyword_filter:
+                    if attr["priority"] == 0: 
+                        is_visible[i] = False
+                    elif re_vsync.search(lines[i]):
+                        is_in_section = any(status_buffers[fn][i][0] != "" for fn in tab.source_file_names)
+                        if not is_in_section:
+                            is_visible[i] = False
+                            
+            if is_visible[i]:
+                visible_mapping[i] = display_line_count
+                display_line_count += 1
+
+        # 2nd pass: 表示リストの構築
         flines, fcmts = [], []
         main_tags = []
         final_st_lines = {fn: [] for fn in tab.source_file_names}
         final_st_tags = {fn: [] for fn in tab.source_file_names}
         
-        re_vsync = re.compile(VSYNC_REGEX, re.I)
-        
         line_count = 0
         for i in range(len(lines)):
-            if not self.show_vsync_lines and VSYNC_MARKER in lines[i]: continue
-            
-            attr = line_attrs[i]
-            if self.use_keyword_filter:
-                if attr["priority"] == 0: 
-                    continue
-                # 不要なV-SYNCの非表示化
-                if re_vsync.search(lines[i]):
-                    is_in_section = any(status_buffers[fn][i][0] != "" for fn in tab.source_file_names)
-                    if not is_in_section:
-                        continue
+            if not is_visible[i]:
+                continue
             
             line_count += 1
             flines.append(lines[i])
             s_name = f"[{srcs[i]}] " if (tab.is_merged and srcs[i]) else ""
             
-            base_cmt = f"{s_name}{attr['comment']}"
+            base_cmt = f"{s_name}{line_attrs[i]['comment']}"
             ana_cmt = tab.analysis_comments.get(i, "")
-            if ana_cmt: base_cmt = (base_cmt + " " + ana_cmt).strip()
+            
+            if ana_cmt:
+                # プレースホルダー [[REF:idx]] を表示上の行番号に変換する
+                def replacer(match):
+                    target_idx = int(match.group(1))
+                    disp_num = visible_mapping.get(target_idx)
+                    if disp_num is not None:
+                        return f"L{disp_num}"
+                    else:
+                        return f"L{target_idx+1}(非表示)"
+                        
+                ana_cmt = re.sub(r"\[\[REF:(\d+)\]\]", replacer, ana_cmt)
+                
+                if base_cmt: 
+                    base_cmt += " " + ana_cmt
+                else: 
+                    base_cmt = ana_cmt
             
             fcmts.append(base_cmt)
             
-            if attr["color"] != "#ffffff":
-                main_tags.append((line_count, attr["color"]))
+            if line_attrs[i]["color"] != "#ffffff":
+                main_tags.append((line_count, line_attrs[i]["color"]))
             
             for fn in tab.source_file_names:
                 txt, col = status_buffers[fn][i]
@@ -919,6 +951,12 @@ class LogViewerApp:
             self.status_var.set(f"検索: '{self.last_search_keyword}' は見つかりませんでした。")
 
     # --- UI Helpers ---
+    def create_preset_menu(self, parent_btn, entry_widget):
+        menu = tk.Menu(self.root, tearoff=0)
+        presets = [("整数",r"\d+"),("16進",r"0x[0-9A-Fa-f]+"),("IP",r"\d{1,3}(\.\d{1,3}){3}"),("[]内",r"\[.*?\]"),("Key=Val",r"\w+=\S+")]
+        for l, r in presets: menu.add_command(label=l, command=lambda t=r: entry_widget.insert(tk.INSERT, t))
+        menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
+
     def edit_keywords_dialog(self): 
         self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords", ["pattern","color","comment","extra_lines"])
         
@@ -997,9 +1035,11 @@ class LogViewerApp:
                     tk.Entry(r, textvariable=item["end"], width=20).pack(side=tk.LEFT, padx=2)
                     if key == "sections":
                          tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                
                 if "color" in fields:
                     tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
                     tk.Button(r, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get())).pack(side=tk.LEFT)
+                
                 if "replace" in fields:
                     tk.Entry(r, textvariable=item["replace"], width=30).pack(side=tk.LEFT, padx=5)
                 if "comment" in fields:
@@ -1082,82 +1122,33 @@ class LogViewerApp:
         try:
             l = tab.text.get("1.0", "end-1c").splitlines()
             c = tab.comment_text.get("1.0", "end-1c").splitlines()
-            srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
-            if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
             
-            section_rules = []
-            for s in self.sections_config:
-                if s.get("enabled", True):
-                    fp = s.get("file_pattern", ".*") or ".*"
-                    end_pat = s["end"]
-                    is_vsync_end = False
-                    if end_pat == VSYNC_TAG: 
-                        end_pat = VSYNC_REGEX
-                        is_vsync_end = True
-                    section_rules.append({
-                        "start": re.compile(s["start"], re.I),
-                        "end": re.compile(end_pat, re.I),
-                        "name": s["name"],
-                        "color": s["color"],
-                        "file_pat_re": re.compile(fp, re.I),
-                        "is_vsync_end": is_vsync_end
-                    })
-                    
-            active_states = {fn: None for fn in tab.source_file_names}
-            status_buffers = {fn: [] for fn in tab.source_file_names}
-            
-            for i, line in enumerate(l):
-                line_src = srcs[i]
-                is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-                for fn in tab.source_file_names:
-                    rule_to_display = None
-                    display_text = ""
-                    
-                    if active_states[fn]:
-                        is_end_match = active_states[fn]["end"].search(line)
-                        if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]): 
-                            rule_to_display = active_states[fn]
-                            display_text = f"{rule_to_display['name']} (終了)"
-                            active_states[fn] = None 
-                        else: 
-                            rule_to_display = active_states[fn]
-                            display_text = rule_to_display['name']
-                            
-                    if not rule_to_display and not active_states[fn]:
-                        if fn == line_src:
-                            for rule in section_rules:
-                                if rule["file_pat_re"].search(fn) and rule["start"].search(line):
-                                    rule_to_display = rule
-                                    display_text = f"{rule['name']} (開始)"
-                                    active_states[fn] = rule
-                                    if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]): 
-                                        display_text = f"{rule['name']} (開始/終了)"
-                                        active_states[fn] = None
-                                    break
-                    status_buffers[fn].append((display_text, rule_to_display["color"] if rule_to_display else "#ffffff"))
-                    
-            colors = ["#ffffff"] * len(l)
-            k_rules = []
-            for it in self.keywords_config:
-                if it["enabled"]: k_rules.append((re.compile(it["pattern"], re.I), it["color"], int(it["extra_lines"])))
-            for i in range(len(l)):
-                for pat, col, ext in k_rules:
-                    if pat.search(l[i]):
-                        for j in range(i, min(i+ext+1, len(l))): colors[j] = col
-                        break
-                        
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
             header_row = '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th>'
             for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
             h.append(header_row + '</tr></thead><tbody>')
             
+            # Textウィジェットの背景色タグを取得してHTMLに反映させる処理
             for i, line in enumerate(l):
-                if not self.show_vsync_lines and VSYNC_MARKER in line: continue
+                bg_color = "transparent"
+                tags = tab.text.tag_names(f"{i+1}.0")
+                for tag in tags:
+                    if tag.startswith("kw_"):
+                        bg_color = f"#{tag[3:]}"
+                        break
+                        
                 cm = c[i] if i < len(c) else ""
-                row_html = f'<tr style="background:{colors[i]}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
+                row_html = f'<tr style="background:{bg_color}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
+                
                 for fn in tab.source_file_names:
-                    txt, col = status_buffers[fn][i]
-                    row_html += f'<td style="background:{col if col != "#ffffff" else "transparent"}">{html.escape(txt)}</td>'
+                    txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
+                    st_bg = "transparent"
+                    st_tags = tab.status_texts[fn].tag_names(f"{i+1}.0")
+                    for tag in st_tags:
+                        if tag.startswith("st_"):
+                            st_bg = f"#{tag[3:]}"
+                            break
+                    row_html += f'<td style="background:{st_bg}">{html.escape(txt)}</td>'
                 h.append(row_html + '</tr>')
                 
             with open(p, "w", encoding="utf-8-sig") as f: f.write("\n".join(h) + "</tbody></table></body></html>")
