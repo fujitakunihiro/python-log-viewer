@@ -34,9 +34,9 @@ DEFAULT_CONFIG = {
         {"pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0}
     ],
     "sections": [
-        {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
-        {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
-        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
+        {"name": "初期化(Server)", "start": "SRV_INIT_START", "end": "SRV_INIT_DONE", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
+        {"name": "初期化(Client)", "start": "CLI_BOOT",       "end": "CLI_READY",     "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
+        {"name": "通信処理",       "start": "CONNECT",        "end": "DISCONNECT",    "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns": [],
     "analysis_rules": [
@@ -762,12 +762,10 @@ class LogViewerApp:
                         end_pat = VSYNC_REGEX
                         is_vsync_end = True
                         
-                    end_re = re.compile(end_pat, re.I) if end_pat else None
-                    
                     section_rules.append({
                         "start": re.compile(s["start"], re.I),
                         "start_wait": s.get("start_wait", False),
-                        "end": end_re,
+                        "end": re.compile(end_pat, re.I),
                         "end_str": end_pat,
                         "end_wait": s.get("end_wait", False),
                         "name": s["name"],
@@ -933,6 +931,50 @@ class LogViewerApp:
             if is_visible[i]:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
+        
+        # --- Consecutive V-Sync Collapse Logic (Only if Filter ON) ---
+        if self.use_keyword_filter:
+            visible_indices = [idx for idx, vis in enumerate(is_visible) if vis]
+            v_ptr = 0
+            while v_ptr < len(visible_indices):
+                idx = visible_indices[v_ptr]
+                
+                # Check if current visible line is a V-Sync
+                # (Use the same logic: marker string or regex match)
+                is_curr_vsync = (VSYNC_MARKER in lines[idx]) or (re_vsync.search(lines[idx]) is not None)
+                
+                if is_curr_vsync:
+                    block_indices = [idx]
+                    next_ptr = v_ptr + 1
+                    
+                    while next_ptr < len(visible_indices):
+                        next_idx = visible_indices[next_ptr]
+                        is_next_vsync = (VSYNC_MARKER in lines[next_idx]) or (re_vsync.search(lines[next_idx]) is not None)
+                        
+                        if is_next_vsync:
+                            block_indices.append(next_idx)
+                            next_ptr += 1
+                        else:
+                            break
+                    
+                    # If block has 3 or more V-Syncs, hide the middle ones
+                    if len(block_indices) >= 3:
+                        for hide_idx in block_indices[1:-1]:
+                            is_visible[hide_idx] = False
+                            # Also remove from visible mapping (optional, but consistent)
+                            # Re-map later is safer but expensive. Just marking False is enough for rendering loop.
+
+                    v_ptr = next_ptr
+                else:
+                    v_ptr += 1
+            
+            # Re-calculate line numbers after collapsing
+            visible_mapping = {}
+            display_line_count = 1
+            for i in range(len(lines)):
+                if is_visible[i]:
+                    visible_mapping[i] = display_line_count
+                    display_line_count += 1
 
         flines, fcmts, ftimediffs = [], [], []
         main_tags = []
@@ -1275,68 +1317,33 @@ class LogViewerApp:
             srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
             if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
             
-            section_rules = []
-            for s in self.sections_config:
-                if s.get("enabled", True):
-                    fp = s.get("file_pattern", ".*") or ".*"
-                    end_pat = s["end"]
-                    is_vsync_end = False
-                    if end_pat == VSYNC_TAG: 
-                        end_pat = VSYNC_REGEX
-                        is_vsync_end = True
-                    section_rules.append({
-                        "start": re.compile(s["start"], re.I),
-                        "end": re.compile(end_pat, re.I),
-                        "name": s["name"],
-                        "color": s["color"],
-                        "file_pat_re": re.compile(fp, re.I),
-                        "is_vsync_end": is_vsync_end
-                    })
-                    
-            active_states = {fn: None for fn in tab.source_file_names}
+            # --- Status Re-Calculation is NOT needed here because we use GUI text content directly ---
+            # To ensure WYSIWYG, we scrape what's on the screen (including background colors).
+            
+            # Prepare status buffers from GUI content
             status_buffers = {fn: [] for fn in tab.source_file_names}
             
-            for i, line in enumerate(l):
-                line_src = srcs[i]
-                is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-                for fn in tab.source_file_names:
-                    rule_to_display = None
-                    display_text = ""
-                    
-                    if active_states[fn]:
-                        is_end_match = active_states[fn]["end"].search(line)
-                        if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]): 
-                            rule_to_display = active_states[fn]
-                            display_text = f"{rule_to_display['name']} (終了)"
-                            active_states[fn] = None 
-                        else: 
-                            rule_to_display = active_states[fn]
-                            display_text = rule_to_display['name']
-                            
-                    if not rule_to_display and not active_states[fn] and fn == line_src:
-                        for rule in section_rules:
-                            if rule["file_pat_re"].search(fn) and rule["start"].search(line):
-                                rule_to_display = rule
-                                display_text = f"{rule['name']} (開始)"
-                                active_states[fn] = rule
-                                if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]): 
-                                    display_text = f"{rule['name']} (開始/終了)"
-                                    active_states[fn] = None
-                                break
-                    
-                    gui_txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
-                    status_buffers[fn].append((gui_txt, rule_to_display["color"] if rule_to_display else "#ffffff"))
-                    
-            colors = ["#ffffff"] * len(l)
-            k_rules = []
-            for it in self.keywords_config:
-                if it["enabled"]: k_rules.append((re.compile(it["pattern"], re.I), it["color"], int(it["extra_lines"])))
-            for i in range(len(l)):
-                for pat, col, ext in k_rules:
-                    if pat.search(l[i]):
-                        for j in range(i, min(i+ext+1, len(l))): colors[j] = col
-                        break
-                        
+            # Re-calculate visibility map (same logic as display)
+            # This is needed because 'l' contains all lines, but we might want to skip hidden ones
+            re_vsync = re.compile(VSYNC_REGEX, re.I)
+            is_visible = [True] * len(l)
+            
+            # Determine visibility based on current keyword/vsync filter state
+            # Note: Ideally we should use the same `is_visible` array from `apply_display_update` 
+            # but that's local variable. We will reconstruct it simply or assume `l` (get 1.0 to end)
+            # is what the user sees? 
+            # `text.get("1.0", "end")` returns ALL text, even if tagged invisible?
+            # Actually Tkinter Text get returns everything.
+            # To export EXACTLY what is seen, we must respect the filters.
+            
+            # Re-run filter logic to determine visibility for export
+            # (Simplified version of apply_display_update logic for visibility)
+            # We can also check if the line has the 'elide' tag if we implemented hiding that way,
+            # but currently we re-insert text. So `l` IS what is in the buffer.
+            # Wait, `apply_display_update` does `tab.text.delete("1.0", tk.END)` then insert.
+            # So `l` contains ONLY visible lines!
+            # Therefore, we don't need to re-filter. We just iterate `l`.
+            
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
             header_row = '<thead><tr><th>Line</th><th>Time Diff</th><th>Log Content</th><th>Comment</th>'
             for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
@@ -1344,6 +1351,8 @@ class LogViewerApp:
             
             for i, line in enumerate(l):
                 bg_color = "transparent"
+                # To get tags, we need to map `i` (index in `l`) to line number in widget
+                # Since `l` corresponds 1:1 to widget lines:
                 tags = tab.text.tag_names(f"{i+1}.0")
                 for tag in tags:
                     if tag.startswith("kw_"):
@@ -1355,8 +1364,15 @@ class LogViewerApp:
                 row_html = f'<tr style="background:{bg_color}"><td>{i+1}</td><td>{html.escape(diff_str)}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
                 
                 for fn in tab.source_file_names:
-                    txt, col = status_buffers[fn][i]
-                    row_html += f'<td style="background:{col if col != "#ffffff" else "transparent"}">{html.escape(txt)}</td>'
+                    # Get text and color from status widgets
+                    txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
+                    st_bg = "transparent"
+                    st_tags = tab.status_texts[fn].tag_names(f"{i+1}.0")
+                    for tag in st_tags:
+                        if tag.startswith("st_"):
+                            st_bg = f"#{tag[3:]}"
+                            break
+                    row_html += f'<td style="background:{st_bg}">{html.escape(txt)}</td>'
                 h.append(row_html + '</tr>')
                 
             with open(p, "w", encoding="utf-8-sig") as f: f.write("\n".join(h) + "</tbody></table></body></html>")
