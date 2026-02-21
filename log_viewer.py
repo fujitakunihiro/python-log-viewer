@@ -6,6 +6,7 @@ import sys
 import re
 import html
 import tkinter as tk
+from datetime import datetime, timedelta
 from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 from typing import Dict, List, Tuple, Optional, Any
 
@@ -23,7 +24,9 @@ DEFAULT_CONFIG = {
     "keywords": [
         {"pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
         {"pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
-        {"pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0}
+        {"pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0},
+        # 仮想V-Sync用のデフォルト色設定
+        {"pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0}
     ],
     "sections": [
         {"name": "初期化(Server)", "start": "SRV_INIT_START", "end": "SRV_INIT_DONE", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
@@ -192,6 +195,8 @@ class LogViewerApp:
         emenu.add_command(label="検索...", command=self.open_find_dialog, accelerator="Ctrl+F")
         emenu.add_command(label="次を検索", command=self.find_next, accelerator="F3")
         emenu.add_command(label="前を検索", command=self.find_prev, accelerator="Shift+F3")
+        emenu.add_separator()
+        emenu.add_command(label="V周期(仮想)の挿入...", command=self.open_vsync_dialog)
         menubar.add_cascade(label="編集", menu=emenu)
 
         cmenu = tk.Menu(menubar, tearoff=0)
@@ -308,6 +313,172 @@ class LogViewerApp:
         m_tab = LogTab(self.notebook, self, "Merged", "\n".join(final_lines), source_files_list=unique_srcs, is_merged=True)
         m_tab.line_source_map = final_src
         self.notebook.add(m_tab, text="[マージ結果]"); self.notebook.select(m_tab); self.apply_display_update(m_tab)
+
+    # --- Virtual V-Sync Feature ---
+    def open_vsync_dialog(self):
+        tab = self.get_current_tab()
+        if not tab: return
+        
+        dlg = tk.Toplevel(self.root)
+        dlg.title("仮想V周期の挿入")
+        dlg.geometry("450x300")
+        
+        tk.Label(dlg, text="ログ内からV周期の基準となるイベントを指定してください。", anchor="w").pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Label(dlg, text="開始イベント(正規表現):").pack(anchor="w", padx=10)
+        e_pattern = tk.Entry(dlg, width=50)
+        e_pattern.pack(padx=10, pady=2)
+        e_pattern.insert(0, r"V_START|V-Sync")
+
+        tk.Label(dlg, text="タイムスタンプ抽出(正規表現):").pack(anchor="w", padx=10, pady=(10,0))
+        tk.Label(dlg, text="(行頭の時刻をキャプチャするグループ()を1つ含めてください)", font=("",8)).pack(anchor="w", padx=10)
+        e_ts_pat = tk.Entry(dlg, width=50)
+        e_ts_pat.pack(padx=10, pady=2)
+        e_ts_pat.insert(0, r"^(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?)")
+
+        frame_mode = tk.LabelFrame(dlg, text="間隔設定")
+        frame_mode.pack(fill=tk.X, padx=10, pady=10)
+        
+        mode_var = tk.IntVar(value=0)
+        rb_auto = tk.Radiobutton(frame_mode, text="自動計算 (最初の2つのイベント間隔を使用)", variable=mode_var, value=0)
+        rb_auto.pack(anchor="w", padx=5, pady=2)
+        
+        f_manual = tk.Frame(frame_mode)
+        f_manual.pack(anchor="w", padx=5, pady=2)
+        rb_manual = tk.Radiobutton(f_manual, text="手動指定 (ms):", variable=mode_var, value=1)
+        rb_manual.pack(side=tk.LEFT)
+        e_ms = tk.Entry(f_manual, width=10)
+        e_ms.pack(side=tk.LEFT, padx=5)
+        e_ms.insert(0, "16.666")
+
+        def run():
+            pat = e_pattern.get()
+            ts_pat = e_ts_pat.get()
+            try:
+                ms = float(e_ms.get()) if mode_var.get() == 1 else None
+            except ValueError:
+                messagebox.showerror("エラー", "ミリ秒は数値を入力してください")
+                return
+            
+            self._generate_virtual_vsync_tab(tab, pat, ts_pat, ms)
+            dlg.destroy()
+
+        tk.Button(dlg, text="実行", command=run, bg="#ddddff", width=15).pack(pady=10)
+
+    def _parse_time_seconds(self, ts_str: str) -> Optional[float]:
+        """HH:MM:SS.mmm または 秒数(float) を秒(float)に変換"""
+        try:
+            # HH:MM:SS.mmm format
+            if ":" in ts_str:
+                parts = ts_str.split(":")
+                h = int(parts[0])
+                m = int(parts[1])
+                s = float(parts[2])
+                return h * 3600 + m * 60 + s
+            else:
+                return float(ts_str)
+        except:
+            return None
+
+    def _generate_virtual_vsync_tab(self, source_tab: LogTab, event_pattern: str, ts_pattern: str, manual_ms: Optional[float]):
+        lines = source_tab.original_content.splitlines()
+        re_event = re.compile(event_pattern, re.I)
+        re_ts = re.compile(ts_pattern)
+
+        # 1. 基準イベントを検索し、時刻を取得
+        events = [] # (line_index, time_sec)
+        
+        for i, line in enumerate(lines):
+            if re_event.search(line):
+                m = re_ts.search(line)
+                if m:
+                    t = self._parse_time_seconds(m.group(1))
+                    if t is not None:
+                        events.append(t)
+                        # 自動計算用に2つあれば十分だが、最初のイベント特定のため全て走査しても良い
+                        if manual_ms is None and len(events) >= 2:
+                            break 
+        
+        if not events:
+            messagebox.showwarning("警告", "指定されたパターンに一致する行、または有効なタイムスタンプが見つかりませんでした。")
+            return
+
+        start_time = events[0]
+        interval_sec = 0.0333 # default 30fps fallback
+
+        if manual_ms is not None:
+            interval_sec = manual_ms / 1000.0
+        elif len(events) >= 2:
+            interval_sec = events[1] - events[0]
+            if interval_sec <= 0:
+                messagebox.showwarning("警告", "イベント間の時間が不正(0以下)です。手動設定を試してください。")
+                return
+            msg = f"検出された間隔: {interval_sec*1000:.3f} ms\nこの間隔で仮想V-Syncを挿入しますか？"
+            if not messagebox.askyesno("確認", msg):
+                return
+        else:
+            # イベントが1つしかない場合
+            res = simpledialog.askfloat("入力", "イベントが1つしか見つかりませんでした。\n間隔(ms)を入力してください:", initialvalue=16.666)
+            if res is None: return
+            interval_sec = res / 1000.0
+
+        # 2. ログを再構築して挿入
+        new_lines = []
+        new_src_map = []
+        
+        src_map_orig = source_tab.line_source_map if source_tab.is_merged else source_tab.source_file_names * len(lines)
+        if len(src_map_orig) < len(lines): src_map_orig.extend([""] * (len(lines) - len(src_map_orig)))
+
+        # 基準時刻から開始
+        next_virtual_ts = start_time + interval_sec
+        
+        # タイムスタンプフォーマット用 (単純に挿入行を作るため)
+        # 元のタイムスタンプの桁数などに合わせるのは複雑なため、HH:MM:SS.mmm形式で生成する
+        def format_sec(s):
+            h = int(s // 3600)
+            m = int((s % 3600) // 60)
+            sec = s % 60
+            return f"{h:02d}:{m:02d}:{sec:06.3f}"
+
+        current_time_parsed = start_time # 進行状況追跡
+
+        for i, line in enumerate(lines):
+            # 現在行の時刻解析
+            m = re_ts.search(line)
+            line_ts = None
+            if m:
+                line_ts = self._parse_time_seconds(m.group(1))
+
+            # タイムスタンプがあり、かつ基準時刻より後であれば挿入判定を行う
+            if line_ts is not None and line_ts > start_time:
+                # 次の仮想V-Sync時刻が、現在行の時刻を追い越すまで挿入
+                # (例: next=100, line=105 -> 挿入. next=101, line=105 -> 挿入...)
+                # ただし、時刻が飛躍した場合(日付またぎ等)の無限ループ防止のリミットを設ける
+                insertion_count = 0
+                while next_virtual_ts < line_ts and insertion_count < 100:
+                    v_line = f"{format_sec(next_virtual_ts)} --- [VIRTUAL V-SYNC] ---"
+                    new_lines.append(v_line)
+                    new_src_map.append("(Virtual)")
+                    
+                    next_virtual_ts += interval_sec
+                    insertion_count += 1
+                
+                # もし100行以上飛んでしまった場合は、基準をリセット（時刻飛び対策）
+                if insertion_count >= 100:
+                    next_virtual_ts = line_ts + interval_sec
+
+            new_lines.append(line)
+            new_src_map.append(src_map_orig[i])
+
+        # 3. 新しいタブを作成
+        res_content = "\n".join(new_lines)
+        v_tab = LogTab(self.notebook, self, "Virtual V-Sync", res_content, source_files_list=source_tab.source_file_names, is_merged=True)
+        v_tab.line_source_map = new_src_map
+        self.notebook.add(v_tab, text="[V-Sync View]")
+        self.notebook.select(v_tab)
+        self.apply_display_update(v_tab)
+        self.status_var.set(f"仮想V-Sync挿入完了 (間隔: {interval_sec*1000:.3f}ms)")
+
 
     # --- Filter & Display ---
     def toggle_filter(self):
