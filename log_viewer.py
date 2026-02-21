@@ -556,11 +556,11 @@ class LogViewerApp:
                             prefix = f"[{rule['name']}]" if rule['name'] else ""
                             ts_str = f" (+{diff_ms:.1f}ms)" if diff_ms >= 0 else ""
                             
-                            msg_cmd = f"{prefix}--> 適用: [[REF:{ev['line']}]]{ts_str}"
+                            msg_cmd = f"{prefix}--> 指示: [[REF:{ev['line']}]]{ts_str}"
                             old_c = tab.analysis_comments.get(trig['line'], "")
                             tab.analysis_comments[trig['line']] = (old_c + " " + msg_cmd).strip()
                             
-                            msg_vsync = f"{prefix}<-- 指示: [[REF:{trig['line']}]]"
+                            msg_vsync = f"{prefix}<-- 適用: [[REF:{trig['line']}]]"
                             old_v = tab.analysis_comments.get(ev['line'], "")
                             tab.analysis_comments[ev['line']] = (old_v + " " + msg_vsync).strip()
                             
