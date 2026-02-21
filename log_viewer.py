@@ -19,6 +19,10 @@ except ImportError:
     ROOT_CLASS = tk.Tk
     HAS_DND = False
 
+# --- Constants ---
+VSYNC_TAG = "<VSYNC>"
+VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC"
+
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
     "keywords": [
@@ -449,8 +453,6 @@ class LogViewerApp:
         lines = tab.original_content.splitlines()
         
         # 1. ログ全行をスキャンし、イベントをリスト化する
-        # events = [(line_idx, timestamp, event_type, rule_index)]
-        # event_type: 0=Trigger(指示), 1=Apply(適用)
         events = []
 
         for i, line in enumerate(lines):
@@ -459,24 +461,18 @@ class LogViewerApp:
             if m: ts = self._parse_time_seconds(m.group(1)) or 0.0
 
             for rule_idx, rule in enumerate(compiled_rules):
-                # Trigger?
                 if rule["cmd_re"].search(line):
                     events.append({'line': i, 'ts': ts, 'type': 0, 'rule': rule_idx})
                 
-                # Apply?
-                # Note: 同じ行がTriggerかつApplyの場合、両方のイベントとして登録する
                 if rule["vsync_re"].search(line):
                     events.append({'line': i, 'ts': ts, 'type': 1, 'rule': rule_idx})
 
         count = 0
         
         # 2. ルールごとにマッチングを行う
-        # Triggerを見つけたら、それ以降で最も近いApplyを探す
         for rule_idx, rule in enumerate(compiled_rules):
             rule_events = [e for e in events if e['rule'] == rule_idx]
             
-            # このルールのイベントを時系列（行番号）順に処理
-            # 未処理のTriggerリスト
             pending_triggers = []
 
             for ev in rule_events:
@@ -485,9 +481,7 @@ class LogViewerApp:
                 
                 elif ev['type'] == 1: # Apply
                     if pending_triggers:
-                        # 溜まっていたTriggerを全てこのApplyで解決する
                         for trig in pending_triggers:
-                            # 時間差計算
                             diff_ms = (ev['ts'] - trig['ts']) * 1000.0 if (ev['ts'] > 0 and trig['ts'] > 0) else 0.0
                             prefix = f"[{rule['name']}]" if rule['name'] else ""
 
@@ -504,8 +498,6 @@ class LogViewerApp:
                             tab.analysis_comments[ev['line']] = (old_v + " " + msg_vsync).strip()
                             
                             count += 1
-                        
-                        # 解決したのでクリア
                         pending_triggers = []
 
         self.apply_display_update(tab)
@@ -685,9 +677,12 @@ class LogViewerApp:
             if s.get("enabled", True):
                 try: 
                     fp = s.get("file_pattern", ".*") or ".*"
+                    end_pat = s["end"]
+                    if end_pat == VSYNC_TAG: end_pat = VSYNC_REGEX
+                    
                     section_rules.append({
                         "start": re.compile(s["start"], re.I),
-                        "end": re.compile(s["end"], re.I),
+                        "end": re.compile(end_pat, re.I),
                         "name": s["name"],
                         "color": s["color"],
                         "file_pat_re": re.compile(fp, re.I)
@@ -945,7 +940,9 @@ class LogViewerApp:
                     # Removed helper btn
                 if "end" in fields:
                     ee = tk.Entry(r, textvariable=item["end"], width=20); ee.pack(side=tk.LEFT, padx=2)
-                    # Removed helper btn
+                    # Add button for V-Sync shortcut if sections
+                    if key == "sections":
+                         tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
                 
                 if "color" in fields:
                     tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
@@ -1034,9 +1031,12 @@ class LogViewerApp:
                 if s.get("enabled", True):
                     try: 
                         fp = s.get("file_pattern", ".*") or ".*"
+                        end_pat = s["end"]
+                        if end_pat == VSYNC_TAG: end_pat = VSYNC_REGEX
+                        
                         section_rules.append({
                             "start": re.compile(s["start"], re.I),
-                            "end": re.compile(s["end"], re.I),
+                            "end": re.compile(end_pat, re.I),
                             "name": s["name"],
                             "color": s["color"],
                             "file_pat_re": re.compile(fp, re.I)
