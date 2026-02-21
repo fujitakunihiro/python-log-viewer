@@ -340,12 +340,22 @@ class LogViewerApp:
                 extra = 0
                 for pat, ex in kw_rules:
                     if pat.search(line): extra = ex; break
-                bl = raw_lines[i : i + extra + 1]
-                skey = effective_ts[i]
                 
+                # 次の行が新しいタイムスタンプを持っていたら巻き込みを打ち切る
+                actual_extra = 0
+                for j in range(1, extra + 1):
+                    if i + j < len(raw_lines):
+                        next_line = raw_lines[i + j]
+                        ts_part_next = next_line[:ts_len]
+                        if ts_part_next.strip() and len(next_line) > 0 and not next_line[0].isspace():
+                            break
+                        actual_extra += 1
+                
+                bl = raw_lines[i : i + actual_extra + 1]
+                skey = effective_ts[i]
                 current_src = t.line_source_map[i] if (t.line_source_map and i < len(t.line_source_map)) else fn
                 all_blocks.append((skey, bl, current_src))
-                i += extra + 1
+                i += actual_extra + 1
                 
         all_blocks.sort(key=lambda x: x[0])
         final_lines, final_src = [], []
@@ -373,7 +383,7 @@ class LogViewerApp:
         fr = tk.Frame(dlg)
         fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        tk.Label(fr, text="「(先) 指示イベント」と「(後) 適用イベント」のペアを登録します。\nOKを押すと、全タブに対して解析が再実行されます。", anchor="w").pack(fill=tk.X)
+        tk.Label(fr, text="「(先) 指示イベント」と「(後) 適用イベント」のペアを登録します。\nOKを押すと、全タブに対して解析が再実行され、パターンがフィルタ設定に自動追加されます。", anchor="w").pack(fill=tk.X)
         
         l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1)
         l_fr.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -455,6 +465,34 @@ class LogViewerApp:
             
             self.analysis_rules_config = new_rules
             self.analysis_time_pattern = e_ts.get()
+            
+            # フィルタ設定(キーワード)への自動追加ロジック
+            existing_patterns = set(kw.get("pattern", "") for kw in self.keywords_config)
+            
+            for rule in new_rules:
+                # cmd_pattern の追加
+                cmd_pat = rule["cmd_pattern"].strip()
+                if cmd_pat and cmd_pat not in existing_patterns:
+                    self.keywords_config.append({
+                        "pattern": cmd_pat,
+                        "color": "#ffffff",
+                        "comment": "",
+                        "enabled": True,
+                        "extra_lines": 0
+                    })
+                    existing_patterns.add(cmd_pat)
+                
+                # vsync_pattern の追加
+                vsync_pat = rule["vsync_pattern"].strip()
+                if vsync_pat and vsync_pat not in existing_patterns:
+                    self.keywords_config.append({
+                        "pattern": vsync_pat,
+                        "color": "#ffffff",
+                        "comment": "",
+                        "enabled": True,
+                        "extra_lines": 0
+                    })
+                    existing_patterns.add(vsync_pat)
             
             for tab_id in self.notebook.tabs():
                 try:
@@ -1142,32 +1180,81 @@ class LogViewerApp:
         try:
             l = tab.text.get("1.0", "end-1c").splitlines()
             c = tab.comment_text.get("1.0", "end-1c").splitlines()
+            srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
+            if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
             
+            section_rules = []
+            for s in self.sections_config:
+                if s.get("enabled", True):
+                    fp = s.get("file_pattern", ".*") or ".*"
+                    end_pat = s["end"]
+                    is_vsync_end = False
+                    if end_pat == VSYNC_TAG: 
+                        end_pat = VSYNC_REGEX
+                        is_vsync_end = True
+                    section_rules.append({
+                        "start": re.compile(s["start"], re.I),
+                        "end": re.compile(end_pat, re.I),
+                        "name": s["name"],
+                        "color": s["color"],
+                        "file_pat_re": re.compile(fp, re.I),
+                        "is_vsync_end": is_vsync_end
+                    })
+                    
+            active_states = {fn: None for fn in tab.source_file_names}
+            status_buffers = {fn: [] for fn in tab.source_file_names}
+            
+            for i, line in enumerate(l):
+                line_src = srcs[i]
+                is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
+                for fn in tab.source_file_names:
+                    rule_to_display = None
+                    display_text = ""
+                    
+                    if active_states[fn]:
+                        is_end_match = active_states[fn]["end"].search(line)
+                        if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]): 
+                            rule_to_display = active_states[fn]
+                            display_text = f"{rule_to_display['name']} (終了)"
+                            active_states[fn] = None 
+                        else: 
+                            rule_to_display = active_states[fn]
+                            display_text = rule_to_display['name']
+                            
+                    if not rule_to_display and not active_states[fn] and fn == line_src:
+                        for rule in section_rules:
+                            if rule["file_pat_re"].search(fn) and rule["start"].search(line):
+                                rule_to_display = rule
+                                display_text = f"{rule['name']} (開始)"
+                                active_states[fn] = rule
+                                if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]): 
+                                    display_text = f"{rule['name']} (開始/終了)"
+                                    active_states[fn] = None
+                                break
+                    status_buffers[fn].append((display_text, rule_to_display["color"] if rule_to_display else "#ffffff"))
+                    
+            colors = ["#ffffff"] * len(l)
+            k_rules = []
+            for it in self.keywords_config:
+                if it["enabled"]: k_rules.append((re.compile(it["pattern"], re.I), it["color"], int(it["extra_lines"])))
+            for i in range(len(l)):
+                for pat, col, ext in k_rules:
+                    if pat.search(l[i]):
+                        for j in range(i, min(i+ext+1, len(l))): colors[j] = col
+                        break
+                        
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
             header_row = '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th>'
             for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
             h.append(header_row + '</tr></thead><tbody>')
             
             for i, line in enumerate(l):
-                bg_color = "transparent"
-                tags = tab.text.tag_names(f"{i+1}.0")
-                for tag in tags:
-                    if tag.startswith("kw_"):
-                        bg_color = f"#{tag[3:]}"
-                        break
-                        
+                if not self.show_vsync_lines and VSYNC_MARKER in line: continue
                 cm = c[i] if i < len(c) else ""
-                row_html = f'<tr style="background:{bg_color}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
-                
+                row_html = f'<tr style="background:{colors[i]}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
                 for fn in tab.source_file_names:
-                    txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
-                    st_bg = "transparent"
-                    st_tags = tab.status_texts[fn].tag_names(f"{i+1}.0")
-                    for tag in st_tags:
-                        if tag.startswith("st_"):
-                            st_bg = f"#{tag[3:]}"
-                            break
-                    row_html += f'<td style="background:{st_bg}">{html.escape(txt)}</td>'
+                    txt, col = status_buffers[fn][i]
+                    row_html += f'<td style="background:{col if col != "#ffffff" else "transparent"}">{html.escape(txt)}</td>'
                 h.append(row_html + '</tr>')
                 
             with open(p, "w", encoding="utf-8-sig") as f: f.write("\n".join(h) + "</tbody></table></body></html>")
