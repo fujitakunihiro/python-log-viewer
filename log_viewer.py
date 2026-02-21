@@ -92,7 +92,7 @@ class LogTab(tk.Frame):
         self.paned_window.pack(fill=tk.BOTH, expand=True)
         
         left_frame = tk.Frame(self.paned_window)
-        self.paned_window.add(left_frame, minsize=100, stretch="always", width=600)
+        self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
         header_text = "[Merged View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
         tk.Label(left_frame, text=header_text, bg="#e0e0e0", relief=tk.RAISED).pack(side=tk.TOP, fill=tk.X)
@@ -106,6 +106,12 @@ class LogTab(tk.Frame):
         
         self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg='#f0f0f0')
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
+        
+        # --- 時間差を表示するテキストカラムを追加 ---
+        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#f8f8f8", fg="#555555", yscrollcommand=self.vsb.set)
+        self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
+        self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
+
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
         
@@ -136,7 +142,8 @@ class LogTab(tk.Frame):
             hsb.config(command=st_text.xview)
             self.status_texts[fname] = st_text
             
-        all_texts = [self.text, self.comment_text] + list(self.status_texts.values())
+        # timediff_text もスクロール同期の対象に含める
+        all_texts = [self.text, self.timediff_text, self.comment_text] + list(self.status_texts.values())
         
         def sync_yview(*args):
             for t in all_texts: t.yview(*args)
@@ -557,11 +564,11 @@ class LogViewerApp:
                             prefix = f"[{rule['name']}]" if rule['name'] else ""
                             ts_str = f" (+{diff_ms:.1f}ms)" if diff_ms >= 0 else ""
                             
-                            msg_cmd = f"{prefix}--> 指示: [[REF:{ev['line']}]]{ts_str}"
+                            msg_cmd = f"{prefix}--> 適用: [[REF:{ev['line']}]]{ts_str}"
                             old_c = tab.analysis_comments.get(trig['line'], "")
                             tab.analysis_comments[trig['line']] = (old_c + " " + msg_cmd).strip()
                             
-                            msg_vsync = f"{prefix}<-- 適用: [[REF:{trig['line']}]]"
+                            msg_vsync = f"{prefix}<-- 指示: [[REF:{trig['line']}]]"
                             old_v = tab.analysis_comments.get(ev['line'], "")
                             tab.analysis_comments[ev['line']] = (old_v + " " + msg_vsync).strip()
                             
@@ -876,19 +883,29 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
-        flines, fcmts = [], []
+        flines, fcmts, ftimediffs = [], [], []
         main_tags = []
         final_st_lines = {fn: [] for fn in tab.source_file_names}
         final_st_tags = {fn: [] for fn in tab.source_file_names}
         
         line_count = 0
+        base_ts = None
+        
         for i in range(len(lines)):
             if not is_visible[i]:
                 continue
             
+            if base_ts is None and timestamps[i] is not None:
+                base_ts = timestamps[i]
+            
             line_count += 1
             flines.append(lines[i])
             s_name = f"[{srcs[i]}] " if (tab.is_merged and srcs[i]) else ""
+            
+            if timestamps[i] is not None and base_ts is not None:
+                ftimediffs.append(f"{(timestamps[i] - base_ts):.6f}")
+            else:
+                ftimediffs.append("")
             
             base_cmt = f"{s_name}{line_attrs[i]['comment']}"
             ana_cmt = tab.analysis_comments.get(i, "")
@@ -922,6 +939,10 @@ class LogViewerApp:
                     
         tab.text.delete("1.0", tk.END)
         tab.text.insert("1.0", "\n".join(flines))
+        
+        tab.timediff_text.delete("1.0", tk.END)
+        tab.timediff_text.insert("1.0", "\n".join(ftimediffs))
+        
         tab.comment_text.delete("1.0", tk.END)
         tab.comment_text.insert("1.0", "\n".join(fcmts))
         
@@ -1186,6 +1207,7 @@ class LogViewerApp:
         try:
             l = tab.text.get("1.0", "end-1c").splitlines()
             c = tab.comment_text.get("1.0", "end-1c").splitlines()
+            td = tab.timediff_text.get("1.0", "end-1c").splitlines()
             srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
             if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
             
@@ -1221,6 +1243,7 @@ class LogViewerApp:
                         is_end_match = active_states[fn]["end"].search(line)
                         if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]): 
                             rule_to_display = active_states[fn]
+                            # 時間差は既にGUI出力時に計算されて上書きされているのでそのまま使う
                             display_text = f"{rule_to_display['name']} (終了)"
                             active_states[fn] = None 
                         else: 
@@ -1237,7 +1260,10 @@ class LogViewerApp:
                                     display_text = f"{rule['name']} (開始/終了)"
                                     active_states[fn] = None
                                 break
-                    status_buffers[fn].append((display_text, rule_to_display["color"] if rule_to_display else "#ffffff"))
+                    
+                    # 既にGUI側で `[xx.xms]` と書き込まれた文字列を取得する
+                    gui_txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
+                    status_buffers[fn].append((gui_txt, rule_to_display["color"] if rule_to_display else "#ffffff"))
                     
             colors = ["#ffffff"] * len(l)
             k_rules = []
@@ -1250,14 +1276,22 @@ class LogViewerApp:
                         break
                         
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
-            header_row = '<thead><tr><th>Line</th><th>Log Content</th><th>Comment</th>'
+            header_row = '<thead><tr><th>Line</th><th>Time Diff</th><th>Log Content</th><th>Comment</th>'
             for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
             h.append(header_row + '</tr></thead><tbody>')
             
             for i, line in enumerate(l):
-                if not self.show_vsync_lines and VSYNC_MARKER in line: continue
+                bg_color = "transparent"
+                tags = tab.text.tag_names(f"{i+1}.0")
+                for tag in tags:
+                    if tag.startswith("kw_"):
+                        bg_color = f"#{tag[3:]}"
+                        break
+                        
                 cm = c[i] if i < len(c) else ""
-                row_html = f'<tr style="background:{colors[i]}"><td>{i+1}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
+                diff_str = td[i] if i < len(td) else ""
+                row_html = f'<tr style="background:{bg_color}"><td>{i+1}</td><td>{html.escape(diff_str)}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
+                
                 for fn in tab.source_file_names:
                     txt, col = status_buffers[fn][i]
                     row_html += f'<td style="background:{col if col != "#ffffff" else "transparent"}">{html.escape(txt)}</td>'
