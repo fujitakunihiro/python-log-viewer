@@ -301,7 +301,6 @@ class LogViewerApp:
 
     def merge_logs_action(self):
         tabs = [self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
-        # マージ済みでない実体ファイルを持つタブを抽出
         target_tabs = [t for t in tabs if t.file_path and t.file_path != "Merged"]
         if len(target_tabs) < 2:
             messagebox.showinfo("マージ", "マージするには2つ以上のログファイルを開いてください。")
@@ -344,9 +343,7 @@ class LogViewerApp:
                 bl = raw_lines[i : i + extra + 1]
                 skey = effective_ts[i]
                 
-                # Use actual source name or Virtual name
                 current_src = t.line_source_map[i] if (t.line_source_map and i < len(t.line_source_map)) else fn
-                # 複数行のブロックの場合は最初の行のソースを使用
                 all_blocks.append((skey, bl, current_src))
                 i += extra + 1
                 
@@ -540,7 +537,7 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title("V周期(仮想)挿入の設定")
-        dlg.geometry("450x300")
+        dlg.geometry("450x350")
         self.vsync_settings_dlg_ref = dlg
         
         conf = self.vsync_config
@@ -795,12 +792,21 @@ class LogViewerApp:
         final_st_lines = {fn: [] for fn in tab.source_file_names}
         final_st_tags = {fn: [] for fn in tab.source_file_names}
         
+        re_vsync = re.compile(VSYNC_REGEX, re.I)
+        
         line_count = 0
         for i in range(len(lines)):
             if not self.show_vsync_lines and VSYNC_MARKER in lines[i]: continue
             
             attr = line_attrs[i]
-            if self.use_keyword_filter and attr["priority"] == 0: continue
+            if self.use_keyword_filter:
+                if attr["priority"] == 0: 
+                    continue
+                # 不要なV-SYNCの非表示化
+                if re_vsync.search(lines[i]):
+                    is_in_section = any(status_buffers[fn][i][0] != "" for fn in tab.source_file_names)
+                    if not is_in_section:
+                        continue
             
             line_count += 1
             flines.append(lines[i])
@@ -979,13 +985,10 @@ class LogViewerApp:
                 
                 if "file_pattern" in fields:
                     tk.Entry(r, textvariable=item["file_pattern"], width=20).pack(side=tk.LEFT, padx=2)
-
                 if "pattern" in fields:
                     tk.Entry(r, textvariable=item["pattern"], width=25).pack(side=tk.LEFT, padx=2)
-
                 if "search" in fields:
                     tk.Entry(r, textvariable=item["search"], width=25).pack(side=tk.LEFT, padx=2)
-                
                 if "name" in fields:
                     tk.Entry(r, textvariable=item["name"], width=15).pack(side=tk.LEFT, padx=2)
                 if "start" in fields:
@@ -994,11 +997,9 @@ class LogViewerApp:
                     tk.Entry(r, textvariable=item["end"], width=20).pack(side=tk.LEFT, padx=2)
                     if key == "sections":
                          tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
-                
                 if "color" in fields:
                     tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
                     tk.Button(r, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get())).pack(side=tk.LEFT)
-                
                 if "replace" in fields:
                     tk.Entry(r, textvariable=item["replace"], width=30).pack(side=tk.LEFT, padx=5)
                 if "comment" in fields:
@@ -1122,16 +1123,17 @@ class LogViewerApp:
                             rule_to_display = active_states[fn]
                             display_text = rule_to_display['name']
                             
-                    if not rule_to_display and not active_states[fn] and fn == line_src:
-                        for rule in section_rules:
-                            if rule["file_pat_re"].search(fn) and rule["start"].search(line):
-                                rule_to_display = rule
-                                display_text = f"{rule['name']} (開始)"
-                                active_states[fn] = rule
-                                if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]): 
-                                    display_text = f"{rule['name']} (開始/終了)"
-                                    active_states[fn] = None
-                                break
+                    if not rule_to_display and not active_states[fn]:
+                        if fn == line_src:
+                            for rule in section_rules:
+                                if rule["file_pat_re"].search(fn) and rule["start"].search(line):
+                                    rule_to_display = rule
+                                    display_text = f"{rule['name']} (開始)"
+                                    active_states[fn] = rule
+                                    if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]): 
+                                        display_text = f"{rule['name']} (開始/終了)"
+                                        active_states[fn] = None
+                                    break
                     status_buffers[fn].append((display_text, rule_to_display["color"] if rule_to_display else "#ffffff"))
                     
             colors = ["#ffffff"] * len(l)
