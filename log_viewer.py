@@ -341,7 +341,6 @@ class LogViewerApp:
                 for pat, ex in kw_rules:
                     if pat.search(line): extra = ex; break
                 
-                # 次の行が新しいタイムスタンプを持っていたら巻き込みを打ち切る
                 actual_extra = 0
                 for j in range(1, extra + 1):
                     if i + j < len(raw_lines):
@@ -470,7 +469,8 @@ class LogViewerApp:
             existing_patterns = set(kw.get("pattern", "") for kw in self.keywords_config)
             
             for rule in new_rules:
-                # cmd_pattern の追加
+                if not rule["enabled"]: continue
+                
                 cmd_pat = rule["cmd_pattern"].strip()
                 if cmd_pat and cmd_pat not in existing_patterns:
                     self.keywords_config.append({
@@ -482,7 +482,6 @@ class LogViewerApp:
                     })
                     existing_patterns.add(cmd_pat)
                 
-                # vsync_pattern の追加
                 vsync_pat = rule["vsync_pattern"].strip()
                 if vsync_pat and vsync_pat not in existing_patterns:
                     self.keywords_config.append({
@@ -493,6 +492,8 @@ class LogViewerApp:
                         "extra_lines": 0
                     })
                     existing_patterns.add(vsync_pat)
+            
+            self.save_config_dialog_silent()
             
             for tab_id in self.notebook.tabs():
                 try:
@@ -629,7 +630,8 @@ class LogViewerApp:
         btn_box.pack(pady=10, fill=tk.X)
         tk.Button(btn_box, text="保存", command=save_conf, bg="#ddddff", width=15).pack(side=tk.RIGHT, padx=10)
 
-    def save_config_dialog_silent(self):
+    def save_config_dialog_silent(self, filepath=None):
+        target_path = filepath if filepath else self.config_path
         data = {
             "keywords": self.keywords_config, 
             "sections": self.sections_config, 
@@ -639,9 +641,10 @@ class LogViewerApp:
             "vsync_auto_insert": self.vsync_config
         }
         try:
-            with open(self.config_path, "w", encoding="utf-8") as f: 
+            with open(target_path, "w", encoding="utf-8") as f: 
                 json.dump(data, f, indent=2, ensure_ascii=False)
-        except: pass
+        except Exception as e: 
+            print(f"Config Save Error: {e}")
 
     def _parse_time_seconds(self, ts_str: str) -> Optional[float]:
         try:
@@ -1140,6 +1143,7 @@ class LogViewerApp:
                     new_cfg.append(d)
             
             setattr(self, f"{key}_config", new_cfg)
+            self.save_config_dialog_silent()
             dlg.destroy()
             for tab_id in self.notebook.tabs():
                 try:
@@ -1156,7 +1160,9 @@ class LogViewerApp:
         
     def save_config_dialog(self):
         p = filedialog.asksaveasfilename(defaultextension=".json")
-        if p: self.save_config_dialog_silent(p)
+        if p: 
+            self.save_config_dialog_silent(p)
+            messagebox.showinfo("完了", "設定を保存しました。")
         
     def load_config(self, p):
         try:
