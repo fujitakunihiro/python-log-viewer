@@ -518,12 +518,10 @@ class LogViewerApp:
                             prefix = f"[{rule['name']}]" if rule['name'] else ""
                             ts_str = f" (+{diff_ms:.1f}ms)" if diff_ms >= 0 else ""
                             
-                            # 指示行には「--> 適用: L(Apply)」
                             msg_cmd = f"{prefix}--> 適用: [[REF:{ev['line']}]]{ts_str}"
                             old_c = tab.analysis_comments.get(trig['line'], "")
                             tab.analysis_comments[trig['line']] = (old_c + " " + msg_cmd).strip()
                             
-                            # 適用行には「<-- 指示: L(Trigger)」
                             msg_vsync = f"{prefix}<-- 指示: [[REF:{trig['line']}]]"
                             old_v = tab.analysis_comments.get(ev['line'], "")
                             tab.analysis_comments[ev['line']] = (old_v + " " + msg_vsync).strip()
@@ -728,6 +726,20 @@ class LogViewerApp:
                     })
                 except: pass
 
+        ts_pat = self.analysis_time_pattern
+        try:
+            re_ts = re.compile(ts_pat)
+        except:
+            re_ts = re.compile(r"^\[?(\d+(?:\.\d+)?)\]?")
+            
+        timestamps = []
+        for line in lines:
+            m = re_ts.search(line)
+            if m:
+                timestamps.append(self._parse_time_seconds(m.group(1)))
+            else:
+                timestamps.append(None)
+
         active_states = {fn: None for fn in tab.source_file_names}
         status_buffers = {fn: [] for fn in tab.source_file_names}
         
@@ -740,13 +752,24 @@ class LogViewerApp:
                 display_text = ""
                 
                 if active_states[fn]:
-                    is_end_match = active_states[fn]["end"].search(line)
-                    if is_end_match and (fn == line_src or is_virtual_line or active_states[fn]["is_vsync_end"]):
-                        rule_to_display = active_states[fn]
+                    rule = active_states[fn]["rule"]
+                    start_idx = active_states[fn]["start_idx"]
+                    is_end_match = rule["end"].search(line)
+                    
+                    if is_end_match and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
+                        rule_to_display = rule
                         display_text = f"{rule_to_display['name']} (終了)"
+                        
+                        ts_start = timestamps[start_idx]
+                        ts_end = timestamps[i]
+                        if ts_start is not None and ts_end is not None:
+                            diff_ms = (ts_end - ts_start) * 1000.0
+                            old_txt, col = status_buffers[fn][start_idx]
+                            status_buffers[fn][start_idx] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
+                            
                         active_states[fn] = None 
                     else:
-                        rule_to_display = active_states[fn]
+                        rule_to_display = rule
                         display_text = rule_to_display['name']
                         
                 if not rule_to_display and not active_states[fn]:
@@ -755,10 +778,10 @@ class LogViewerApp:
                             if rule["file_pat_re"].search(fn) and rule["start"].search(line):
                                 rule_to_display = rule
                                 display_text = f"{rule['name']} (開始)"
-                                active_states[fn] = rule
+                                active_states[fn] = {"rule": rule, "start_idx": i}
                                 
                                 if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                                    display_text = f"{rule['name']} (開始/終了)"
+                                    display_text = f"{rule['name']} (開始/終了) [0.0ms]"
                                     active_states[fn] = None
                                 break
 
@@ -790,7 +813,6 @@ class LogViewerApp:
                             line_attrs[j]["priority"] = 20
                     break
 
-        # 1st pass: 表示対象の判定と表示行番号（表示上の連番）のマッピング
         re_vsync = re.compile(VSYNC_REGEX, re.I)
         visible_mapping = {}
         is_visible = [True] * len(lines)
@@ -813,7 +835,6 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
-        # 2nd pass: 表示リストの構築
         flines, fcmts = [], []
         main_tags = []
         final_st_lines = {fn: [] for fn in tab.source_file_names}
@@ -832,7 +853,6 @@ class LogViewerApp:
             ana_cmt = tab.analysis_comments.get(i, "")
             
             if ana_cmt:
-                # プレースホルダー [[REF:idx]] を表示上の行番号に変換する
                 def replacer(match):
                     target_idx = int(match.group(1))
                     disp_num = visible_mapping.get(target_idx)
@@ -1128,7 +1148,6 @@ class LogViewerApp:
             for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
             h.append(header_row + '</tr></thead><tbody>')
             
-            # Textウィジェットの背景色タグを取得してHTMLに反映させる処理
             for i, line in enumerate(l):
                 bg_color = "transparent"
                 tags = tab.text.tag_names(f"{i+1}.0")
