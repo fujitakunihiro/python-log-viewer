@@ -470,7 +470,7 @@ class LogViewerApp:
             self.analysis_rules_config = new_rules
             self.analysis_time_pattern = e_ts.get()
             
-            # フィルタ設定への自動追加ロジック
+            # フィルタ設定(キーワード)への自動追加ロジック
             existing_patterns = set(kw.get("pattern", "") for kw in self.keywords_config)
             
             for rule in new_rules:
@@ -762,10 +762,13 @@ class LogViewerApp:
                         end_pat = VSYNC_REGEX
                         is_vsync_end = True
                         
+                    end_re = re.compile(end_pat, re.I) if end_pat else None
+                    
                     section_rules.append({
                         "start": re.compile(s["start"], re.I),
                         "start_wait": s.get("start_wait", False),
-                        "end": re.compile(end_pat, re.I),
+                        "end": end_re,
+                        "end_str": end_pat,
                         "end_wait": s.get("end_wait", False),
                         "name": s["name"],
                         "color": s["color"],
@@ -789,6 +792,7 @@ class LogViewerApp:
                 timestamps.append(None)
 
         active_states = {fn: None for fn in tab.source_file_names}
+        pending_states = {fn: None for fn in tab.source_file_names}
         status_buffers = {fn: [] for fn in tab.source_file_names}
         
         re_vsync = re.compile(VSYNC_REGEX, re.I)
@@ -801,82 +805,85 @@ class LogViewerApp:
             for fn in tab.source_file_names:
                 rule_to_display = None
                 display_text = ""
+                ended_this_line = False
+                ended_rule = None
                 
-                state_info = active_states[fn]
-                
-                if state_info:
-                    rule = state_info["rule"]
-                    state = state_info["state"]
-                    
-                    if state == "START_PENDING":
-                        if is_vsync_line:
-                            state_info["state"] = "ACTIVE"
-                            state_info["start_idx"] = i
-                            rule_to_display = rule
-                            display_text = f"{rule['name']} (開始)"
-                    
-                    elif state == "ACTIVE":
-                        is_end_match = rule["end"].search(line)
-                        if is_end_match and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                            if rule["end_wait"]:
-                                state_info["state"] = "END_PENDING"
-                                rule_to_display = rule
-                                display_text = rule['name']
-                            else:
-                                rule_to_display = rule
-                                display_text = f"{rule['name']} (終了)"
-                                
-                                ts_start = timestamps[state_info["start_idx"]]
-                                ts_end = timestamps[i]
-                                if ts_start is not None and ts_end is not None:
-                                    diff_ms = (ts_end - ts_start) * 1000.0
-                                    old_txt, col = status_buffers[fn][state_info["start_idx"]]
-                                    status_buffers[fn][state_info["start_idx"]] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
-                                    
-                                active_states[fn] = None
-                        else:
-                            rule_to_display = rule
-                            display_text = rule['name']
-                            
-                    elif state == "END_PENDING":
-                        if is_vsync_line:
-                            ts_start = timestamps[state_info["start_idx"]]
-                            ts_end = timestamps[i]
-                            if ts_start is not None and ts_end is not None:
-                                diff_ms = (ts_end - ts_start) * 1000.0
-                                old_txt, col = status_buffers[fn][state_info["start_idx"]]
-                                status_buffers[fn][state_info["start_idx"]] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
-                                
-                            active_states[fn] = None
-                        else:
-                            rule_to_display = rule
-                            display_text = rule['name']
+                def _end_active_state(fn_name, end_i):
+                    s_info = active_states[fn_name]
+                    if s_info:
+                        ts_start = timestamps[s_info["start_idx"]]
+                        ts_end = timestamps[end_i]
+                        if ts_start is not None and ts_end is not None:
+                            diff_ms = (ts_end - ts_start) * 1000.0
+                            old_txt, col = status_buffers[fn_name][s_info["start_idx"]]
+                            status_buffers[fn_name][s_info["start_idx"]] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
+                    active_states[fn_name] = None
 
-                if not rule_to_display and active_states[fn] is None:
-                    if fn == line_src: 
-                        for rule in section_rules:
-                            if rule["file_pat_re"].search(fn) and rule["start"].search(line):
-                                if rule["start_wait"]:
-                                    active_states[fn] = {
-                                        "state": "START_PENDING",
-                                        "rule": rule,
-                                        "start_idx": -1
-                                    }
-                                else:
-                                    active_states[fn] = {
-                                        "state": "ACTIVE",
-                                        "rule": rule,
-                                        "start_idx": i
-                                    }
-                                    rule_to_display = rule
-                                    display_text = f"{rule['name']} (開始)"
+                if active_states[fn] and active_states[fn].get("end_pending") and is_vsync_line:
+                    ended_rule = active_states[fn]["rule"]
+                    _end_active_state(fn, i)
+                    ended_this_line = True
+
+                if pending_states[fn] and is_vsync_line:
+                    if active_states[fn]:
+                        ended_rule = active_states[fn]["rule"]
+                        _end_active_state(fn, i)
+                        ended_this_line = True
+                    
+                    active_states[fn] = {
+                        "rule": pending_states[fn]["rule"],
+                        "start_idx": i,
+                        "end_pending": False
+                    }
+                    pending_states[fn] = None
+                    rule_to_display = active_states[fn]["rule"]
+                    display_text = f"{rule_to_display['name']} (開始)"
+
+                if fn == line_src:
+                    for rule in section_rules:
+                        if rule["file_pat_re"].search(fn) and rule["start"].search(line):
+                            if rule["start_wait"]:
+                                pending_states[fn] = {"rule": rule}
+                            else:
+                                if active_states[fn]:
+                                    ended_rule = active_states[fn]["rule"]
+                                    _end_active_state(fn, i)
+                                    ended_this_line = True
                                     
-                                    if not rule["end_wait"] and rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                                        display_text = f"{rule['name']} (開始/終了) [0.0ms]"
-                                        active_states[fn] = None
-                                    elif rule["end_wait"] and rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                                        active_states[fn]["state"] = "END_PENDING"
-                                break
+                                active_states[fn] = {
+                                    "rule": rule,
+                                    "start_idx": i,
+                                    "end_pending": False
+                                }
+                                pending_states[fn] = None
+                                rule_to_display = rule
+                                display_text = f"{rule['name']} (開始)"
+                            break 
+
+                if active_states[fn] and not active_states[fn].get("end_pending"):
+                    rule = active_states[fn]["rule"]
+                    if rule["end_str"] != "":
+                        if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
+                            if rule["end_wait"]:
+                                active_states[fn]["end_pending"] = True
+                            else:
+                                ended_rule = active_states[fn]["rule"]
+                                _end_active_state(fn, i)
+                                ended_this_line = True
+                                
+                                if rule_to_display == ended_rule:
+                                    display_text = f"{ended_rule['name']} (開始/終了) [0.0ms]"
+                                else:
+                                    rule_to_display = ended_rule
+                                    display_text = f"{ended_rule['name']} (終了)"
+
+                if rule_to_display is None:
+                    if active_states[fn]:
+                        rule_to_display = active_states[fn]["rule"]
+                        display_text = rule_to_display['name']
+                    elif ended_this_line:
+                        rule_to_display = ended_rule
+                        display_text = f"{ended_rule['name']} (終了)"
 
                 if rule_to_display: 
                     status_buffers[fn].append((display_text, rule_to_display["color"]))
@@ -1120,9 +1127,9 @@ class LogViewerApp:
         if "name" in fields: tk.Label(hdr, text="区間名", width=15, anchor="w").pack(side=tk.LEFT)
         
         if "start" in fields: tk.Label(hdr, text="開始パターン", width=15, anchor="w").pack(side=tk.LEFT)
-        if "start_wait" in fields: tk.Label(hdr, text="V待", width=4).pack(side=tk.LEFT)
+        if "start_wait" in fields: tk.Label(hdr, text="+V待", width=4).pack(side=tk.LEFT)
         if "end" in fields: tk.Label(hdr, text="終了パターン", width=15, anchor="w").pack(side=tk.LEFT)
-        if "end_wait" in fields: tk.Label(hdr, text="V待", width=4).pack(side=tk.LEFT)
+        if "end_wait" in fields: tk.Label(hdr, text="+V待", width=4).pack(side=tk.LEFT)
         
         if "color" in fields: tk.Label(hdr, text="色", width=10).pack(side=tk.LEFT, padx=15)
         if "replace" in fields: tk.Label(hdr, text="置換/説明", width=30).pack(side=tk.LEFT, padx=5)
