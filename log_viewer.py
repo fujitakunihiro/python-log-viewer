@@ -21,7 +21,8 @@ except ImportError:
 
 # --- Constants ---
 VSYNC_TAG = "<VSYNC>"
-VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC"
+# 修正: [VIRTUAL V-SYNC] を確実に捉えるため、エスケープ付きパターンを追加
+VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]"
 VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---"
 
 # --- Default Configuration ---
@@ -210,8 +211,6 @@ class LogViewerApp:
         emenu.add_command(label="検索...", command=self.open_find_dialog, accelerator="Ctrl+F")
         emenu.add_command(label="次を検索", command=self.find_next, accelerator="F3")
         emenu.add_command(label="前を検索", command=self.find_prev, accelerator="Shift+F3")
-        emenu.add_separator()
-        emenu.add_command(label="V周期(仮想)の挿入...", command=self.open_vsync_dialog)
         menubar.add_cascade(label="編集", menu=emenu)
 
         cmenu = tk.Menu(menubar, tearoff=0)
@@ -223,6 +222,7 @@ class LogViewerApp:
         cmenu.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog)
         cmenu.add_separator()
         cmenu.add_command(label="イベント適用解析設定の編集...", command=self.edit_analysis_rules_dialog)
+        cmenu.add_command(label="V周期(仮想)の挿入...", command=self.open_vsync_dialog)
         menubar.add_cascade(label="設定", menu=cmenu)
         self.root.config(menu=menubar)
 
@@ -232,7 +232,6 @@ class LogViewerApp:
         
         tk.Button(toolbar, text="ログをマージ", command=self.merge_logs_action, bg="#e3f2fd").pack(side=tk.LEFT, padx=10)
         
-        # V周期関連ボタンの追加
         tk.Button(toolbar, text="V周期(仮想)挿入", command=self.open_vsync_dialog, bg="#f3e5f5").pack(side=tk.LEFT, padx=5)
         
         self.btn_vsync_toggle = tk.Button(toolbar, text="V周期表示: ON", width=12, command=self.toggle_vsync_display)
@@ -1021,7 +1020,7 @@ class LogViewerApp:
     def save_config_dialog(self):
         p = filedialog.asksaveasfilename(defaultextension=".json"); 
         if p:
-            data = {"keywords": self.keywords_config, "sections": self.sections_config, "replace_patterns": self.replace_patterns_config, "analysis_rules": self.analysis_rules_config, "analysis_time_pattern": self.analysis_time_pattern}
+            data = {"keywords": self.keywords_config, "sections": self.sections_config, "replace_patterns": self.replace_patterns_config, "analysis_rules": self.analysis_rules_config}
             with open(p, "w", encoding="utf-8") as f: json.dump(data, f, indent=2, ensure_ascii=False)
     def load_config(self, p):
         try:
@@ -1031,10 +1030,8 @@ class LogViewerApp:
                 self.sections_config = d.get("sections", [])
                 self.replace_patterns_config = d.get("replace_patterns", [])
                 self.analysis_rules_config = d.get("analysis_rules", [])
-                self.analysis_time_pattern = d.get("analysis_time_pattern", self.analysis_time_pattern)
             t = self.get_current_tab(); 
-            if t: 
-                self.run_analysis_for_tab(t)
+            if t: self.apply_display_update(t)
         except: pass
 
     def export_to_excel(self):
