@@ -34,9 +34,9 @@ DEFAULT_CONFIG = {
         {"pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0}
     ],
     "sections": [
-        {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
-        {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
-        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
+        {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "duration_ms": "", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
+        {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "duration_ms": "", "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
+        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "duration_ms": "", "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns": [],
     "analysis_rules": [
@@ -145,7 +145,6 @@ class LogTab(tk.Frame):
         
         # カーソル行のハイライト設定
         for w in self.all_texts:
-            # 視認性を高めるため、薄い赤背景と下線を設定
             w.tag_configure("cursor_line", background="#ffdddd", underline=True)
             w.bind('<ButtonRelease-1>', self.update_cursor_line)
             w.bind('<KeyRelease>', self.update_cursor_line)
@@ -163,7 +162,6 @@ class LogTab(tk.Frame):
         for t in self.all_texts: t.bind('<MouseWheel>', on_mw)
 
     def update_cursor_line(self, event=None):
-        """カーソルがある行を全てのテキストウィジェットで横断的にハイライトする"""
         if not hasattr(self, 'all_texts'): return
         widget = event.widget if event and isinstance(event.widget, tk.Text) else self.text
         try:
@@ -173,7 +171,6 @@ class LogTab(tk.Frame):
             for w in self.all_texts:
                 w.tag_remove("cursor_line", "1.0", tk.END)
                 w.tag_add("cursor_line", f"{line_num}.0", f"{line_num}.end")
-                # 既存の色分けの上にハイライトを表示させる
                 w.tag_raise("cursor_line")
         except:
             pass
@@ -784,12 +781,16 @@ class LogViewerApp:
                         end_pat = VSYNC_REGEX
                         is_vsync_end = True
                         
+                    end_re = re.compile(end_pat, re.I) if end_pat else None
+                    dur_ms = float(s.get("duration_ms", "0") or 0)
+                    
                     section_rules.append({
                         "start": re.compile(s["start"], re.I),
                         "start_wait": s.get("start_wait", False),
-                        "end": re.compile(end_pat, re.I) if end_pat else None,
+                        "end": end_re,
                         "end_str": end_pat,
                         "end_wait": s.get("end_wait", False),
+                        "duration_ms": dur_ms,
                         "name": s["name"],
                         "color": s["color"],
                         "file_pat_re": re.compile(fp, re.I),
@@ -829,30 +830,44 @@ class LogViewerApp:
                 ended_rule = None
                 
                 def _end_active_state(fn_name, end_i):
+                    ret_str = ""
                     s_info = active_states[fn_name]
-                    if s_info:
-                        ts_start = timestamps[s_info["start_idx"]]
+                    if s_info and "start_idx" in s_info:
+                        idx = s_info["start_idx"]
+                        ts_start = s_info.get("start_ts")
                         ts_end = timestamps[end_i]
+                        
                         if ts_start is not None and ts_end is not None:
                             diff_ms = (ts_end - ts_start) * 1000.0
-                            old_txt, col = status_buffers[fn_name][s_info["start_idx"]]
-                            status_buffers[fn_name][s_info["start_idx"]] = (f"{old_txt} [{diff_ms:.1f}ms]", col)
+                            t_str = f" [{diff_ms:.1f}ms]"
+                            
+                            # 過去の行ならバッファを更新
+                            if idx < len(status_buffers[fn_name]):
+                                old_txt, col = status_buffers[fn_name][idx]
+                                status_buffers[fn_name][idx] = (f"{old_txt}{t_str}", col)
+                            else:
+                                ret_str = t_str
+                    
                     active_states[fn_name] = None
+                    return ret_str
 
                 if active_states[fn] and active_states[fn].get("end_pending") and is_vsync_line:
                     ended_rule = active_states[fn]["rule"]
-                    _end_active_state(fn, i)
+                    t_str = _end_active_state(fn, i)
                     ended_this_line = True
 
                 if pending_states[fn] and is_vsync_line:
                     if active_states[fn]:
                         ended_rule = active_states[fn]["rule"]
-                        _end_active_state(fn, i)
+                        t_str = _end_active_state(fn, i)
+                        # ここでは t_str をどこかに表示する必要があるが、
+                        # 開始と終了が同じ行でない限り、通常は過去行への追記で完結する
                         ended_this_line = True
                     
                     active_states[fn] = {
                         "rule": pending_states[fn]["rule"],
                         "start_idx": i,
+                        "start_ts": timestamps[i],
                         "end_pending": False
                     }
                     pending_states[fn] = None
@@ -867,35 +882,62 @@ class LogViewerApp:
                             else:
                                 if active_states[fn]:
                                     ended_rule = active_states[fn]["rule"]
-                                    _end_active_state(fn, i)
+                                    t_str = _end_active_state(fn, i)
+                                    if t_str: display_text += t_str # 前の区間の終了時間を現在の行に足すかどうかは仕様次第だが、ここでは無視（開始優先）
                                     ended_this_line = True
                                     
                                 active_states[fn] = {
                                     "rule": rule,
                                     "start_idx": i,
+                                    "start_ts": timestamps[i],
                                     "end_pending": False
                                 }
                                 pending_states[fn] = None
                                 rule_to_display = rule
                                 display_text = f"{rule['name']} (開始)"
+                                
+                                is_end_match = False
+                                if rule["end_str"] != "":
+                                    is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
+                                    
+                                if is_end_match:
+                                    if rule["end_wait"]:
+                                        active_states[fn]["end_pending"] = True
+                                    else:
+                                        display_text = f"{rule['name']} (開始/終了) [0.0ms]"
+                                        active_states[fn] = None
                             break 
 
                 if active_states[fn] and not active_states[fn].get("end_pending"):
                     rule = active_states[fn]["rule"]
+                    state_info = active_states[fn]
+                    
+                    is_time_expired = False
+                    if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
+                        if i > state_info["start_idx"]:
+                            elapsed_ms = (timestamps[i] - state_info["start_ts"]) * 1000.0
+                            if elapsed_ms >= rule["duration_ms"]:
+                                is_time_expired = True
+
+                    is_end_match = False
                     if rule["end_str"] != "":
                         if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                            if rule["end_wait"]:
-                                active_states[fn]["end_pending"] = True
+                            is_end_match = True
+
+                    if is_end_match or is_time_expired:
+                        if rule["end_wait"]:
+                            active_states[fn]["end_pending"] = True
+                        else:
+                            ended_rule = rule
+                            t_str = _end_active_state(fn, i)
+                            ended_this_line = True
+                            
+                            if rule_to_display == ended_rule:
+                                # Start and End same line case handled above, this is for later end
+                                display_text = f"{ended_rule['name']} (終了){t_str}"
                             else:
-                                ended_rule = active_states[fn]["rule"]
-                                _end_active_state(fn, i)
-                                ended_this_line = True
-                                
-                                if rule_to_display == ended_rule:
-                                    display_text = f"{ended_rule['name']} (開始/終了) [0.0ms]"
-                                else:
-                                    rule_to_display = ended_rule
-                                    display_text = f"{ended_rule['name']} (終了)"
+                                rule_to_display = ended_rule
+                                display_text = f"{ended_rule['name']} (終了){t_str}"
 
                 if rule_to_display is None:
                     if active_states[fn]:
@@ -903,7 +945,7 @@ class LogViewerApp:
                         display_text = rule_to_display['name']
                     elif ended_this_line:
                         rule_to_display = ended_rule
-                        display_text = f"{ended_rule['name']} (終了)"
+                        # display_text is already set by _end_active_state logic above if needed
 
                 if rule_to_display: 
                     status_buffers[fn].append((display_text, rule_to_display["color"]))
@@ -954,7 +996,6 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
         
-        # --- Consecutive V-Sync Collapse Logic (Only if Filter ON) ---
         if self.use_keyword_filter:
             visible_indices = [idx for idx, vis in enumerate(is_visible) if vis]
             v_ptr = 0
@@ -1156,7 +1197,7 @@ class LogViewerApp:
         self._edit_dlg("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。", "replace_patterns", ["search","replace"])
         
     def edit_sections_dialog(self): 
-        self._edit_dlg("区間設定の編集 ※ファイル毎に開始～終了パターンを定義して色分けします。", "sections", ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "color"])
+        self._edit_dlg("区間設定の編集 ※ファイル毎に開始～終了パターンを定義して色分けします。", "sections", ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "duration_ms", "color"])
 
     def _edit_dlg(self, title, key, fields):
         ref_attr = f"{key}_dlg_ref"
@@ -1189,6 +1230,7 @@ class LogViewerApp:
         if "start_wait" in fields: tk.Label(hdr, text="+V待", width=4).pack(side=tk.LEFT)
         if "end" in fields: tk.Label(hdr, text="終了パターン", width=15, anchor="w").pack(side=tk.LEFT)
         if "end_wait" in fields: tk.Label(hdr, text="+V待", width=4).pack(side=tk.LEFT)
+        if "duration_ms" in fields: tk.Label(hdr, text="持続(ms)", width=8).pack(side=tk.LEFT, padx=2)
         
         if "color" in fields: tk.Label(hdr, text="色", width=10).pack(side=tk.LEFT, padx=15)
         if "replace" in fields: tk.Label(hdr, text="置換/説明", width=30).pack(side=tk.LEFT, padx=5)
@@ -1233,9 +1275,11 @@ class LogViewerApp:
                 if "end" in fields:
                     tk.Entry(r, textvariable=item["end"], width=15).pack(side=tk.LEFT, padx=2)
                     if key == "sections":
-                         tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                         tk.Button(r, text="<V>", width=3, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
                 if "end_wait" in fields:
                     tk.Checkbutton(r, variable=item["end_wait"]).pack(side=tk.LEFT, padx=2)
+                if "duration_ms" in fields:
+                    tk.Entry(r, textvariable=item["duration_ms"], width=8).pack(side=tk.LEFT, padx=2)
                 
                 if "color" in fields:
                     tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
@@ -1333,6 +1377,13 @@ class LogViewerApp:
             td = tab.timediff_text.get("1.0", "end-1c").splitlines()
             srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
             if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
+            
+            # Use already calculated status buffers from GUI
+            status_buffers = {fn: [] for fn in tab.source_file_names}
+            
+            # Re-calculate visibility map (same logic as display)
+            re_vsync = re.compile(VSYNC_REGEX, re.I)
+            is_visible = [True] * len(l)
             
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
             header_row = '<thead><tr><th>Line</th><th>Time Diff</th><th>Log Content</th><th>Comment</th>'
