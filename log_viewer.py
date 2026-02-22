@@ -34,9 +34,9 @@ DEFAULT_CONFIG = {
         {"pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0}
     ],
     "sections": [
-        {"name": "初期化(Server)", "start": "SRV_INIT_START", "end": "SRV_INIT_DONE", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
-        {"name": "初期化(Client)", "start": "CLI_BOOT",       "end": "CLI_READY",     "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
-        {"name": "通信処理",       "start": "CONNECT",        "end": "DISCONNECT",    "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
+        {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
+        {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
+        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns": [],
     "analysis_rules": [
@@ -141,19 +141,42 @@ class LogTab(tk.Frame):
             hsb.config(command=st_text.xview)
             self.status_texts[fname] = st_text
             
-        all_texts = [self.text, self.timediff_text, self.comment_text] + list(self.status_texts.values())
+        self.all_texts = [self.text, self.timediff_text, self.comment_text] + list(self.status_texts.values())
+        
+        # カーソル行のハイライト設定
+        for w in self.all_texts:
+            # 視認性を高めるため、薄い赤背景と下線を設定
+            w.tag_configure("cursor_line", background="#ffdddd", underline=True)
+            w.bind('<ButtonRelease-1>', self.update_cursor_line)
+            w.bind('<KeyRelease>', self.update_cursor_line)
         
         def sync_yview(*args):
-            for t in all_texts: t.yview(*args)
+            for t in self.all_texts: t.yview(*args)
             self.linenumbers.redraw()
         self.vsb.config(command=sync_yview)
         
         def on_mw(e):
             d = int(-1*(e.delta/120)) if e.delta else 0
-            for t in all_texts: t.yview_scroll(d, "units")
+            for t in self.all_texts: t.yview_scroll(d, "units")
             self.linenumbers.redraw()
             return "break"
-        for t in all_texts: t.bind('<MouseWheel>', on_mw)
+        for t in self.all_texts: t.bind('<MouseWheel>', on_mw)
+
+    def update_cursor_line(self, event=None):
+        """カーソルがある行を全てのテキストウィジェットで横断的にハイライトする"""
+        if not hasattr(self, 'all_texts'): return
+        widget = event.widget if event and isinstance(event.widget, tk.Text) else self.text
+        try:
+            idx = widget.index("insert")
+            line_num = idx.split('.')[0]
+            
+            for w in self.all_texts:
+                w.tag_remove("cursor_line", "1.0", tk.END)
+                w.tag_add("cursor_line", f"{line_num}.0", f"{line_num}.end")
+                # 既存の色分けの上にハイライトを表示させる
+                w.tag_raise("cursor_line")
+        except:
+            pass
 
 class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
@@ -470,7 +493,6 @@ class LogViewerApp:
             self.analysis_rules_config = new_rules
             self.analysis_time_pattern = e_ts.get()
             
-            # フィルタ設定(キーワード)への自動追加ロジック
             existing_patterns = set(kw.get("pattern", "") for kw in self.keywords_config)
             
             for rule in new_rules:
@@ -765,7 +787,7 @@ class LogViewerApp:
                     section_rules.append({
                         "start": re.compile(s["start"], re.I),
                         "start_wait": s.get("start_wait", False),
-                        "end": re.compile(end_pat, re.I),
+                        "end": re.compile(end_pat, re.I) if end_pat else None,
                         "end_str": end_pat,
                         "end_wait": s.get("end_wait", False),
                         "name": s["name"],
@@ -938,9 +960,6 @@ class LogViewerApp:
             v_ptr = 0
             while v_ptr < len(visible_indices):
                 idx = visible_indices[v_ptr]
-                
-                # Check if current visible line is a V-Sync
-                # (Use the same logic: marker string or regex match)
                 is_curr_vsync = (VSYNC_MARKER in lines[idx]) or (re_vsync.search(lines[idx]) is not None)
                 
                 if is_curr_vsync:
@@ -957,18 +976,14 @@ class LogViewerApp:
                         else:
                             break
                     
-                    # If block has 3 or more V-Syncs, hide the middle ones
                     if len(block_indices) >= 3:
                         for hide_idx in block_indices[1:-1]:
                             is_visible[hide_idx] = False
-                            # Also remove from visible mapping (optional, but consistent)
-                            # Re-map later is safer but expensive. Just marking False is enough for rendering loop.
 
                     v_ptr = next_ptr
                 else:
                     v_ptr += 1
             
-            # Re-calculate line numbers after collapsing
             visible_mapping = {}
             display_line_count = 1
             for i in range(len(lines)):
@@ -1059,6 +1074,7 @@ class LogViewerApp:
             tab.text.tag_add(tn, f"{ln}.0", f"{ln}.end")
             
         tab.linenumbers.redraw()
+        tab.update_cursor_line()
 
     def _apply_replacements(self, content: str) -> str:
         for itm in self.replace_patterns_config:
@@ -1121,6 +1137,7 @@ class LogViewerApp:
             
             tab.text.mark_set("insert", pos)
             tab.text.see(pos)
+            tab.update_cursor_line()
             self.status_var.set(f"検索: '{self.last_search_keyword}' が見つかりました。")
         else:
             self.status_var.set(f"検索: '{self.last_search_keyword}' は見つかりませんでした。")
@@ -1216,7 +1233,7 @@ class LogViewerApp:
                 if "end" in fields:
                     tk.Entry(r, textvariable=item["end"], width=15).pack(side=tk.LEFT, padx=2)
                     if key == "sections":
-                         tk.Button(r, text="<V>", width=3, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                         tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
                 if "end_wait" in fields:
                     tk.Checkbutton(r, variable=item["end_wait"]).pack(side=tk.LEFT, padx=2)
                 
@@ -1317,33 +1334,6 @@ class LogViewerApp:
             srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
             if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
             
-            # --- Status Re-Calculation is NOT needed here because we use GUI text content directly ---
-            # To ensure WYSIWYG, we scrape what's on the screen (including background colors).
-            
-            # Prepare status buffers from GUI content
-            status_buffers = {fn: [] for fn in tab.source_file_names}
-            
-            # Re-calculate visibility map (same logic as display)
-            # This is needed because 'l' contains all lines, but we might want to skip hidden ones
-            re_vsync = re.compile(VSYNC_REGEX, re.I)
-            is_visible = [True] * len(l)
-            
-            # Determine visibility based on current keyword/vsync filter state
-            # Note: Ideally we should use the same `is_visible` array from `apply_display_update` 
-            # but that's local variable. We will reconstruct it simply or assume `l` (get 1.0 to end)
-            # is what the user sees? 
-            # `text.get("1.0", "end")` returns ALL text, even if tagged invisible?
-            # Actually Tkinter Text get returns everything.
-            # To export EXACTLY what is seen, we must respect the filters.
-            
-            # Re-run filter logic to determine visibility for export
-            # (Simplified version of apply_display_update logic for visibility)
-            # We can also check if the line has the 'elide' tag if we implemented hiding that way,
-            # but currently we re-insert text. So `l` IS what is in the buffer.
-            # Wait, `apply_display_update` does `tab.text.delete("1.0", tk.END)` then insert.
-            # So `l` contains ONLY visible lines!
-            # Therefore, we don't need to re-filter. We just iterate `l`.
-            
             h = ['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
             header_row = '<thead><tr><th>Line</th><th>Time Diff</th><th>Log Content</th><th>Comment</th>'
             for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
@@ -1351,8 +1341,6 @@ class LogViewerApp:
             
             for i, line in enumerate(l):
                 bg_color = "transparent"
-                # To get tags, we need to map `i` (index in `l`) to line number in widget
-                # Since `l` corresponds 1:1 to widget lines:
                 tags = tab.text.tag_names(f"{i+1}.0")
                 for tag in tags:
                     if tag.startswith("kw_"):
@@ -1364,7 +1352,6 @@ class LogViewerApp:
                 row_html = f'<tr style="background:{bg_color}"><td>{i+1}</td><td>{html.escape(diff_str)}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
                 
                 for fn in tab.source_file_names:
-                    # Get text and color from status widgets
                     txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
                     st_bg = "transparent"
                     st_tags = tab.status_texts[fn].tag_names(f"{i+1}.0")
