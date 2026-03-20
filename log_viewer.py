@@ -28,11 +28,11 @@ VIRTUAL_SRC_NAME = "(Virtual)"
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
     "keywords":[
-        {"pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
-        {"pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
-        {"pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0},
-        {"pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0},
-        {"pattern": r"--- \[VIRTUAL TIMER\].*", "color": "#ffe0b2", "comment": "タイマー満了", "enabled": True, "extra_lines": 0}
+        {"file_pattern": ".*", "pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
+        {"file_pattern": ".*", "pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
+        {"file_pattern": ".*", "pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0},
+        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0},
+        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL TIMER\].*", "color": "#ffe0b2", "comment": "タイマー満了", "enabled": True, "extra_lines": 0}
     ],
     "sections":[
         {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "duration_ms": "", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
@@ -48,7 +48,9 @@ DEFAULT_CONFIG = {
         "event_pattern": r"V_START|V-Sync",
         "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
         "mode": "auto", 
-        "manual_ms": 16.666
+        "manual_ms": 16.666,
+        "start_mode": "pattern",
+        "start_line": ""
     }
 }
 
@@ -56,7 +58,7 @@ class LineNumberCanvas(tk.Canvas):
     def __init__(self, master, text_widget, **kwargs):
         super().__init__(master, **kwargs)
         self.text_widget = text_widget
-        for ev in ['<KeyRelease>', '<MouseWheel>', '<Configure>', '<<Modified>>', '<Button-1>']:
+        for ev in['<KeyRelease>', '<MouseWheel>', '<Configure>', '<<Modified>>', '<Button-1>']:
             self.text_widget.bind(ev, self.redraw)
 
     def redraw(self, *args):
@@ -78,8 +80,8 @@ class LogTab(tk.Frame):
         self.original_content = content
         self.is_merged = is_merged
         
-        self.source_file_names = source_files_list if source_files_list else ([os.path.basename(path)] if path else [])
-        self.line_source_map: List[str] = []
+        self.source_file_names = source_files_list if source_files_list else ([os.path.basename(path)] if path else[])
+        self.line_source_map: List[str] =[]
         self.status_texts: Dict[str, tk.Text] = {}
         self.analysis_comments: Dict[int, str] = {}
         self._create_layout()
@@ -185,7 +187,7 @@ class LogViewerApp:
         self.keywords_config =[x.copy() for x in DEFAULT_CONFIG["keywords"]]
         self.sections_config =[x.copy() for x in DEFAULT_CONFIG["sections"]]
         self.replace_patterns_config =[]
-        self.analysis_rules_config = [x.copy() for x in DEFAULT_CONFIG["analysis_rules"]]
+        self.analysis_rules_config =[x.copy() for x in DEFAULT_CONFIG["analysis_rules"]]
         self.vsync_config = DEFAULT_CONFIG["vsync_auto_insert"].copy()
         
         self.use_keyword_filter = False
@@ -339,7 +341,7 @@ class LogViewerApp:
             
         fname = os.path.basename(path)
         if self.vsync_config.get("enabled", True):
-            new_content, new_src_map = self._process_vsync_insertion(content, [fname]*len(content.splitlines()), [fname])
+            new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()), [fname])
             tab = LogTab(self.notebook, self, path, new_content, source_files_list=[fname], is_merged=True)
             tab.line_source_map = new_src_map
             self.notebook.add(tab, text=fname)
@@ -368,7 +370,12 @@ class LogViewerApp:
         kw_rules =[]
         for itm in self.keywords_config:
             if itm.get("enabled", True):
-                try: kw_rules.append((re.compile(itm["pattern"], re.I), int(itm.get("extra_lines", 0))))
+                try: 
+                    kw_rules.append((
+                        re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
+                        re.compile(itm["pattern"], re.I), 
+                        int(itm.get("extra_lines", 0))
+                    ))
                 except: pass
                 
         all_blocks =[]
@@ -388,14 +395,17 @@ class LogViewerApp:
                 if ts_part.strip() and len(line) > 0 and not line[0].isspace(): last_valid_ts = ts_part
                 effective_ts.append(last_valid_ts)
             first_ts = next((x for x in effective_ts if x), "0"*ts_len)
-            effective_ts = [x if x else first_ts for x in effective_ts]
+            effective_ts =[x if x else first_ts for x in effective_ts]
             
             i = 0
             while i < len(raw_lines):
                 line = raw_lines[i]
+                current_src = t.line_source_map[i] if (t.line_source_map and i < len(t.line_source_map)) else fn
                 extra = 0
-                for pat, ex in kw_rules:
-                    if pat.search(line): extra = ex; break
+                for fpat, pat, ex in kw_rules:
+                    if fpat.search(current_src) and pat.search(line): 
+                        extra = ex
+                        break
                 
                 actual_extra = 0
                 for j in range(1, extra + 1):
@@ -408,12 +418,11 @@ class LogViewerApp:
                 
                 bl = raw_lines[i : i + actual_extra + 1]
                 skey = effective_ts[i]
-                current_src = t.line_source_map[i] if (t.line_source_map and i < len(t.line_source_map)) else fn
                 all_blocks.append((skey, bl, current_src))
                 i += actual_extra + 1
                 
         all_blocks.sort(key=lambda x: x[0])
-        final_lines, final_src = [],[]
+        final_lines, final_src =[],[]
         for _, bl, src_name in all_blocks:
             final_lines.extend(bl)
             final_src.extend([src_name] * len(bl))
@@ -501,7 +510,7 @@ class LogViewerApp:
         act_fr.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=10)
         
         def save_and_run():
-            new_rules = []
+            new_rules =[]
             for item in entries:
                 r = {
                     "enabled": item["enabled"].get(),
@@ -521,6 +530,7 @@ class LogViewerApp:
                 cmd_pat = rule["cmd_pattern"].strip()
                 if cmd_pat and cmd_pat not in existing_patterns:
                     self.keywords_config.append({
+                        "file_pattern": ".*",
                         "pattern": cmd_pat,
                         "color": "#ffffff",
                         "comment": "",
@@ -532,6 +542,7 @@ class LogViewerApp:
                 vsync_pat = rule["vsync_pattern"].strip()
                 if vsync_pat and vsync_pat not in existing_patterns:
                     self.keywords_config.append({
+                        "file_pattern": ".*",
                         "pattern": vsync_pat,
                         "color": "#ffffff",
                         "comment": "",
@@ -555,7 +566,7 @@ class LogViewerApp:
     def run_analysis_for_tab(self, tab: LogTab):
         tab.analysis_comments.clear()
         
-        rules = [r for r in self.analysis_rules_config if r["enabled"] and r["cmd_pattern"] and r["vsync_pattern"]]
+        rules =[r for r in self.analysis_rules_config if r["enabled"] and r["cmd_pattern"] and r["vsync_pattern"]]
         if not rules:
             self.apply_display_update(tab)
             return
@@ -626,7 +637,7 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title("V周期(仮想)挿入の設定")
-        dlg.geometry("450x350")
+        dlg.geometry("480x430")
         self.vsync_settings_dlg_ref = dlg
         
         conf = self.vsync_config
@@ -638,13 +649,31 @@ class LogViewerApp:
         e_pattern.pack(padx=10, pady=2)
         e_pattern.insert(0, conf.get("event_pattern", r"V_START|V-Sync"))
 
-        tk.Label(dlg, text="タイムスタンプ抽出(正規表現):").pack(anchor="w", padx=10, pady=(10,0))
+        tk.Label(dlg, text="タイムスタンプ抽出(正規表現):").pack(anchor="w", padx=10, pady=(5,0))
         e_ts_pat = tk.Entry(dlg, width=50)
         e_ts_pat.pack(padx=10, pady=2)
         e_ts_pat.insert(0, conf.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?"))
 
+        # --- 開始位置の指定 ---
+        frame_start = tk.LabelFrame(dlg, text="開始位置の指定")
+        frame_start.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        start_mode_var = tk.StringVar(value=conf.get("start_mode", "pattern"))
+        
+        rb_start_pat = tk.Radiobutton(frame_start, text="イベントパターンにマッチした最初の行から開始", variable=start_mode_var, value="pattern")
+        rb_start_pat.pack(anchor="w", padx=5, pady=2)
+        
+        f_start_line = tk.Frame(frame_start)
+        f_start_line.pack(anchor="w", padx=5, pady=2)
+        rb_start_line = tk.Radiobutton(f_start_line, text="指定した行番号の時刻から開始 (行番号):", variable=start_mode_var, value="line")
+        rb_start_line.pack(side=tk.LEFT)
+        e_start_line = tk.Entry(f_start_line, width=10)
+        e_start_line.pack(side=tk.LEFT, padx=5)
+        e_start_line.insert(0, str(conf.get("start_line", "")))
+
+        # --- 間隔設定 ---
         frame_mode = tk.LabelFrame(dlg, text="間隔設定")
-        frame_mode.pack(fill=tk.X, padx=10, pady=10)
+        frame_mode.pack(fill=tk.X, padx=10, pady=5)
         
         mode_var = tk.StringVar(value=conf.get("mode", "auto"))
         rb_auto = tk.Radiobutton(frame_mode, text="自動計算 (最初の2つのイベント間隔を使用)", variable=mode_var, value="auto")
@@ -667,7 +696,9 @@ class LogViewerApp:
                 "event_pattern": e_pattern.get(),
                 "time_pattern": e_ts_pat.get(),
                 "mode": mode_var.get(),
-                "manual_ms": ms
+                "manual_ms": ms,
+                "start_mode": start_mode_var.get(),
+                "start_line": e_start_line.get()
             }
             self.save_config_dialog_silent() 
             messagebox.showinfo("保存", "設定を保存しました。次回ファイルオープン時から適用されます。")
@@ -737,14 +768,35 @@ class LogViewerApp:
         pat = self.vsync_config.get("event_pattern", r"V_START|V-Sync")
         mode = self.vsync_config.get("mode", "auto")
         manual_ms = self.vsync_config.get("manual_ms", 16.666)
+        start_mode = self.vsync_config.get("start_mode", "pattern")
+        start_line_str = self.vsync_config.get("start_line", "")
         
         re_event = re.compile(pat, re.I)
         events =[]
-        for i, line in enumerate(lines_temp):
-            if re_event.search(line):
+        
+        start_search_idx = 0
+        start_line_idx = -1
+        
+        if start_mode == "line":
+            try:
+                line_num = int(start_line_str)
+                line_idx = line_num - 1
+                if 0 <= line_idx < len(timestamps_temp):
+                    t = timestamps_temp[line_idx]
+                    if t is not None:
+                        events.append(t)
+                        start_search_idx = line_idx + 1
+                        start_line_idx = line_idx
+            except Exception:
+                pass
+                
+        for i in range(start_search_idx, len(lines_temp)):
+            if re_event.search(lines_temp[i]):
                 t = timestamps_temp[i]
                 if t is not None:
                     events.append(t)
+                    if start_line_idx == -1:
+                        start_line_idx = i
                     if mode == "auto" and len(events) >= 2: break 
                         
         start_time = events[0] if events else 0.0
@@ -773,7 +825,10 @@ class LogViewerApp:
                         insertion_count += 1
                     if insertion_count >= 100: next_virtual_ts = line_ts + interval_sec
                     
-                lines_v.append(line)
+                if i == start_line_idx:
+                    lines_v.append(line + "  <<<[V-SYNC 起点]")
+                else:
+                    lines_v.append(line)
                 src_map_v.append(src_map_temp[i])
                 timestamps_v.append(line_ts)
         else:
@@ -836,7 +891,7 @@ class LogViewerApp:
                 expired.sort(key=lambda x: x[0])
                 for exp_ts, fn_name, rule in expired:
                     dur_ms = rule['duration_ms']
-                    v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+                    v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
                     lines_final.append(v_line)
                     src_map_final.append(VIRTUAL_SRC_NAME)
                     active_states_sim[fn_name] = None
@@ -873,6 +928,10 @@ class LogViewerApp:
                                 if rule["end_str"] != "":
                                     is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
                                     
+                                # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
+                                if rule["duration_ms"] > 0:
+                                    is_end_match = False
+                                    
                                 if is_end_match:
                                     if rule["end_wait"]:
                                         active_states_sim[fn]["end_pending"] = True
@@ -886,6 +945,13 @@ class LogViewerApp:
                     if rule["end_str"] != "":
                         if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
                             is_end_match = True
+
+                    # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
+                    if rule["duration_ms"] > 0 and active_states_sim[fn].get("start_ts") is not None and ts is not None:
+                        elapsed_ms = (ts - active_states_sim[fn]["start_ts"]) * 1000.0
+                        if elapsed_ms < rule["duration_ms"] - 0.001:
+                            is_end_match = False
+
                     if is_end_match:
                         if rule["end_wait"]:
                             active_states_sim[fn]["end_pending"] = True
@@ -903,7 +969,7 @@ class LogViewerApp:
         remaining_expired.sort(key=lambda x: x[0])
         for exp_ts, fn_name, rule in remaining_expired:
             dur_ms = rule['duration_ms']
-            v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+            v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
             lines_final.append(v_line)
             src_map_final.append(VIRTUAL_SRC_NAME)
 
@@ -1062,6 +1128,10 @@ class LogViewerApp:
                                 if rule["end_str"] != "":
                                     is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
                                     
+                                # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
+                                if rule["duration_ms"] > 0:
+                                    is_end_match = False
+                                    
                                 if is_end_match:
                                     if rule["end_wait"]:
                                         active_states[fn]["end_pending"] = True
@@ -1085,6 +1155,10 @@ class LogViewerApp:
                     if rule["end_str"] != "":
                         if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
                             is_end_match = True
+
+                    # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
+                    if rule["duration_ms"] > 0 and not is_time_expired:
+                        is_end_match = False
 
                     if is_end_match or is_time_expired:
                         if rule["end_wait"]:
@@ -1116,6 +1190,7 @@ class LogViewerApp:
         for itm in self.keywords_config:
             if itm.get("enabled", True):
                 try: kw_rules.append({
+                        "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
                         "regex": re.compile(itm["pattern"], re.I),
                         "comment": itm.get("comment", ""),
                         "color": itm.get("color", "#ffffff"),
@@ -1126,6 +1201,7 @@ class LogViewerApp:
         has_timer_rule = any("VIRTUAL TIMER" in str(r.get("pattern", "")) for r in self.keywords_config)
         if not has_timer_rule:
             kw_rules.append({
+                "file_pat_re": re.compile(".*"),
                 "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
                 "comment": "タイマー満了",
                 "color": "#ffe0b2",
@@ -1133,16 +1209,24 @@ class LogViewerApp:
             })
 
         for idx in range(len(lines)):
+            if "<<< [V-SYNC 起点]" in lines[idx]:
+                if line_attrs[idx]["priority"] < 30:
+                    line_attrs[idx]["color"] = "#ffb6c1" # ピンク色
+                    line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
+                    line_attrs[idx]["priority"] = 30
+
+            line_src = srcs[idx]
             for rule in kw_rules:
-                if rule["regex"].search(lines[idx]):
-                    for j in range(idx, min(idx + rule["extra"] + 1, len(lines))):
-                        if line_attrs[j]["priority"] < 20:
-                            line_attrs[j]["color"] = rule["color"]
-                            base_cmt = line_attrs[j]["comment"]
-                            new_cmt = rule["comment"]
-                            line_attrs[j]["comment"] = f"{base_cmt} {new_cmt}".strip()
-                            line_attrs[j]["priority"] = 20
-                    break
+                if rule["file_pat_re"].search(line_src):
+                    if rule["regex"].search(lines[idx]):
+                        for j in range(idx, min(idx + rule["extra"] + 1, len(lines))):
+                            if line_attrs[j]["priority"] < 20:
+                                line_attrs[j]["color"] = rule["color"]
+                                base_cmt = line_attrs[j]["comment"]
+                                new_cmt = rule["comment"]
+                                line_attrs[j]["comment"] = f"{base_cmt} {new_cmt}".strip()
+                                line_attrs[j]["priority"] = 20
+                        break
 
         visible_mapping = {}
         is_visible = [True] * len(lines)
@@ -1154,7 +1238,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
@@ -1168,14 +1252,14 @@ class LogViewerApp:
                 display_line_count += 1
         
         if self.use_keyword_filter:
-            visible_indices = [idx for idx, vis in enumerate(is_visible) if vis]
+            visible_indices =[idx for idx, vis in enumerate(is_visible) if vis]
             v_ptr = 0
             while v_ptr < len(visible_indices):
                 idx = visible_indices[v_ptr]
                 is_curr_vsync = (VSYNC_MARKER in lines[idx]) or (re_vsync.search(lines[idx]) is not None)
                 
                 if is_curr_vsync:
-                    block_indices = [idx]
+                    block_indices =[idx]
                     next_ptr = v_ptr + 1
                     
                     while next_ptr < len(visible_indices):
@@ -1203,7 +1287,7 @@ class LogViewerApp:
                     visible_mapping[i] = display_line_count
                     display_line_count += 1
 
-        flines, fcmts, ftimediffs = [], [], []
+        flines, fcmts, ftimediffs = [],[], []
         main_tags =[]
         final_st_lines = {fn:[] for fn in tab.source_file_names}
         final_st_tags = {fn:[] for fn in tab.source_file_names}
@@ -1362,10 +1446,10 @@ class LogViewerApp:
         menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
 
     def edit_keywords_dialog(self): 
-        self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords",["pattern","color","comment","extra_lines"])
+        self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords",["file_pattern", "pattern","color","comment","extra_lines"])
         
     def edit_replace_patterns_dialog(self): 
-        self._edit_dlg("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。", "replace_patterns", ["search","replace"])
+        self._edit_dlg("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。", "replace_patterns",["search","replace"])
         
     def edit_sections_dialog(self): 
         self._edit_dlg("区間設定の編集 ※ファイル毎に開始～終了パターンを定義して色分けします。", "sections",["file_pattern", "name", "start", "start_wait", "end", "end_wait", "duration_ms", "color"])
@@ -1466,10 +1550,12 @@ class LogViewerApp:
         def add(data=None):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
             for f in fields:
-                if f in ["start_wait", "end_wait"]:
+                if f in["start_wait", "end_wait"]:
                     item[f] = tk.BooleanVar(value=data.get(f, False) if data else False)
                 else:
-                    item[f] = tk.StringVar(value=str(data.get(f, "0" if f=="extra_lines" else "")) if data else ("0" if f=="extra_lines" else ""))
+                    def_val = "0" if f == "extra_lines" else (".*" if f == "file_pattern" else "")
+                    val = data.get(f, def_val) if data and f in data else def_val
+                    item[f] = tk.StringVar(value=str(val))
             entries.append(item)
             refresh()
             
@@ -1494,7 +1580,7 @@ class LogViewerApp:
             new_cfg =[]
             for item in entries:
                 valid = False
-                for k in ["pattern", "search", "start"]:
+                for k in["pattern", "search", "start"]:
                     if k in fields and item[k].get(): valid = True
                 if valid:
                     d = {f: item[f].get() for f in fields}
@@ -1527,7 +1613,7 @@ class LogViewerApp:
         try:
             with open(p, "r", encoding="utf-8") as f:
                 d = json.load(f)
-                self.keywords_config = d.get("keywords", [])
+                self.keywords_config = d.get("keywords",[])
                 self.sections_config = d.get("sections",[])
                 self.replace_patterns_config = d.get("replace_patterns",[])
                 self.analysis_rules_config = d.get("analysis_rules",[])
