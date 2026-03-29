@@ -40,9 +40,6 @@ DEFAULT_CONFIG = {
         {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "duration_ms": "", "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns":[],
-    "analysis_rules":[
-        {"name": "Input->V", "cmd_pattern": "Command|Input", "vsync_pattern": "V_START|V-Sync|VIRTUAL V-SYNC", "enabled": True}
-    ],
     "vsync_auto_insert": {
         "enabled": True,
         "event_pattern": r"V_START|V-Sync",
@@ -83,7 +80,6 @@ class LogTab(tk.Frame):
         self.source_file_names = source_files_list if source_files_list else ([os.path.basename(path)] if path else[])
         self.line_source_map: List[str] =[]
         self.status_texts: Dict[str, tk.Text] = {}
-        self.analysis_comments: Dict[int, str] = {}
         self._create_layout()
 
     def _create_layout(self):
@@ -122,7 +118,7 @@ class LogTab(tk.Frame):
         self.hsb_cmt = tk.Scrollbar(cmt_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
         
-        tk.Label(cmt_frame, text="Comment / Tags / Analysis", bg="#e0e0e0", relief=tk.RAISED).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(cmt_frame, text="Comment / Tags", bg="#e0e0e0", relief=tk.RAISED).pack(side=tk.TOP, fill=tk.X)
         
         self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg="#fcfcfc", fg="#0000aa", yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_cmt.set)
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
@@ -187,7 +183,6 @@ class LogViewerApp:
         self.keywords_config =[x.copy() for x in DEFAULT_CONFIG["keywords"]]
         self.sections_config =[x.copy() for x in DEFAULT_CONFIG["sections"]]
         self.replace_patterns_config =[]
-        self.analysis_rules_config =[x.copy() for x in DEFAULT_CONFIG["analysis_rules"]]
         self.vsync_config = DEFAULT_CONFIG["vsync_auto_insert"].copy()
         
         self.use_keyword_filter = False
@@ -199,7 +194,6 @@ class LogViewerApp:
         self.sections_dlg_ref = None
         self.find_window_ref = None
         self.last_search_keyword = ""
-        self.analysis_dlg_ref = None
         self.vsync_settings_dlg_ref = None
 
         self._build_ui()
@@ -242,7 +236,6 @@ class LogViewerApp:
         cmenu.add_command(label="区間設定の編集 (開始-終了)...", command=self.edit_sections_dialog)
         cmenu.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog)
         cmenu.add_separator()
-        cmenu.add_command(label="イベント適用解析設定の編集...", command=self.edit_analysis_rules_dialog)
         cmenu.add_command(label="V周期(仮想)挿入の設定...", command=self.open_vsync_settings_dialog)
         menubar.add_cascade(label="設定", menu=cmenu)
         
@@ -306,7 +299,7 @@ class LogViewerApp:
                     else: 
                         t.original_content = content
                         t.line_source_map =[] 
-                    self.run_analysis_for_tab(t)
+                    self.apply_display_update(t)
             
             if len(target_tabs) >= 2:
                 self.merge_logs_action(auto_ts_len=self.last_merge_ts_len)
@@ -329,7 +322,7 @@ class LogViewerApp:
             tab.original_content = content
             tab.line_source_map =[] 
             
-        self.run_analysis_for_tab(tab)
+        self.apply_display_update(tab)
         self.status_var.set(f"再読み込み完了: {os.path.basename(tab.file_path)}")
 
     def _open_file_path(self, path: str):
@@ -346,12 +339,12 @@ class LogViewerApp:
             tab.line_source_map = new_src_map
             self.notebook.add(tab, text=fname)
             self.notebook.select(tab)
-            self.run_analysis_for_tab(tab)
+            self.apply_display_update(tab)
         else:
             tab = LogTab(self.notebook, self, path, content, source_files_list=[fname])
             self.notebook.add(tab, text=fname)
             self.notebook.select(tab)
-            self.run_analysis_for_tab(tab)
+            self.apply_display_update(tab)
 
     def merge_logs_action(self, auto_ts_len=None):
         tabs =[self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
@@ -431,203 +424,7 @@ class LogViewerApp:
         m_tab.line_source_map = final_src
         self.notebook.add(m_tab, text="[マージ結果]")
         self.notebook.select(m_tab)
-        self.run_analysis_for_tab(m_tab)
-
-    # --- Analysis Features (Auto) ---
-    def edit_analysis_rules_dialog(self):
-        if self.analysis_dlg_ref and self.analysis_dlg_ref.winfo_exists():
-            self.analysis_dlg_ref.lift()
-            return
-            
-        dlg = tk.Toplevel(self.root)
-        dlg.title("イベント適用解析設定の編集")
-        dlg.geometry("900x500")
-        self.analysis_dlg_ref = dlg
-
-        fr = tk.Frame(dlg)
-        fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        tk.Label(fr, text="「(先) 指示イベント」と「(後) 適用イベント」のペアを登録します。\nOKを押すと、全タブに対して解析が再実行され、パターンがフィルタ設定に自動追加されます。", anchor="w").pack(fill=tk.X)
-        
-        l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1)
-        l_fr.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        hdr = tk.Frame(l_fr)
-        hdr.pack(fill=tk.X, padx=5, pady=2)
-        tk.Frame(hdr, width=120).pack(side=tk.LEFT) 
-        tk.Label(hdr, text="解析名", width=20, anchor="w").pack(side=tk.LEFT, padx=5)
-        tk.Label(hdr, text="(先) 指示イベント(Trigger)", width=30, anchor="w", fg="#0000aa").pack(side=tk.LEFT, padx=5)
-        tk.Label(hdr, text="(後) 適用イベント(Apply)", width=30, anchor="w", fg="#aa0000").pack(side=tk.LEFT, padx=5)
-
-        cv = tk.Canvas(l_fr)
-        sc = tk.Scrollbar(l_fr, command=cv.yview)
-        sf = tk.Frame(cv)
-        cv.configure(yscrollcommand=sc.set)
-        sc.pack(side=tk.RIGHT, fill=tk.Y)
-        cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        win = cv.create_window((0,0), window=sf, anchor="nw")
-        sf.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind("<Configure>", lambda e: cv.itemconfig(win, width=e.width))
-
-        entries =[]
-        
-        def refresh():
-            for w in sf.winfo_children(): w.destroy()
-            for i, item in enumerate(entries):
-                r = tk.Frame(sf)
-                r.pack(fill=tk.X, pady=2, padx=5)
-                tk.Checkbutton(r, variable=item["enabled"]).pack(side=tk.LEFT)
-                tk.Button(r, text="↑", width=2, command=lambda idx=i: move(idx, -1)).pack(side=tk.LEFT)
-                tk.Button(r, text="↓", width=2, command=lambda idx=i: move(idx, 1)).pack(side=tk.LEFT)
-                tk.Button(r, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
-                
-                tk.Entry(r, textvariable=item["name"], width=20).pack(side=tk.LEFT, padx=5)
-                tk.Entry(r, textvariable=item["cmd_pattern"], width=30).pack(side=tk.LEFT, padx=5)
-                tk.Entry(r, textvariable=item["vsync_pattern"], width=30).pack(side=tk.LEFT, padx=5)
-
-        def add(data=None):
-            item = {
-                "enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True),
-                "name": tk.StringVar(value=data.get("name", "") if data else ""),
-                "cmd_pattern": tk.StringVar(value=data.get("cmd_pattern", "") if data else ""),
-                "vsync_pattern": tk.StringVar(value=data.get("vsync_pattern", "") if data else "")
-            }
-            entries.append(item); refresh()
-            
-        def delete(i): del entries[i]; refresh()
-        def move(i, d): 
-            if 0 <= i+d < len(entries): entries[i], entries[i+d] = entries[i+d], entries[i]; refresh()
-
-        if not self.analysis_rules_config: add()
-        else:
-            for r in self.analysis_rules_config: add(r)
-
-        btn_bar = tk.Frame(fr)
-        btn_bar.pack(fill=tk.X, pady=5)
-        tk.Button(btn_bar, text="行を追加", command=add).pack(side=tk.LEFT)
-
-        act_fr = tk.Frame(dlg)
-        act_fr.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=10)
-        
-        def save_and_run():
-            new_rules =[]
-            for item in entries:
-                r = {
-                    "enabled": item["enabled"].get(),
-                    "name": item["name"].get(),
-                    "cmd_pattern": item["cmd_pattern"].get(),
-                    "vsync_pattern": item["vsync_pattern"].get()
-                }
-                new_rules.append(r)
-            
-            self.analysis_rules_config = new_rules
-            
-            existing_patterns = set(kw.get("pattern", "") for kw in self.keywords_config)
-            
-            for rule in new_rules:
-                if not rule["enabled"]: continue
-                
-                cmd_pat = rule["cmd_pattern"].strip()
-                if cmd_pat and cmd_pat not in existing_patterns:
-                    self.keywords_config.append({
-                        "file_pattern": ".*",
-                        "pattern": cmd_pat,
-                        "color": "#ffffff",
-                        "comment": "",
-                        "enabled": True,
-                        "extra_lines": 0
-                    })
-                    existing_patterns.add(cmd_pat)
-                
-                vsync_pat = rule["vsync_pattern"].strip()
-                if vsync_pat and vsync_pat not in existing_patterns:
-                    self.keywords_config.append({
-                        "file_pattern": ".*",
-                        "pattern": vsync_pat,
-                        "color": "#ffffff",
-                        "comment": "",
-                        "enabled": True,
-                        "extra_lines": 0
-                    })
-                    existing_patterns.add(vsync_pat)
-            
-            self.save_config_dialog_silent()
-            
-            for tab_id in self.notebook.tabs():
-                try:
-                    w = self.notebook.nametowidget(tab_id)
-                    if isinstance(w, LogTab): self.run_analysis_for_tab(w)
-                except: pass
-            
-            dlg.destroy()
-
-        tk.Button(act_fr, text="OK", command=save_and_run, bg="#ddddff", width=15, height=2).pack(side=tk.RIGHT)
-
-    def run_analysis_for_tab(self, tab: LogTab):
-        tab.analysis_comments.clear()
-        
-        rules =[r for r in self.analysis_rules_config if r["enabled"] and r["cmd_pattern"] and r["vsync_pattern"]]
-        if not rules:
-            self.apply_display_update(tab)
-            return
-
-        ts_pat = self.vsync_config.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-        try:
-            re_ts = re.compile(ts_pat)
-            compiled_rules =[]
-            for r in rules:
-                compiled_rules.append({
-                    "name": r.get("name", ""),
-                    "cmd_re": re.compile(r["cmd_pattern"], re.I),
-                    "vsync_re": re.compile(r["vsync_pattern"], re.I)
-                })
-        except re.error as e:
-            print(f"Regex Error in Analysis: {e}")
-            self.apply_display_update(tab)
-            return
-
-        lines = tab.original_content.splitlines()
-        events =[]
-
-        for i, line in enumerate(lines):
-            ts = 0.0
-            m = re_ts.search(line)
-            if m: ts = self._parse_time_seconds(m.group(1)) or 0.0
-
-            for rule_idx, rule in enumerate(compiled_rules):
-                if rule["cmd_re"].search(line):
-                    events.append({'line': i, 'ts': ts, 'type': 0, 'rule': rule_idx})
-                if rule["vsync_re"].search(line):
-                    events.append({'line': i, 'ts': ts, 'type': 1, 'rule': rule_idx})
-
-        count = 0
-        for rule_idx, rule in enumerate(compiled_rules):
-            rule_events =[e for e in events if e['rule'] == rule_idx]
-            pending_triggers =[]
-
-            for ev in rule_events:
-                if ev['type'] == 0: 
-                    pending_triggers.append(ev)
-                elif ev['type'] == 1:
-                    if pending_triggers:
-                        for trig in pending_triggers:
-                            diff_ms = (ev['ts'] - trig['ts']) * 1000.0 if (ev['ts'] > 0 and trig['ts'] > 0) else 0.0
-                            prefix = f"[{rule['name']}]" if rule['name'] else ""
-                            ts_str = f" (+{diff_ms:.1f}ms)" if diff_ms >= 0 else ""
-                            
-                            msg_cmd = f"{prefix}--> 適用: [[REF:{ev['line']}]]{ts_str}"
-                            old_c = tab.analysis_comments.get(trig['line'], "")
-                            tab.analysis_comments[trig['line']] = (old_c + " " + msg_cmd).strip()
-                            
-                            msg_vsync = f"{prefix}<-- 指示: [[REF:{trig['line']}]]"
-                            old_v = tab.analysis_comments.get(ev['line'], "")
-                            tab.analysis_comments[ev['line']] = (old_v + " " + msg_vsync).strip()
-                            
-                            count += 1
-                        pending_triggers =[]
-
-        self.apply_display_update(tab)
-        self.status_var.set(f"解析完了(自動): {count} 件のリンク作成")
+        self.apply_display_update(m_tab)
 
     # --- Virtual V-Sync (Settings) ---
     def open_vsync_settings_dialog(self):
@@ -714,7 +511,6 @@ class LogViewerApp:
             "keywords": self.keywords_config, 
             "sections": self.sections_config, 
             "replace_patterns": self.replace_patterns_config, 
-            "analysis_rules": self.analysis_rules_config,
             "vsync_auto_insert": self.vsync_config
         }
         try:
@@ -1136,7 +932,7 @@ class LogViewerApp:
                                     if rule["end_wait"]:
                                         active_states[fn]["end_pending"] = True
                                     else:
-                                        display_text = f"{rule['name']} (開始/終了) [0.0ms]"
+                                        display_text = f"{rule['name']} (開始/終了)[0.0ms]"
                                         active_states[fn] = None
                             break 
 
@@ -1312,23 +1108,6 @@ class LogViewerApp:
                 ftimediffs.append("")
             
             base_cmt = f"{s_name}{line_attrs[i]['comment']}"
-            ana_cmt = tab.analysis_comments.get(i, "")
-            
-            if ana_cmt:
-                def replacer(match):
-                    target_idx = int(match.group(1))
-                    disp_num = visible_mapping.get(target_idx)
-                    if disp_num is not None:
-                        return f"L{disp_num}"
-                    else:
-                        return f"L{target_idx+1}(非表示)"
-                        
-                ana_cmt = re.sub(r"\[\[REF:(\d+)\]\]", replacer, ana_cmt)
-                
-                if base_cmt: 
-                    base_cmt += " " + ana_cmt
-                else: 
-                    base_cmt = ana_cmt
             
             fcmts.append(base_cmt)
             
@@ -1616,10 +1395,9 @@ class LogViewerApp:
                 self.keywords_config = d.get("keywords",[])
                 self.sections_config = d.get("sections",[])
                 self.replace_patterns_config = d.get("replace_patterns",[])
-                self.analysis_rules_config = d.get("analysis_rules",[])
                 self.vsync_config = d.get("vsync_auto_insert", self.vsync_config)
             t = self.get_current_tab()
-            if t: self.run_analysis_for_tab(t)
+            if t: self.apply_display_update(t)
         except: pass
 
     def export_to_excel(self):
