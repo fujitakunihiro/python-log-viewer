@@ -671,7 +671,7 @@ class LogViewerApp:
                 for exp_ts, fn_name, s_info in expired:
                     rule = s_info["rule"]
                     dur_ms = rule['duration_ms']
-                    v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+                    v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
                     lines_final.append(v_line)
                     src_map_final.append(VIRTUAL_SRC_NAME)
                     s_info["timer_expired"] = True
@@ -945,13 +945,7 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
-                    # --- 復活：時間経過計算ロジック ---
-                    is_time_expired = False
-                    if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
-                        if i > state_info["start_idx"]:
-                            elapsed_ms = (timestamps[i] - state_info["start_ts"]) * 1000.0
-                            if elapsed_ms >= rule["duration_ms"] - 0.001:
-                                is_time_expired = True
+                    is_time_expired = state_info.get("timer_expired", False)
 
                     condition_met = False
                     if rule["end_str"] != "":
@@ -1019,7 +1013,7 @@ class LogViewerApp:
             })
 
         for idx in range(len(lines)):
-            if "<<<[V-SYNC 起点]" in lines[idx]:
+            if "<<< [V-SYNC 起点]" in lines[idx]:
                 if line_attrs[idx]["priority"] < 30:
                     line_attrs[idx]["color"] = "#ffb6c1" 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
@@ -1040,7 +1034,6 @@ class LogViewerApp:
 
         visible_mapping = {}
         is_visible = [True] * len(lines)
-        display_line_count = 1
         
         for i in range(len(lines)):
             if not self.show_vsync_lines and VSYNC_MARKER in lines[i]:
@@ -1048,7 +1041,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<<[V-SYNC 起点]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
@@ -1057,9 +1050,20 @@ class LogViewerApp:
                         if not is_in_section:
                             is_visible[i] = False
                             
-            if is_visible[i]:
-                visible_mapping[i] = display_line_count
-                display_line_count += 1
+        if self.use_keyword_filter and self.show_vsync_lines:
+            vsync_to_show = set()
+            for idx, vis in enumerate(is_visible):
+                if vis and not re_vsync.search(lines[idx]):
+                    for j in range(idx - 1, -1, -1):
+                        if re_vsync.search(lines[j]):
+                            vsync_to_show.add(j)
+                            break
+                    for j in range(idx + 1, len(lines)):
+                        if re_vsync.search(lines[j]):
+                            vsync_to_show.add(j)
+                            break
+            for j in vsync_to_show:
+                is_visible[j] = True
         
         if self.use_keyword_filter:
             visible_indices =[idx for idx, vis in enumerate(is_visible) if vis]
@@ -1090,14 +1094,13 @@ class LogViewerApp:
                 else:
                     v_ptr += 1
             
-            visible_mapping = {}
-            display_line_count = 1
-            for i in range(len(lines)):
-                if is_visible[i]:
-                    visible_mapping[i] = display_line_count
-                    display_line_count += 1
+        display_line_count = 1
+        for i in range(len(lines)):
+            if is_visible[i]:
+                visible_mapping[i] = display_line_count
+                display_line_count += 1
 
-        flines, fcmts, ftimediffs = [],[], []
+        flines, fcmts, ftimediffs = [],[],[]
         main_tags =[]
         final_st_lines = {fn:[] for fn in tab.source_file_names}
         final_st_tags = {fn:[] for fn in tab.source_file_names}
