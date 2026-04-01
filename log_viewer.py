@@ -649,7 +649,7 @@ class LogViewerApp:
                     if insertion_count >= 100: next_virtual_ts = line_ts + interval_sec
                     
                 if i == start_line_idx:
-                    lines_v.append(line + "  <<< [V-SYNC 起点]")
+                    lines_v.append(line + "  <<<[V-SYNC 起点]")
                 else:
                     lines_v.append(line)
                 src_map_v.append(src_map_temp[i])
@@ -703,7 +703,7 @@ class LogViewerApp:
             ts = timestamps_v[i]
             line_src = src_map_v[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-            is_vsync_line = (re_vsync.search(line) is not None)
+            is_vsync_line = (re_vsync.search(line) is not None) and ("[VIRTUAL TIMER]" not in line)
 
             if ts is not None:
                 expired =[]
@@ -718,7 +718,7 @@ class LogViewerApp:
                 for exp_ts, fn_name, s_info in expired:
                     rule = s_info["rule"]
                     dur_ms = rule['duration_ms']
-                    v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+                    v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
                     lines_final.append(v_line)
                     src_map_final.append(VIRTUAL_SRC_NAME)
                     s_info["timer_expired"] = True
@@ -811,7 +811,7 @@ class LogViewerApp:
         remaining_expired.sort(key=lambda x: x[0])
         for exp_ts, fn_name, rule in remaining_expired:
             dur_ms = rule['duration_ms']
-            v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+            v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
             lines_final.append(v_line)
             src_map_final.append(VIRTUAL_SRC_NAME)
 
@@ -897,8 +897,6 @@ class LogViewerApp:
         for i, line in enumerate(lines):
             line_src = srcs[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-            
-            # --- 修正：タイマー満了行はVSYNCではない ---
             is_vsync_line = (re_vsync.search(line) is not None) and ("[VIRTUAL TIMER]" not in line)
 
             for fn in tab.source_file_names:
@@ -932,12 +930,14 @@ class LogViewerApp:
                     ended_rule = active_states[fn]["rule"]
                     t_str = _end_active_state(fn, i)
                     ended_this_line = True
+                    display_text = f"{ended_rule['name']} (終了){t_str}"
 
                 if pending_states[fn] and is_vsync_line:
                     if active_states[fn]:
                         ended_rule = active_states[fn]["rule"]
                         t_str = _end_active_state(fn, i)
                         ended_this_line = True
+                        display_text = f"{ended_rule['name']} (終了){t_str}"
                     
                     active_states[fn] = {
                         "rule": pending_states[fn]["rule"],
@@ -992,7 +992,6 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
-                    # --- 修正：時間差計算を復活 ---
                     is_time_expired = False
                     if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
                         if i > state_info["start_idx"]:
@@ -1066,7 +1065,7 @@ class LogViewerApp:
             })
 
         for idx in range(len(lines)):
-            if "<<<[V-SYNC 起点]" in lines[idx]:
+            if "<<< [V-SYNC 起点]" in lines[idx]:
                 if line_attrs[idx]["priority"] < 30:
                     line_attrs[idx]["color"] = "#ffb6c1" 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
@@ -1302,7 +1301,7 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title(title)
-        dlg.geometry("1150x500")
+        dlg.geometry("1250x550")
         setattr(self, ref_attr, dlg)
         
         fr = tk.Frame(dlg)
@@ -1411,9 +1410,65 @@ class LogViewerApp:
         for c in cfg: add(c)
         if not entries: add()
 
-        btn_fr = tk.Frame(fr)
+        btn_fr = tk.Frame(fr, width=250)
         btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
-        tk.Button(btn_fr, text="行を追加", command=add, width=10).pack(pady=5)
+        tk.Button(btn_fr, text="行を追加", command=add, width=20, height=2).pack(pady=5)
+        
+        info_text = ""
+        if key == "sections":
+            info_text = (
+                "【区間設定の使い方】\n\n"
+                "■開始パターン\n"
+                " 区間の開始条件(正規表現)です。\n"
+                " [+V待]で、合致後の次のV周期から\n"
+                " 区間を開始します。\n\n"
+                "■終了パターン\n"
+                " 区間の終了条件(正規表現)です。\n"
+                " [V周期]ボタンで<VSYNC>を入力可能です。\n"
+                " 空欄の場合は持続(ms)の経過のみで\n"
+                " 終了します。\n\n"
+                "■終了の+V待\n"
+                " 条件(パターンや時間)を満たした直後の\n"
+                " V周期で区間を終了させます。\n\n"
+                "■持続(ms)\n"
+                " 指定時間が経過すると区間が\n"
+                " 終了します。この時[VIRTUAL TIMER]\n"
+                " のログが自動挿入されます。\n\n"
+                " ※終了パターンと持続(ms)の両方を\n"
+                " 指定した場合、持続(ms)が経過するまでは\n"
+                " 終了パターンに合致しても無視されます。"
+            )
+        elif key == "keywords":
+            info_text = (
+                "【フィルタ設定の使い方】\n\n"
+                "正規表現で検索し、マッチした行を\n"
+                "抽出・色付け・コメント付与します。\n\n"
+                "■対象ファイル\n"
+                " 適用するファイル名(正規表現)です。\n"
+                " (例: client.* , server.*)\n\n"
+                "■+行\n"
+                " マッチした行のさらに下何行分まで\n"
+                " 同じ色を適用するかを指定します。\n"
+                " スタックトレース等をまとめて\n"
+                " 色付けしたい場合に便利です。"
+            )
+        elif key == "replace_patterns":
+            info_text = (
+                "【説明パターンの使い方】\n\n"
+                "ログ内の難解な文字列を、読みやすい\n"
+                "説明に置換(付記)します。\n\n"
+                "■検索文字列\n"
+                " 検索対象の正規表現を指定します。\n\n"
+                "■置換/説明\n"
+                " 置換後の文字列を指定します。\n"
+                " マッチした文字列の直後に\n"
+                " 検索文字列(置換/説明)\n"
+                " の形式で表示されます。"
+            )
+
+        if info_text:
+            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#ffffe0", relief=tk.SOLID, bd=1, padx=8, pady=8, font=("MS UI Gothic", 9))
+            info_lbl.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def save():
             new_cfg =[]
@@ -1435,7 +1490,7 @@ class LogViewerApp:
                     if isinstance(w, LogTab): self.apply_display_update(w)
                 except: pass
 
-        tk.Button(btn_fr, text="OK", command=save, width=10, bg="#ddd").pack(side=tk.BOTTOM, pady=5)
+        tk.Button(btn_fr, text="OK", command=save, width=20, bg="#ddddff", height=2).pack(side=tk.BOTTOM, pady=5)
 
     # --- IO ---
     def load_config_dialog(self):
