@@ -439,15 +439,10 @@ class LogViewerApp:
         conf = self.vsync_config
         
         tk.Label(dlg, text="V周期(仮想)挿入の起点とタイミングを設定します。\n設定を保存すると、次回ファイルを開く時から自動適用されます。", anchor="w", font=("", 9, "bold")).pack(pady=10, padx=10, fill=tk.X)
-        
-        tk.Label(dlg, text="タイムスタンプ抽出(正規表現):").pack(anchor="w", padx=10, pady=(5,0))
-        e_ts_pat = tk.Entry(dlg, width=50)
-        e_ts_pat.pack(padx=10, pady=2)
-        e_ts_pat.insert(0, conf.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?"))
 
         # --- 開始位置の指定 ---
         frame_start = tk.LabelFrame(dlg, text="開始位置の指定")
-        frame_start.pack(fill=tk.X, padx=10, pady=(10, 5))
+        frame_start.pack(fill=tk.X, padx=10, pady=(5, 5))
         
         start_mode_val = conf.get("start_mode", "line")
         if start_mode_val not in ["line", "time"]:
@@ -487,7 +482,7 @@ class LogViewerApp:
             
             self.vsync_config = {
                 "enabled": True, 
-                "time_pattern": e_ts_pat.get(),
+                "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
                 "manual_ms": ms,
                 "start_mode": start_mode_var.get(),
                 "start_line": e_start_line.get(),
@@ -499,7 +494,7 @@ class LogViewerApp:
 
         btn_box = tk.Frame(dlg)
         btn_box.pack(pady=10, fill=tk.X)
-        tk.Button(btn_box, text="保存", command=save_conf, bg="#ddddff", width=15).pack(side=tk.RIGHT, padx=10)
+        tk.Button(btn_box, text="OK", command=save_conf, bg="#ddddff", width=15).pack(side=tk.RIGHT, padx=10)
 
     def save_config_dialog_silent(self, filepath=None):
         target_path = filepath if filepath else self.config_path
@@ -950,6 +945,7 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
+                    # --- 復活：時間経過計算ロジック ---
                     is_time_expired = False
                     if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
                         if i > state_info["start_idx"]:
@@ -1023,7 +1019,7 @@ class LogViewerApp:
             })
 
         for idx in range(len(lines)):
-            if "<<< [V-SYNC 起点]" in lines[idx]:
+            if "<<<[V-SYNC 起点]" in lines[idx]:
                 if line_attrs[idx]["priority"] < 30:
                     line_attrs[idx]["color"] = "#ffb6c1" 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
@@ -1052,7 +1048,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<<[V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
