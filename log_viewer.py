@@ -42,11 +42,9 @@ DEFAULT_CONFIG = {
     "replace_patterns":[],
     "vsync_auto_insert": {
         "enabled": True,
-        "event_pattern": r"V_START|V-Sync",
         "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
-        "mode": "auto", 
         "manual_ms": 16.666,
-        "start_mode": "pattern",
+        "start_mode": "line",
         "start_line": "",
         "start_time_val": "2.0"
     }
@@ -435,18 +433,13 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title("V周期(仮想)挿入の設定")
-        dlg.geometry("480x430")
+        dlg.geometry("480x250")
         self.vsync_settings_dlg_ref = dlg
         
         conf = self.vsync_config
         
-        tk.Label(dlg, text="V周期(仮想)挿入の基準イベントとタイミングを設定します。\n設定を保存すると、次回ファイルを開く時から自動適用されます。", anchor="w", font=("", 9, "bold")).pack(pady=10, padx=10, fill=tk.X)
+        tk.Label(dlg, text="V周期(仮想)挿入の起点とタイミングを設定します。\n設定を保存すると、次回ファイルを開く時から自動適用されます。", anchor="w", font=("", 9, "bold")).pack(pady=10, padx=10, fill=tk.X)
         
-        tk.Label(dlg, text="基準イベント(正規表現):").pack(anchor="w", padx=10)
-        e_pattern = tk.Entry(dlg, width=50)
-        e_pattern.pack(padx=10, pady=2)
-        e_pattern.insert(0, conf.get("event_pattern", r"V_START|V-Sync"))
-
         tk.Label(dlg, text="タイムスタンプ抽出(正規表現):").pack(anchor="w", padx=10, pady=(5,0))
         e_ts_pat = tk.Entry(dlg, width=50)
         e_ts_pat.pack(padx=10, pady=2)
@@ -456,10 +449,10 @@ class LogViewerApp:
         frame_start = tk.LabelFrame(dlg, text="開始位置の指定")
         frame_start.pack(fill=tk.X, padx=10, pady=(10, 5))
         
-        start_mode_var = tk.StringVar(value=conf.get("start_mode", "pattern"))
-        
-        rb_start_pat = tk.Radiobutton(frame_start, text="基準イベントにマッチした最初の行から開始", variable=start_mode_var, value="pattern")
-        rb_start_pat.pack(anchor="w", padx=5, pady=2)
+        start_mode_val = conf.get("start_mode", "line")
+        if start_mode_val not in ["line", "time"]:
+            start_mode_val = "line"
+        start_mode_var = tk.StringVar(value=start_mode_val)
         
         f_start_line = tk.Frame(frame_start)
         f_start_line.pack(anchor="w", padx=5, pady=2)
@@ -481,14 +474,9 @@ class LogViewerApp:
         frame_mode = tk.LabelFrame(dlg, text="間隔設定")
         frame_mode.pack(fill=tk.X, padx=10, pady=5)
         
-        mode_var = tk.StringVar(value=conf.get("mode", "auto"))
-        rb_auto = tk.Radiobutton(frame_mode, text="自動計算 (最初の2つのイベント間隔を使用)", variable=mode_var, value="auto")
-        rb_auto.pack(anchor="w", padx=5, pady=2)
-        
         f_manual = tk.Frame(frame_mode)
         f_manual.pack(anchor="w", padx=5, pady=2)
-        rb_manual = tk.Radiobutton(f_manual, text="手動指定 (ms):", variable=mode_var, value="manual")
-        rb_manual.pack(side=tk.LEFT)
+        tk.Label(f_manual, text="挿入間隔 (ms):").pack(side=tk.LEFT)
         e_ms = tk.Entry(f_manual, width=10)
         e_ms.pack(side=tk.LEFT, padx=5)
         e_ms.insert(0, str(conf.get("manual_ms", 16.666)))
@@ -499,9 +487,7 @@ class LogViewerApp:
             
             self.vsync_config = {
                 "enabled": True, 
-                "event_pattern": e_pattern.get(),
                 "time_pattern": e_ts_pat.get(),
-                "mode": mode_var.get(),
                 "manual_ms": ms,
                 "start_mode": start_mode_var.get(),
                 "start_line": e_start_line.get(),
@@ -570,27 +556,17 @@ class LogViewerApp:
             else: return f"[{s:.6f}]"
 
         # === PASS 1: Virtual V-Sync Insertion ===
-        pat = self.vsync_config.get("event_pattern", r"V_START|V-Sync")
-        mode = self.vsync_config.get("mode", "auto")
         manual_ms = self.vsync_config.get("manual_ms", 16.666)
-        start_mode = self.vsync_config.get("start_mode", "pattern")
+        start_mode = self.vsync_config.get("start_mode", "line")
         start_line_str = self.vsync_config.get("start_line", "")
         start_time_val_str = self.vsync_config.get("start_time_val", "0.0")
         
-        try:
-            re_event = re.compile(pat, re.I)
-        except Exception:
-            re_event = re.compile(r"V_START|V-Sync", re.I)
-            
-        events =[]
-        
-        start_search_idx = 0
+        start_time = None
         start_line_idx = -1
         
         if start_mode == "time":
             try:
-                forced_start_time = float(start_time_val_str)
-                events.append(forced_start_time)
+                start_time = float(start_time_val_str)
             except Exception:
                 pass
         elif start_mode == "line":
@@ -600,41 +576,23 @@ class LogViewerApp:
                 if 0 <= line_idx < len(timestamps_temp):
                     t = timestamps_temp[line_idx]
                     if t is not None:
-                        events.append(t)
-                        start_search_idx = line_idx + 1
+                        start_time = t
                         start_line_idx = line_idx
             except Exception:
                 pass
                 
-        if start_mode != "time":
-            for i in range(start_search_idx, len(lines_temp)):
-                if re_event.search(lines_temp[i]):
-                    t = timestamps_temp[i]
-                    if t is not None:
-                        events.append(t)
-                        if start_line_idx == -1:
-                            start_line_idx = i
-                        if mode == "auto" and len(events) >= 2: break 
-                        
-        start_time = events[0] if events else 0.0
-        
         try:
             manual_ms_val = float(manual_ms)
         except:
             manual_ms_val = 16.666
             
-        interval_sec = 0.016666
-        if events:
-            if mode == "manual": interval_sec = manual_ms_val / 1000.0
-            elif len(events) >= 2:
-                interval_sec = events[1] - events[0]
-                if interval_sec <= 0: interval_sec = 0.016666
+        interval_sec = manual_ms_val / 1000.0
             
         lines_v =[]
         src_map_v =[]
         timestamps_v =[]
 
-        if events:
+        if start_time is not None:
             next_virtual_ts = start_time + interval_sec
             for i, line in enumerate(lines_temp):
                 line_ts = timestamps_temp[i]
@@ -649,7 +607,7 @@ class LogViewerApp:
                     if insertion_count >= 100: next_virtual_ts = line_ts + interval_sec
                     
                 if i == start_line_idx:
-                    lines_v.append(line + "  <<<[V-SYNC 起点]")
+                    lines_v.append(line + "  <<< [V-SYNC 起点]")
                 else:
                     lines_v.append(line)
                 src_map_v.append(src_map_temp[i])
@@ -718,7 +676,7 @@ class LogViewerApp:
                 for exp_ts, fn_name, s_info in expired:
                     rule = s_info["rule"]
                     dur_ms = rule['duration_ms']
-                    v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+                    v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
                     lines_final.append(v_line)
                     src_map_final.append(VIRTUAL_SRC_NAME)
                     s_info["timer_expired"] = True
@@ -811,7 +769,7 @@ class LogViewerApp:
         remaining_expired.sort(key=lambda x: x[0])
         for exp_ts, fn_name, rule in remaining_expired:
             dur_ms = rule['duration_ms']
-            v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+            v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
             lines_final.append(v_line)
             src_map_final.append(VIRTUAL_SRC_NAME)
 
@@ -1094,7 +1052,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<<[V-SYNC 起点]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
@@ -1301,7 +1259,7 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title(title)
-        dlg.geometry("1250x550")
+        dlg.geometry("1150x550")
         setattr(self, ref_attr, dlg)
         
         fr = tk.Frame(dlg)
