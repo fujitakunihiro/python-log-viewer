@@ -945,6 +945,13 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
+                    # Check if duration_ms has expired
+                    if rule["duration_ms"] > 0 and not state_info.get("timer_expired"):
+                        if state_info.get("start_ts") is not None and timestamps[i] is not None:
+                            expire_ts = state_info["start_ts"] + rule["duration_ms"] / 1000.0
+                            if timestamps[i] >= expire_ts - 0.000001:
+                                state_info["timer_expired"] = True
+                    
                     is_time_expired = state_info.get("timer_expired", False)
 
                     condition_met = False
