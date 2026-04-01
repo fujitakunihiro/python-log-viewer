@@ -47,7 +47,8 @@ DEFAULT_CONFIG = {
         "mode": "auto", 
         "manual_ms": 16.666,
         "start_mode": "pattern",
-        "start_line": ""
+        "start_line": "",
+        "start_time_val": "2.0"
     }
 }
 
@@ -457,16 +458,24 @@ class LogViewerApp:
         
         start_mode_var = tk.StringVar(value=conf.get("start_mode", "pattern"))
         
-        rb_start_pat = tk.Radiobutton(frame_start, text="イベントパターンにマッチした最初の行から開始", variable=start_mode_var, value="pattern")
+        rb_start_pat = tk.Radiobutton(frame_start, text="基準イベントにマッチした最初の行から開始", variable=start_mode_var, value="pattern")
         rb_start_pat.pack(anchor="w", padx=5, pady=2)
         
         f_start_line = tk.Frame(frame_start)
         f_start_line.pack(anchor="w", padx=5, pady=2)
-        rb_start_line = tk.Radiobutton(f_start_line, text="指定した行番号の時刻から開始 (行番号):", variable=start_mode_var, value="line")
+        rb_start_line = tk.Radiobutton(f_start_line, text="指定した行番号の時刻から開始 (生ログ行番号):", variable=start_mode_var, value="line")
         rb_start_line.pack(side=tk.LEFT)
         e_start_line = tk.Entry(f_start_line, width=10)
         e_start_line.pack(side=tk.LEFT, padx=5)
         e_start_line.insert(0, str(conf.get("start_line", "")))
+        
+        f_start_time = tk.Frame(frame_start)
+        f_start_time.pack(anchor="w", padx=5, pady=2)
+        rb_start_time = tk.Radiobutton(f_start_time, text="指定した時刻(秒)から強制開始:", variable=start_mode_var, value="time")
+        rb_start_time.pack(side=tk.LEFT)
+        e_start_time = tk.Entry(f_start_time, width=10)
+        e_start_time.pack(side=tk.LEFT, padx=5)
+        e_start_time.insert(0, str(conf.get("start_time_val", "2.0")))
 
         # --- 間隔設定 ---
         frame_mode = tk.LabelFrame(dlg, text="間隔設定")
@@ -495,7 +504,8 @@ class LogViewerApp:
                 "mode": mode_var.get(),
                 "manual_ms": ms,
                 "start_mode": start_mode_var.get(),
-                "start_line": e_start_line.get()
+                "start_line": e_start_line.get(),
+                "start_time_val": e_start_time.get()
             }
             self.save_config_dialog_silent() 
             messagebox.showinfo("保存", "設定を保存しました。次回ファイルオープン時から適用されます。")
@@ -533,7 +543,6 @@ class LogViewerApp:
             return None
 
     def _process_vsync_insertion(self, content: str, src_map: List[str], src_file_names: List[str]) -> Tuple[str, List[str]]:
-        
         lines_temp = content.splitlines()
         src_map_temp = src_map if len(src_map) == len(lines_temp) else src_map + [""] * (len(lines_temp) - len(src_map))
         
@@ -566,14 +575,25 @@ class LogViewerApp:
         manual_ms = self.vsync_config.get("manual_ms", 16.666)
         start_mode = self.vsync_config.get("start_mode", "pattern")
         start_line_str = self.vsync_config.get("start_line", "")
+        start_time_val_str = self.vsync_config.get("start_time_val", "0.0")
         
-        re_event = re.compile(pat, re.I)
+        try:
+            re_event = re.compile(pat, re.I)
+        except Exception:
+            re_event = re.compile(r"V_START|V-Sync", re.I)
+            
         events =[]
         
         start_search_idx = 0
         start_line_idx = -1
         
-        if start_mode == "line":
+        if start_mode == "time":
+            try:
+                forced_start_time = float(start_time_val_str)
+                events.append(forced_start_time)
+            except Exception:
+                pass
+        elif start_mode == "line":
             try:
                 line_num = int(start_line_str)
                 line_idx = line_num - 1
@@ -586,25 +606,32 @@ class LogViewerApp:
             except Exception:
                 pass
                 
-        for i in range(start_search_idx, len(lines_temp)):
-            if re_event.search(lines_temp[i]):
-                t = timestamps_temp[i]
-                if t is not None:
-                    events.append(t)
-                    if start_line_idx == -1:
-                        start_line_idx = i
-                    if mode == "auto" and len(events) >= 2: break 
+        if start_mode != "time":
+            for i in range(start_search_idx, len(lines_temp)):
+                if re_event.search(lines_temp[i]):
+                    t = timestamps_temp[i]
+                    if t is not None:
+                        events.append(t)
+                        if start_line_idx == -1:
+                            start_line_idx = i
+                        if mode == "auto" and len(events) >= 2: break 
                         
         start_time = events[0] if events else 0.0
+        
+        try:
+            manual_ms_val = float(manual_ms)
+        except:
+            manual_ms_val = 16.666
+            
         interval_sec = 0.016666
         if events:
-            if mode == "manual": interval_sec = manual_ms / 1000.0
+            if mode == "manual": interval_sec = manual_ms_val / 1000.0
             elif len(events) >= 2:
                 interval_sec = events[1] - events[0]
                 if interval_sec <= 0: interval_sec = 0.016666
             
         lines_v =[]
-        src_map_v = []
+        src_map_v =[]
         timestamps_v =[]
 
         if events:
@@ -622,7 +649,7 @@ class LogViewerApp:
                     if insertion_count >= 100: next_virtual_ts = line_ts + interval_sec
                     
                 if i == start_line_idx:
-                    lines_v.append(line + "  <<<[V-SYNC 起点]")
+                    lines_v.append(line + "  <<< [V-SYNC 起点]")
                 else:
                     lines_v.append(line)
                 src_map_v.append(src_map_temp[i])
@@ -661,7 +688,10 @@ class LogViewerApp:
                     })
                 except: pass
 
-        re_vsync = re.compile(VSYNC_REGEX, re.I)
+        try:
+            re_vsync = re.compile(VSYNC_REGEX, re.I)
+        except:
+            re_vsync = re.compile(r"V_START", re.I)
 
         lines_final =[]
         src_map_final =[]
@@ -673,24 +703,31 @@ class LogViewerApp:
             ts = timestamps_v[i]
             line_src = src_map_v[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-            is_vsync_line = (re_vsync.search(line) is not None) or is_virtual_line
+            is_vsync_line = (re_vsync.search(line) is not None)
 
             if ts is not None:
                 expired =[]
                 for fn in src_file_names:
                     s_info = active_states_sim[fn]
-                    if s_info and s_info["rule"]["duration_ms"] > 0 and s_info["start_ts"] is not None:
+                    if s_info and s_info["rule"]["duration_ms"] > 0 and s_info["start_ts"] is not None and not s_info.get("timer_expired"):
                         expire_ts = s_info["start_ts"] + s_info["rule"]["duration_ms"] / 1000.0
                         if ts >= expire_ts - 0.000001:
-                            expired.append((expire_ts, fn, s_info["rule"]))
+                            expired.append((expire_ts, fn, s_info))
                 
                 expired.sort(key=lambda x: x[0])
-                for exp_ts, fn_name, rule in expired:
+                for exp_ts, fn_name, s_info in expired:
+                    rule = s_info["rule"]
                     dur_ms = rule['duration_ms']
                     v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
                     lines_final.append(v_line)
                     src_map_final.append(VIRTUAL_SRC_NAME)
-                    active_states_sim[fn_name] = None
+                    s_info["timer_expired"] = True
+
+                    if rule["end_str"] == "":
+                        if rule["end_wait"]:
+                            s_info["end_pending"] = True
+                        else:
+                            active_states_sim[fn_name] = None
 
             lines_final.append(line)
             src_map_final.append(line_src)
@@ -703,7 +740,8 @@ class LogViewerApp:
                     active_states_sim[fn] = {
                         "rule": pending_states_sim[fn]["rule"],
                         "start_ts": ts,
-                        "end_pending": False
+                        "end_pending": False,
+                        "timer_expired": False
                     }
                     pending_states_sim[fn] = None
 
@@ -716,7 +754,8 @@ class LogViewerApp:
                                 active_states_sim[fn] = {
                                     "rule": rule,
                                     "start_ts": ts,
-                                    "end_pending": False
+                                    "end_pending": False,
+                                    "timer_expired": False
                                 }
                                 pending_states_sim[fn] = None
                                 
@@ -724,7 +763,6 @@ class LogViewerApp:
                                 if rule["end_str"] != "":
                                     is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
                                     
-                                # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
                                 if rule["duration_ms"] > 0:
                                     is_end_match = False
                                     
@@ -737,18 +775,26 @@ class LogViewerApp:
 
                 if active_states_sim[fn] and not active_states_sim[fn].get("end_pending"):
                     rule = active_states_sim[fn]["rule"]
-                    is_end_match = False
+                    state_info = active_states_sim[fn]
+                    
+                    is_time_expired = state_info.get("timer_expired", False)
+
+                    condition_met = False
                     if rule["end_str"] != "":
+                        is_end_match = False
                         if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
                             is_end_match = True
-
-                    # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
-                    if rule["duration_ms"] > 0 and active_states_sim[fn].get("start_ts") is not None and ts is not None:
-                        elapsed_ms = (ts - active_states_sim[fn]["start_ts"]) * 1000.0
-                        if elapsed_ms < rule["duration_ms"] - 0.001:
+                        
+                        if rule["duration_ms"] > 0 and not is_time_expired:
                             is_end_match = False
+                            
+                        condition_met = is_end_match
+                    else:
+                        if rule["duration_ms"] > 0 and is_time_expired and not state_info.get("timer_expired_handled"):
+                            condition_met = True
+                            state_info["timer_expired_handled"] = True
 
-                    if is_end_match:
+                    if condition_met:
                         if rule["end_wait"]:
                             active_states_sim[fn]["end_pending"] = True
                         else:
@@ -757,7 +803,7 @@ class LogViewerApp:
         remaining_expired =[]
         for fn in src_file_names:
             s_info = active_states_sim[fn]
-            if s_info and s_info["rule"]["duration_ms"] > 0 and s_info["start_ts"] is not None:
+            if s_info and s_info["rule"]["duration_ms"] > 0 and s_info["start_ts"] is not None and not s_info.get("timer_expired"):
                 expire_ts = s_info["start_ts"] + s_info["rule"]["duration_ms"] / 1000.0
                 remaining_expired.append((expire_ts, fn, s_info["rule"]))
                 active_states_sim[fn] = None
@@ -843,12 +889,17 @@ class LogViewerApp:
         pending_states = {fn: None for fn in tab.source_file_names}
         status_buffers = {fn:[] for fn in tab.source_file_names}
         
-        re_vsync = re.compile(VSYNC_REGEX, re.I)
+        try:
+            re_vsync = re.compile(VSYNC_REGEX, re.I)
+        except:
+            re_vsync = re.compile(r"V_START", re.I)
 
         for i, line in enumerate(lines):
             line_src = srcs[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-            is_vsync_line = (re_vsync.search(line) is not None) or is_virtual_line
+            
+            # --- 修正：タイマー満了行はVSYNCではない ---
+            is_vsync_line = (re_vsync.search(line) is not None) and ("[VIRTUAL TIMER]" not in line)
 
             for fn in tab.source_file_names:
                 rule_to_display = None
@@ -892,7 +943,8 @@ class LogViewerApp:
                         "rule": pending_states[fn]["rule"],
                         "start_idx": i,
                         "start_ts": timestamps[i],
-                        "end_pending": False
+                        "end_pending": False,
+                        "timer_expired_handled": False
                     }
                     pending_states[fn] = None
                     rule_to_display = active_states[fn]["rule"]
@@ -914,7 +966,8 @@ class LogViewerApp:
                                     "rule": rule,
                                     "start_idx": i,
                                     "start_ts": timestamps[i],
-                                    "end_pending": False
+                                    "end_pending": False,
+                                    "timer_expired_handled": False
                                 }
                                 pending_states[fn] = None
                                 rule_to_display = rule
@@ -924,7 +977,6 @@ class LogViewerApp:
                                 if rule["end_str"] != "":
                                     is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
                                     
-                                # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
                                 if rule["duration_ms"] > 0:
                                     is_end_match = False
                                     
@@ -940,6 +992,7 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
+                    # --- 修正：時間差計算を復活 ---
                     is_time_expired = False
                     if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
                         if i > state_info["start_idx"]:
@@ -947,16 +1000,22 @@ class LogViewerApp:
                             if elapsed_ms >= rule["duration_ms"] - 0.001:
                                 is_time_expired = True
 
-                    is_end_match = False
+                    condition_met = False
                     if rule["end_str"] != "":
+                        is_end_match = False
                         if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
                             is_end_match = True
+                        
+                        if rule["duration_ms"] > 0 and not is_time_expired:
+                            is_end_match = False
+                            
+                        condition_met = is_end_match
+                    else:
+                        if rule["duration_ms"] > 0 and is_time_expired and not state_info.get("timer_expired_handled"):
+                            condition_met = True
+                            state_info["timer_expired_handled"] = True
 
-                    # --- 追加：持続時間が設定されている場合は経過するまで終了パターンを無視 ---
-                    if rule["duration_ms"] > 0 and not is_time_expired:
-                        is_end_match = False
-
-                    if is_end_match or is_time_expired:
+                    if condition_met:
                         if rule["end_wait"]:
                             active_states[fn]["end_pending"] = True
                         else:
@@ -976,6 +1035,8 @@ class LogViewerApp:
                         display_text = rule_to_display['name']
                     elif ended_this_line:
                         rule_to_display = ended_rule
+                        if not display_text:
+                            display_text = f"{ended_rule['name']} (終了)"
 
                 if rule_to_display: 
                     status_buffers[fn].append((display_text, rule_to_display["color"]))
@@ -1005,9 +1066,9 @@ class LogViewerApp:
             })
 
         for idx in range(len(lines)):
-            if "<<< [V-SYNC 起点]" in lines[idx]:
+            if "<<<[V-SYNC 起点]" in lines[idx]:
                 if line_attrs[idx]["priority"] < 30:
-                    line_attrs[idx]["color"] = "#ffb6c1" # ピンク色
+                    line_attrs[idx]["color"] = "#ffb6c1" 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
                     line_attrs[idx]["priority"] = 30
 
@@ -1034,7 +1095,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<<[V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
@@ -1108,7 +1169,6 @@ class LogViewerApp:
                 ftimediffs.append("")
             
             base_cmt = f"{s_name}{line_attrs[i]['comment']}"
-            
             fcmts.append(base_cmt)
             
             if line_attrs[i]["color"] != "#ffffff":
