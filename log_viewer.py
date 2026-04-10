@@ -333,7 +333,7 @@ class LogViewerApp:
             
         fname = os.path.basename(path)
         if self.vsync_config.get("enabled", True):
-            new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()), [fname])
+            new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()),[fname])
             tab = LogTab(self.notebook, self, path, new_content, source_files_list=[fname], is_merged=True)
             tab.line_source_map = new_src_map
             self.notebook.add(tab, text=fname)
@@ -945,13 +945,6 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
-                    # Check if duration_ms has expired
-                    if rule["duration_ms"] > 0 and not state_info.get("timer_expired"):
-                        if state_info.get("start_ts") is not None and timestamps[i] is not None:
-                            expire_ts = state_info["start_ts"] + rule["duration_ms"] / 1000.0
-                            if timestamps[i] >= expire_ts - 0.000001:
-                                state_info["timer_expired"] = True
-                    
                     is_time_expired = state_info.get("timer_expired", False)
 
                     condition_met = False
@@ -1048,7 +1041,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<<[V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
@@ -1107,7 +1100,7 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
-        flines, fcmts, ftimediffs = [],[],[]
+        flines, fcmts, ftimediffs = [],[], []
         main_tags =[]
         final_st_lines = {fn:[] for fn in tab.source_file_names}
         final_st_tags = {fn:[] for fn in tab.source_file_names}
@@ -1265,7 +1258,7 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title(title)
-        dlg.geometry("1150x550")
+        dlg.geometry("1400x550")
         setattr(self, ref_attr, dlg)
         
         fr = tk.Frame(dlg)
@@ -1276,24 +1269,7 @@ class LogViewerApp:
         
         hdr = tk.Frame(l_fr)
         hdr.pack(fill=tk.X, padx=5, pady=2)
-        tk.Frame(hdr, width=135).pack(side=tk.LEFT)
         
-        if "file_pattern" in fields: tk.Label(hdr, text="対象ファイル(正規表現)", width=20, anchor="w").pack(side=tk.LEFT)
-        if "pattern" in fields: tk.Label(hdr, text="正規表現", width=25, anchor="w").pack(side=tk.LEFT)
-        if "search" in fields: tk.Label(hdr, text="検索文字列", width=25, anchor="w").pack(side=tk.LEFT)
-        if "name" in fields: tk.Label(hdr, text="区間名", width=15, anchor="w").pack(side=tk.LEFT)
-        
-        if "start" in fields: tk.Label(hdr, text="開始パターン", width=15, anchor="w").pack(side=tk.LEFT)
-        if "start_wait" in fields: tk.Label(hdr, text="+V待", width=4).pack(side=tk.LEFT)
-        if "end" in fields: tk.Label(hdr, text="終了パターン", width=15, anchor="w").pack(side=tk.LEFT)
-        if "end_wait" in fields: tk.Label(hdr, text="+V待", width=4).pack(side=tk.LEFT)
-        if "duration_ms" in fields: tk.Label(hdr, text="持続(ms)", width=8).pack(side=tk.LEFT, padx=2)
-        
-        if "color" in fields: tk.Label(hdr, text="色", width=10).pack(side=tk.LEFT, padx=15)
-        if "replace" in fields: tk.Label(hdr, text="置換/説明", width=30).pack(side=tk.LEFT, padx=5)
-        if "comment" in fields: tk.Label(hdr, text="コメント", width=20).pack(side=tk.LEFT, padx=5)
-        if "extra_lines" in fields: tk.Label(hdr, text="+行", width=5).pack(side=tk.LEFT)
-
         cv = tk.Canvas(l_fr)
         sc = tk.Scrollbar(l_fr, command=cv.yview)
         sf = tk.Frame(cv)
@@ -1304,50 +1280,80 @@ class LogViewerApp:
         sf.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
         cv.bind("<Configure>", lambda e: cv.itemconfig(win, width=e.width))
 
+        col_defs =[]
+        col_idx = 1
+        col_defs.append((0, "btn", "", 150))
+        for f in fields:
+            if f == "file_pattern": col_defs.append((col_idx, f, "対象ファイル(正規表現)", 140))
+            elif f == "pattern": col_defs.append((col_idx, f, "正規表現", 160))
+            elif f == "search": col_defs.append((col_idx, f, "検索文字列", 160))
+            elif f == "name": col_defs.append((col_idx, f, "区間名", 110))
+            elif f == "start": col_defs.append((col_idx, f, "開始パターン", 110))
+            elif f == "start_wait": col_defs.append((col_idx, f, "+V待", 40))
+            elif f == "end": col_defs.append((col_idx, f, "終了パターン", 140))
+            elif f == "end_wait": col_defs.append((col_idx, f, "+V待", 40))
+            elif f == "duration_ms": col_defs.append((col_idx, f, "持続(ms)", 60))
+            elif f == "color": col_defs.append((col_idx, f, "色", 100))
+            elif f == "replace": col_defs.append((col_idx, f, "置換/説明", 160))
+            elif f == "comment": col_defs.append((col_idx, f, "コメント", 140))
+            elif f == "extra_lines": col_defs.append((col_idx, f, "+行", 40))
+            col_idx += 1
+
+        for c_idx, c_id, c_txt, c_w in col_defs:
+            hdr.columnconfigure(c_idx, minsize=c_w, weight=0)
+            sf.columnconfigure(c_idx, minsize=c_w, weight=0)
+            if c_txt:
+                tk.Label(hdr, text=c_txt, anchor="w").grid(row=0, column=c_idx, sticky="w", padx=4)
+            else:
+                tk.Frame(hdr, width=c_w, height=1).grid(row=0, column=c_idx)
+
         entries =[]
         def refresh():
             for w in sf.winfo_children(): w.destroy()
             for i, item in enumerate(entries):
-                r = tk.Frame(sf)
-                r.pack(fill=tk.X, pady=2, padx=5)
-                tk.Checkbutton(r, variable=item["enabled"]).pack(side=tk.LEFT)
-                tk.Button(r, text="↑", width=2, command=lambda idx=i: move(idx, -1)).pack(side=tk.LEFT)
-                tk.Button(r, text="↓", width=2, command=lambda idx=i: move(idx, 1)).pack(side=tk.LEFT)
-                tk.Button(r, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
+                f_btn = tk.Frame(sf)
+                f_btn.grid(row=i, column=0, sticky="w", padx=2, pady=2)
                 
-                if "file_pattern" in fields:
-                    tk.Entry(r, textvariable=item["file_pattern"], width=20).pack(side=tk.LEFT, padx=2)
-                if "pattern" in fields:
-                    tk.Entry(r, textvariable=item["pattern"], width=25).pack(side=tk.LEFT, padx=2)
-                if "search" in fields:
-                    tk.Entry(r, textvariable=item["search"], width=25).pack(side=tk.LEFT, padx=2)
-                if "name" in fields:
-                    tk.Entry(r, textvariable=item["name"], width=15).pack(side=tk.LEFT, padx=2)
+                tk.Checkbutton(f_btn, variable=item["enabled"]).pack(side=tk.LEFT)
+                tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1)).pack(side=tk.LEFT)
+                tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1)).pack(side=tk.LEFT)
+                tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
+                
+                for c_idx, c_id, c_txt, c_w in col_defs:
+                    if c_id == "btn": continue
                     
-                if "start" in fields:
-                    tk.Entry(r, textvariable=item["start"], width=15).pack(side=tk.LEFT, padx=2)
-                if "start_wait" in fields:
-                    tk.Checkbutton(r, variable=item["start_wait"]).pack(side=tk.LEFT, padx=2)
+                    f_cell = tk.Frame(sf)
+                    f_cell.grid(row=i, column=c_idx, sticky="we", padx=2, pady=2)
                     
-                if "end" in fields:
-                    tk.Entry(r, textvariable=item["end"], width=15).pack(side=tk.LEFT, padx=2)
-                    if key == "sections":
-                         tk.Button(r, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
-                if "end_wait" in fields:
-                    tk.Checkbutton(r, variable=item["end_wait"]).pack(side=tk.LEFT, padx=2)
-                if "duration_ms" in fields:
-                    tk.Entry(r, textvariable=item["duration_ms"], width=8).pack(side=tk.LEFT, padx=2)
-                
-                if "color" in fields:
-                    tk.Entry(r, textvariable=item["color"], width=8).pack(side=tk.LEFT, padx=15)
-                    tk.Button(r, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get())).pack(side=tk.LEFT)
-                
-                if "replace" in fields:
-                    tk.Entry(r, textvariable=item["replace"], width=30).pack(side=tk.LEFT, padx=5)
-                if "comment" in fields:
-                    tk.Entry(r, textvariable=item["comment"], width=20).pack(side=tk.LEFT, padx=5)
-                if "extra_lines" in fields:
-                    tk.Entry(r, textvariable=item["extra_lines"], width=4).pack(side=tk.LEFT, padx=5)
+                    if c_id == "file_pattern":
+                        tk.Entry(f_cell, textvariable=item["file_pattern"], width=10).pack(fill=tk.X, expand=True)
+                    elif c_id == "pattern":
+                        tk.Entry(f_cell, textvariable=item["pattern"], width=10).pack(fill=tk.X, expand=True)
+                    elif c_id == "search":
+                        tk.Entry(f_cell, textvariable=item["search"], width=10).pack(fill=tk.X, expand=True)
+                    elif c_id == "name":
+                        tk.Entry(f_cell, textvariable=item["name"], width=8).pack(fill=tk.X, expand=True)
+                    elif c_id == "start":
+                        tk.Entry(f_cell, textvariable=item["start"], width=8).pack(fill=tk.X, expand=True)
+                    elif c_id == "start_wait":
+                        tk.Checkbutton(f_cell, variable=item["start_wait"]).pack(side=tk.LEFT)
+                    elif c_id == "end":
+                        tk.Entry(f_cell, textvariable=item["end"], width=8).pack(side=tk.LEFT, fill=tk.X, expand=True)
+                        if key == "sections":
+                             tk.Button(f_cell, text="V周期", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                    elif c_id == "end_wait":
+                        tk.Checkbutton(f_cell, variable=item["end_wait"]).pack(side=tk.LEFT)
+                    elif c_id == "duration_ms":
+                        tk.Entry(f_cell, textvariable=item["duration_ms"], width=5).pack(fill=tk.X, expand=True)
+                    elif c_id == "color":
+                        tk.Entry(f_cell, textvariable=item["color"], width=7).pack(side=tk.LEFT, fill=tk.X, expand=True)
+                        tk.Button(f_cell, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get())).pack(side=tk.LEFT)
+                    elif c_id == "replace":
+                        tk.Entry(f_cell, textvariable=item["replace"], width=10).pack(fill=tk.X, expand=True)
+                    elif c_id == "comment":
+                        tk.Entry(f_cell, textvariable=item["comment"], width=10).pack(fill=tk.X, expand=True)
+                    elif c_id == "extra_lines":
+                        tk.Entry(f_cell, textvariable=item["extra_lines"], width=3).pack(fill=tk.X, expand=True)
 
         def add(data=None):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
@@ -1376,6 +1382,7 @@ class LogViewerApp:
 
         btn_fr = tk.Frame(fr, width=250)
         btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
+        btn_fr.pack_propagate(False)
         tk.Button(btn_fr, text="行を追加", command=add, width=20, height=2).pack(pady=5)
         
         info_text = ""
@@ -1431,7 +1438,7 @@ class LogViewerApp:
             )
 
         if info_text:
-            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#ffffe0", relief=tk.SOLID, bd=1, padx=8, pady=8, font=("MS UI Gothic", 9))
+            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#ffffe0", relief=tk.SOLID, bd=1, padx=8, pady=8, font=("MS UI Gothic", 9), wraplength=230)
             info_lbl.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def save():
