@@ -298,22 +298,14 @@ class LogViewerApp:
         cmenu.add_command(label="設定保存...", command=self.save_config_dialog)
         cmenu.add_separator()
         cmenu.add_command(label="フィルタ設定の編集 (行単位)...", command=self.edit_keywords_dialog)
-        cmenu.add_command(label="区間設定の編集 (開始-終了)...", command=self.edit_sections_dialog)
+        # 「区間設定の編集」と「V周期設定」は Advanced ON時のみ追加
         cmenu.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog)
         cmenu.add_separator()
-        cmenu.add_command(label="V周期(仮想)挿入の設定...", command=self.open_vsync_settings_dialog)
-        cmenu.add_separator()
+        # Advancedモード
         cmenu.add_command(label="Advancedモード", command=self.toggle_advance_mode)
         menubar.add_cascade(label="設定", menu=cmenu)
         
         self.root.config(menu=menubar)
-        
-        # Advanced OFF時の初期状態：メニュー項目を無効化
-        try:
-            cmenu.entryconfig(4, state='disabled')  # 区間設定の編集
-            cmenu.entryconfig(7, state='disabled')  # V周期(仮想)挿入の設定
-        except:
-            pass
         
         toolbar = tk.Frame(self.root, bg=UIColors.BG)
         toolbar.pack(fill=tk.X, padx=5, pady=8)
@@ -331,7 +323,7 @@ class LogViewerApp:
         self._update_vsync_info_label()
         
         self.btn_advance = tk.Button(toolbar, text="Advanced: OFF", width=14, command=self.toggle_advance_mode, bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ACCENT_HOVER, cursor="hand2")
-        self.btn_advance.pack(side=tk.LEFT, padx=5)
+        self.btn_advance.pack(side=tk.RIGHT, padx=5)
 
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -867,16 +859,21 @@ class LogViewerApp:
         else:
             self.btn_advance.config(text="Advanced: OFF", bg=UIColors.BORDER, activebackground=UIColors.ACCENT_HOVER)
         
-        # メニュー項目を表示/非表示 (インデックスで制御)
+        # メニュー項目を追加/削除
         try:
             if self.advance_mode:
-                # Advanced ON時：メニュー項目を有効に
-                self.cmenu.entryconfig(4, state='normal')  # 区間設定の編集
-                self.cmenu.entryconfig(7, state='normal')  # V周期(仮想)挿入の設定
+                # Advanced ON時：「区間設定の編集」と「V周期設定」を追加
+                self.cmenu.insert(4, "command", label="区間設定の編集 (開始-終了)...", command=self.edit_sections_dialog)
+                self.cmenu.insert(5, "separator")
+                self.cmenu.insert(7, "command", label="V周期(仮想)挿入の設定...", command=self.open_vsync_settings_dialog)
+                self.cmenu.insert(8, "separator")
             else:
-                # Advanced OFF時：メニュー項目を無効に
-                self.cmenu.entryconfig(4, state='disabled')  # 区間設定の編集
-                self.cmenu.entryconfig(7, state='disabled')  # V周期(仮想)挿入の設定
+                # Advanced OFF時：メニュー項目を削除
+                # 逆順で削除（インデックスがずれないようにするため）
+                self.cmenu.delete(8)  # separator
+                self.cmenu.delete(7)  # V周期設定
+                self.cmenu.delete(5)  # separator
+                self.cmenu.delete(4)  # 区間設定の編集
         except:
             pass
         
