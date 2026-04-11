@@ -66,7 +66,7 @@ DEFAULT_CONFIG = {
     "sections":[
         {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "duration_ms": "", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
         {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "duration_ms": "", "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
-        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "",    "end_wait": False, "duration_ms": "40", "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
+        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "duration_ms": "", "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns":[],
     "vsync_auto_insert": {
@@ -119,23 +119,22 @@ class LogTab(tk.Frame):
         left_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
-        header_text = "[View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
+        header_text = "[Merged View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
         tk.Label(left_frame, text=header_text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         
-        self.text = tk.Text(left_frame, wrap=tk.NONE, yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.text = tk.Text(left_frame, wrap=tk.NONE, xscrollcommand=self.hsb_log.set, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.text.tag_config("found", background=UIColors.ACCENT_HOVER, foreground="white")
         
         self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg=UIColors.BG, highlightthickness=0)
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         
-        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", yscrollcommand=self.vsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
-        if not self.is_merged:
-            self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
+        self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
 
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
@@ -148,7 +147,7 @@ class LogTab(tk.Frame):
         
         tk.Label(cmt_frame, text="Comment / Tags", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
-        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.comment_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_cmt.config(command=self.comment_text.xview)
@@ -161,7 +160,7 @@ class LogTab(tk.Frame):
             hsb = tk.Scrollbar(st_frame, orient=tk.HORIZONTAL)
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
             
-            st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#faf9f6", fg=UIColors.TEXT, yscrollcommand=self.vsb.set, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+            st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#faf9f6", fg=UIColors.TEXT, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
             st_text.tag_configure("sel", background="#cce8ff", foreground="black")
             st_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             hsb.config(command=st_text.xview)
@@ -175,17 +174,38 @@ class LogTab(tk.Frame):
             w.bind('<ButtonRelease-1>', self.update_cursor_line)
             w.bind('<KeyRelease>', self.update_cursor_line)
         
+        # === 完全なスクロール同期ロジック ===
+        self.syncing = False
+        def on_scroll_set(*args):
+            if self.syncing: return
+            self.syncing = True
+            try:
+                self.vsb.set(*args)
+                for t in self.all_texts:
+                    t.yview_moveto(args[0])
+                self.linenumbers.redraw()
+            finally:
+                self.syncing = False
+
+        for t in self.all_texts:
+            t.configure(yscrollcommand=on_scroll_set)
+
         def sync_yview(*args):
-            for t in self.all_texts: t.yview(*args)
+            for t in self.all_texts:
+                t.yview(*args)
             self.linenumbers.redraw()
+            
         self.vsb.config(command=sync_yview)
         
         def on_mw(e):
             d = int(-1*(e.delta/120)) if e.delta else 0
-            for t in self.all_texts: t.yview_scroll(d, "units")
+            for t in self.all_texts: 
+                t.yview_scroll(d, "units")
             self.linenumbers.redraw()
             return "break"
-        for t in self.all_texts: t.bind('<MouseWheel>', on_mw)
+            
+        for t in self.all_texts: 
+            t.bind('<MouseWheel>', on_mw)
 
     def update_cursor_line(self, event=None):
         if not hasattr(self, 'all_texts'): return
@@ -204,7 +224,7 @@ class LogTab(tk.Frame):
 class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Log Viewer")
+        self.root.title("Log Viewer - French Elegance")
         self.root.geometry("1450x850")
         self.root.configure(bg=UIColors.BG)
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -518,7 +538,8 @@ class LogViewerApp:
                 "manual_ms": ms,
                 "start_time_val": e_start_time.get()
             }
-            messagebox.showinfo("保存", "設定は次回ファイルオープン時から適用されます。保存するには『設定 > 設定保存...』を選択してください。")
+            self.save_config_dialog_silent() 
+            messagebox.showinfo("保存", "設定を保存しました。次回ファイルオープン時から適用されます。")
             dlg.destroy()
 
         btn_box = tk.Frame(dlg, bg=UIColors.BG)
@@ -783,7 +804,7 @@ class LogViewerApp:
         remaining_expired.sort(key=lambda x: x[0])
         for exp_ts, fn_name, rule in remaining_expired:
             dur_ms = rule['duration_ms']
-            v_line = f"{format_sec(exp_ts)} --- [VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
+            v_line = f"{format_sec(exp_ts)} ---[VIRTUAL TIMER] Wait Time {dur_ms}ms End ---"
             lines_final.append(v_line)
             src_map_final.append(VIRTUAL_SRC_NAME)
 
@@ -976,7 +997,12 @@ class LogViewerApp:
                     rule = active_states[fn]["rule"]
                     state_info = active_states[fn]
                     
-                    is_time_expired = state_info.get("timer_expired", False)
+                    is_time_expired = False
+                    if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
+                        if i > state_info["start_idx"]:
+                            elapsed_ms = (timestamps[i] - state_info["start_ts"]) * 1000.0
+                            if elapsed_ms >= rule["duration_ms"] - 0.001:
+                                is_time_expired = True
 
                     condition_met = False
                     if rule["end_str"] != "":
@@ -1072,7 +1098,7 @@ class LogViewerApp:
             else:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<<[V-SYNC 起点]" in lines[i]:
+                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
                         is_visible[i] = True 
                     elif attr["priority"] == 0: 
                         is_visible[i] = False
@@ -1131,7 +1157,7 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
-        flines, fcmts, ftimediffs = [],[],[]
+        flines, fcmts, ftimediffs = [],[], []
         main_tags =[]
         final_st_lines = {fn:[] for fn in tab.source_file_names}
         final_st_tags = {fn:[] for fn in tab.source_file_names}
@@ -1383,7 +1409,7 @@ class LogViewerApp:
                     elif c_id == "end":
                         tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                         if key == "sections":
-                             tk.Button(f_cell, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
+                             tk.Button(f_cell, text="V周期", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
                     elif c_id == "end_wait":
                         tk.Checkbutton(f_cell, variable=item["end_wait"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
                     elif c_id == "duration_ms":
@@ -1438,7 +1464,7 @@ class LogViewerApp:
                 " 区間を開始します。\n\n"
                 "■終了パターン\n"
                 " 区間の終了条件(正規表現)です。\n"
-                " [V周期]ボタンで<VSYNC>を入力可能です。\n"
+                "[V周期]ボタンで<VSYNC>を入力可能です。\n"
                 " 空欄の場合は持続(ms)の経過のみで\n"
                 " 終了します。\n\n"
                 "■終了の+V待\n"
@@ -1496,6 +1522,7 @@ class LogViewerApp:
                     new_cfg.append(d)
             
             setattr(self, f"{key}_config", new_cfg)
+            self.save_config_dialog_silent()
             dlg.destroy()
             for tab_id in self.notebook.tabs():
                 try:
