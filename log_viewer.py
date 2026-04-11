@@ -119,7 +119,7 @@ class LogTab(tk.Frame):
         left_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
-        header_text = "[Merged View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
+        header_text = "[View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
         tk.Label(left_frame, text=header_text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
@@ -203,7 +203,7 @@ class LogTab(tk.Frame):
 class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Log Viewer - French Elegance")
+        self.root.title("Log Viewer")
         self.root.geometry("1450x850")
         self.root.configure(bg=UIColors.BG)
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
