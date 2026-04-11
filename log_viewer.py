@@ -19,19 +19,48 @@ except ImportError:
     ROOT_CLASS = tk.Tk
     HAS_DND = False
 
-# --- Constants ---
+# --- Constants & Colors ---
 VSYNC_TAG = "<VSYNC>"
 VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]"
 VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---"
 VIRTUAL_SRC_NAME = "(Virtual)"
 
+class UIColors:
+    BG = "#efe6d5"          # 全体の背景（ライムストーン）
+    PANEL_BG = "#ffffff"    # パネルやキャンバスの背景（クリーンな白）
+    HEADER_BG = "#708090"   # ヘッダー背景（スレートグレー）
+    HEADER_FG = "#ffffff"   # ヘッダーテキスト
+    ACCENT = "#708090"      # アクセント1（スレートグレー）
+    ACCENT_HOVER = "#5c6a78"# アクセント1のホバー
+    ROSE = "#d4a3b3"        # アクセント2（マカロンローズ）
+    ROSE_HOVER = "#c291a1"  # アクセント2のホバー
+    TEXT = "#4a4f54"        # 基本テキスト
+    TEXT_BG = "#ffffff"     # テキストエリア背景
+    BORDER = "#d1cbbd"      # 各種境界線
+
+def apply_french_theme(widget):
+    """ダイアログ内の標準ウィジェットにフレンチテーマを一括適用するヘルパー"""
+    if isinstance(widget, tk.Button) or isinstance(widget, tk.Entry) or isinstance(widget, tk.Text) or isinstance(widget, tk.Canvas):
+        return
+    try:
+        if isinstance(widget, (tk.Frame, tk.LabelFrame)):
+            widget.configure(bg=UIColors.BG)
+        elif isinstance(widget, tk.Label):
+            widget.configure(bg=UIColors.BG, fg=UIColors.TEXT)
+        elif isinstance(widget, (tk.Radiobutton, tk.Checkbutton)):
+            widget.configure(bg=UIColors.BG, fg=UIColors.TEXT, activebackground=UIColors.BG, selectcolor=UIColors.PANEL_BG)
+    except tk.TclError:
+        pass
+    for child in widget.winfo_children():
+        apply_french_theme(child)
+
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
     "keywords":[
-        {"file_pattern": ".*", "pattern": r".*ERROR.*", "color": "#ffcccc", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
-        {"file_pattern": ".*", "pattern": "WARN",       "color": "#ffebcc", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
-        {"file_pattern": ".*", "pattern": "INFO",       "color": "#ccffcc", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0},
-        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e1bee7", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0},
+        {"file_pattern": ".*", "pattern": r".*ERROR.*", "color": "#f8d7da", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
+        {"file_pattern": ".*", "pattern": "WARN",       "color": "#fff3cd", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
+        {"file_pattern": ".*", "pattern": "INFO",       "color": "#d1e7dd", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0},
+        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e2d9f3", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0},
         {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL TIMER\].*", "color": "#ffe0b2", "comment": "タイマー満了", "enabled": True, "extra_lines": 0}
     ],
     "sections":[
@@ -44,9 +73,7 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
         "manual_ms": 16.666,
-        "start_mode": "line",
-        "start_line": "",
-        "start_time_val": "2.0"
+        "start_time_val": "0.0"
     }
 }
 
@@ -65,7 +92,7 @@ class LineNumberCanvas(tk.Canvas):
             if dline is None: break
             y = dline[1]
             linenum = str(i).split(".")[0]
-            self.create_text(40, y, anchor="ne", text=linenum, fill="#666666")
+            self.create_text(40, y, anchor="ne", text=linenum, fill="#888888", font=("Consolas", 10))
             i = self.text_widget.index(f"{i}+1line")
 
 class LogTab(tk.Frame):
@@ -79,60 +106,61 @@ class LogTab(tk.Frame):
         self.source_file_names = source_files_list if source_files_list else ([os.path.basename(path)] if path else[])
         self.line_source_map: List[str] =[]
         self.status_texts: Dict[str, tk.Text] = {}
+        self.configure(bg=UIColors.BG)
         self._create_layout()
 
     def _create_layout(self):
         self.vsb = tk.Scrollbar(self, orient=tk.VERTICAL)
         self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.paned_window = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=4, bg="#d0d0d0")
+        self.paned_window = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=6, bg=UIColors.BORDER, bd=0)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
         
-        left_frame = tk.Frame(self.paned_window)
+        left_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
         header_text = "[Merged View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
-        tk.Label(left_frame, text=header_text, bg="#e0e0e0", relief=tk.RAISED).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(left_frame, text=header_text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         
-        self.text = tk.Text(left_frame, wrap=tk.NONE, yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set)
+        self.text = tk.Text(left_frame, wrap=tk.NONE, yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_log.set, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.text.tag_configure("sel", background="#cce8ff", foreground="black")
-        self.text.tag_config("found", background="#0000cd", foreground="white")
+        self.text.tag_config("found", background=UIColors.ACCENT_HOVER, foreground="white")
         
-        self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg='#f0f0f0')
+        self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg=UIColors.BG, highlightthickness=0)
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         
-        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#f8f8f8", fg="#555555", yscrollcommand=self.vsb.set)
+        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", yscrollcommand=self.vsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
 
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
         
-        cmt_frame = tk.Frame(self.paned_window)
+        cmt_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(cmt_frame, minsize=50, stretch="always", width=250)
         
         self.hsb_cmt = tk.Scrollbar(cmt_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
         
-        tk.Label(cmt_frame, text="Comment / Tags", bg="#e0e0e0", relief=tk.RAISED).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(cmt_frame, text="Comment / Tags", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
-        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg="#fcfcfc", fg="#0000aa", yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_cmt.set)
+        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", yscrollcommand=self.vsb.set, xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.comment_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_cmt.config(command=self.comment_text.xview)
         
         for fname in self.source_file_names:
-            st_frame = tk.Frame(self.paned_window)
+            st_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
             self.paned_window.add(st_frame, minsize=50, stretch="always", width=120)
-            tk.Label(st_frame, text=f"{fname}の区間", bg="#dcedc8", relief=tk.RAISED, font=("MS UI Gothic", 9, "bold")).pack(side=tk.TOP, fill=tk.X)
+            tk.Label(st_frame, text=f"{fname}の区間", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
             
             hsb = tk.Scrollbar(st_frame, orient=tk.HORIZONTAL)
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
             
-            st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#f8f8f8", fg="#333333", yscrollcommand=self.vsb.set, xscrollcommand=hsb.set)
+            st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#faf9f6", fg=UIColors.TEXT, yscrollcommand=self.vsb.set, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
             st_text.tag_configure("sel", background="#cce8ff", foreground="black")
             st_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             hsb.config(command=st_text.xview)
@@ -142,7 +170,7 @@ class LogTab(tk.Frame):
         
         # カーソル行のハイライト設定
         for w in self.all_texts:
-            w.tag_configure("cursor_line", background="#ffdddd", underline=True)
+            w.tag_configure("cursor_line", background="#fff0f5", underline=True)
             w.bind('<ButtonRelease-1>', self.update_cursor_line)
             w.bind('<KeyRelease>', self.update_cursor_line)
         
@@ -175,9 +203,16 @@ class LogTab(tk.Frame):
 class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Log Viewer")
+        self.root.title("Log Viewer - French Elegance")
         self.root.geometry("1450x850")
+        self.root.configure(bg=UIColors.BG)
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("TNotebook", background=UIColors.BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background=UIColors.BORDER, foreground=UIColors.TEXT, padding=[15, 5], font=("Yu Gothic UI", 9, "bold"), borderwidth=0)
+        style.map("TNotebook.Tab", background=[("selected", UIColors.PANEL_BG)], foreground=[("selected", "#000000")])
         
         self.keywords_config =[x.copy() for x in DEFAULT_CONFIG["keywords"]]
         self.sections_config =[x.copy() for x in DEFAULT_CONFIG["sections"]]
@@ -206,6 +241,9 @@ class LogViewerApp:
         
         if os.path.exists(self.config_path):
             self.load_config(self.config_path)
+            
+        self.toggle_vsync_display(force_update=True)
+        self.toggle_filter(force_update=True)
 
     def _build_ui(self):
         menubar = tk.Menu(self.root)
@@ -240,22 +278,22 @@ class LogViewerApp:
         
         self.root.config(menu=menubar)
         
-        toolbar = tk.Frame(self.root)
-        toolbar.pack(fill=tk.X, padx=5, pady=5)
+        toolbar = tk.Frame(self.root, bg=UIColors.BG)
+        toolbar.pack(fill=tk.X, padx=5, pady=8)
         
-        self.btn_kw_filter = tk.Button(toolbar, text="フィルタ: OFF", width=12, command=self.toggle_filter)
-        self.btn_kw_filter.pack(side=tk.LEFT)
+        self.btn_kw_filter = tk.Button(toolbar, text="フィルタ: OFF", width=14, command=self.toggle_filter, bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ACCENT_HOVER, activeforeground="white", cursor="hand2")
+        self.btn_kw_filter.pack(side=tk.LEFT, padx=5)
         
-        tk.Button(toolbar, text="ログをマージ", command=self.merge_logs_action, bg="#e3f2fd").pack(side=tk.LEFT, padx=10)
+        tk.Button(toolbar, text="ログをマージ", command=self.merge_logs_action, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.BORDER, cursor="hand2", padx=10).pack(side=tk.LEFT, padx=10)
         
-        self.btn_vsync_toggle = tk.Button(toolbar, text="V周期表示: ON", width=12, command=self.toggle_vsync_display)
+        self.btn_vsync_toggle = tk.Button(toolbar, text="V周期表示: ON", width=14, command=self.toggle_vsync_display, bg=UIColors.ROSE, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ROSE_HOVER, activeforeground="white", cursor="hand2")
         self.btn_vsync_toggle.pack(side=tk.LEFT, padx=5)
 
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         self.status_var = tk.StringVar(value="準備完了")
-        tk.Label(self.root, textvariable=self.status_var, anchor="w", relief="sunken").pack(fill=tk.X, side=tk.BOTTOM)
+        tk.Label(self.root, textvariable=self.status_var, anchor="w", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=2)
 
         if HAS_DND:
             self.root.drop_target_register(DND_FILES)
@@ -333,7 +371,7 @@ class LogViewerApp:
             
         fname = os.path.basename(path)
         if self.vsync_config.get("enabled", True):
-            new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()),[fname])
+            new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()), [fname])
             tab = LogTab(self.notebook, self, path, new_content, source_files_list=[fname], is_merged=True)
             tab.line_source_map = new_src_map
             self.notebook.add(tab, text=fname)
@@ -415,7 +453,16 @@ class LogViewerApp:
                 
         all_blocks.sort(key=lambda x: x[0])
         final_lines, final_src =[],[]
-        for _, bl, src_name in all_blocks:
+        
+        seen_virtual_lines = set()
+        
+        for skey, bl, src_name in all_blocks:
+            if src_name == VIRTUAL_SRC_NAME and len(bl) == 1 and (VSYNC_MARKER in bl[0] or "[VIRTUAL TIMER]" in bl[0]):
+                vt_key = bl[0].strip()
+                if vt_key in seen_virtual_lines:
+                    continue
+                seen_virtual_lines.add(vt_key)
+                
             final_lines.extend(bl)
             final_src.extend([src_name] * len(bl))
             
@@ -433,48 +480,32 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title("V周期(仮想)挿入の設定")
-        dlg.geometry("480x250")
+        dlg.geometry("400x180")
+        dlg.configure(bg=UIColors.BG)
         self.vsync_settings_dlg_ref = dlg
         
         conf = self.vsync_config
         
-        tk.Label(dlg, text="V周期(仮想)挿入の起点とタイミングを設定します。\n設定を保存すると、次回ファイルを開く時から自動適用されます。", anchor="w", font=("", 9, "bold")).pack(pady=10, padx=10, fill=tk.X)
+        tk.Label(dlg, text="V周期(仮想)挿入の起点とタイミングを設定します。", anchor="w", font=("Yu Gothic UI", 9, "bold")).pack(pady=10, padx=10, fill=tk.X)
 
-        # --- 開始位置の指定 ---
-        frame_start = tk.LabelFrame(dlg, text="開始位置の指定")
+        frame_start = tk.LabelFrame(dlg, text="開始設定", font=("Yu Gothic UI", 9, "bold"), bg=UIColors.BG)
         frame_start.pack(fill=tk.X, padx=10, pady=(5, 5))
         
-        start_mode_val = conf.get("start_mode", "line")
-        if start_mode_val not in ["line", "time"]:
-            start_mode_val = "line"
-        start_mode_var = tk.StringVar(value=start_mode_val)
-        
-        f_start_line = tk.Frame(frame_start)
-        f_start_line.pack(anchor="w", padx=5, pady=2)
-        rb_start_line = tk.Radiobutton(f_start_line, text="指定した行番号の時刻から開始 (生ログ行番号):", variable=start_mode_var, value="line")
-        rb_start_line.pack(side=tk.LEFT)
-        e_start_line = tk.Entry(f_start_line, width=10)
-        e_start_line.pack(side=tk.LEFT, padx=5)
-        e_start_line.insert(0, str(conf.get("start_line", "")))
-        
-        f_start_time = tk.Frame(frame_start)
-        f_start_time.pack(anchor="w", padx=5, pady=2)
-        rb_start_time = tk.Radiobutton(f_start_time, text="指定した時刻(秒)から強制開始:", variable=start_mode_var, value="time")
-        rb_start_time.pack(side=tk.LEFT)
-        e_start_time = tk.Entry(f_start_time, width=10)
+        f_start_time = tk.Frame(frame_start, bg=UIColors.BG)
+        f_start_time.pack(anchor="w", padx=5, pady=5)
+        tk.Label(f_start_time, text="指定した時刻(秒)から強制開始:", bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
+        e_start_time = tk.Entry(f_start_time, width=15, relief=tk.SOLID, bd=1, highlightthickness=0)
         e_start_time.pack(side=tk.LEFT, padx=5)
-        e_start_time.insert(0, str(conf.get("start_time_val", "2.0")))
+        e_start_time.insert(0, str(conf.get("start_time_val", "0.0")))
 
-        # --- 間隔設定 ---
-        frame_mode = tk.LabelFrame(dlg, text="間隔設定")
-        frame_mode.pack(fill=tk.X, padx=10, pady=5)
-        
-        f_manual = tk.Frame(frame_mode)
-        f_manual.pack(anchor="w", padx=5, pady=2)
-        tk.Label(f_manual, text="挿入間隔 (ms):").pack(side=tk.LEFT)
-        e_ms = tk.Entry(f_manual, width=10)
+        f_manual = tk.Frame(frame_start, bg=UIColors.BG)
+        f_manual.pack(anchor="w", padx=5, pady=5)
+        tk.Label(f_manual, text="挿入間隔 (ms):", bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
+        e_ms = tk.Entry(f_manual, width=10, relief=tk.SOLID, bd=1, highlightthickness=0)
         e_ms.pack(side=tk.LEFT, padx=5)
         e_ms.insert(0, str(conf.get("manual_ms", 16.666)))
+        
+        apply_french_theme(dlg)
 
         def save_conf():
             try: ms = float(e_ms.get())
@@ -484,17 +515,15 @@ class LogViewerApp:
                 "enabled": True, 
                 "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
                 "manual_ms": ms,
-                "start_mode": start_mode_var.get(),
-                "start_line": e_start_line.get(),
                 "start_time_val": e_start_time.get()
             }
             self.save_config_dialog_silent() 
             messagebox.showinfo("保存", "設定を保存しました。次回ファイルオープン時から適用されます。")
             dlg.destroy()
 
-        btn_box = tk.Frame(dlg)
+        btn_box = tk.Frame(dlg, bg=UIColors.BG)
         btn_box.pack(pady=10, fill=tk.X)
-        tk.Button(btn_box, text="OK", command=save_conf, bg="#ddddff", width=15).pack(side=tk.RIGHT, padx=10)
+        tk.Button(btn_box, text="OK", command=save_conf, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2", width=15).pack(side=tk.RIGHT, padx=10)
 
     def save_config_dialog_silent(self, filepath=None):
         target_path = filepath if filepath else self.config_path
@@ -552,29 +581,19 @@ class LogViewerApp:
 
         # === PASS 1: Virtual V-Sync Insertion ===
         manual_ms = self.vsync_config.get("manual_ms", 16.666)
-        start_mode = self.vsync_config.get("start_mode", "line")
-        start_line_str = self.vsync_config.get("start_line", "")
         start_time_val_str = self.vsync_config.get("start_time_val", "0.0")
         
         start_time = None
         start_line_idx = -1
         
-        if start_mode == "time":
-            try:
-                start_time = float(start_time_val_str)
-            except Exception:
-                pass
-        elif start_mode == "line":
-            try:
-                line_num = int(start_line_str)
-                line_idx = line_num - 1
-                if 0 <= line_idx < len(timestamps_temp):
-                    t = timestamps_temp[line_idx]
-                    if t is not None:
-                        start_time = t
-                        start_line_idx = line_idx
-            except Exception:
-                pass
+        try:
+            start_time = float(start_time_val_str)
+            for i, ts in enumerate(timestamps_temp):
+                if ts is not None and abs(ts - start_time) < 0.000001:
+                    start_line_idx = i
+                    break
+        except Exception:
+            pass
                 
         try:
             manual_ms_val = float(manual_ms)
@@ -602,7 +621,7 @@ class LogViewerApp:
                     if insertion_count >= 100: next_virtual_ts = line_ts + interval_sec
                     
                 if i == start_line_idx:
-                    lines_v.append(line + "  <<< [V-SYNC 起点]")
+                    lines_v.append(line + "  <<<[V-SYNC 起点]")
                 else:
                     lines_v.append(line)
                 src_map_v.append(src_map_temp[i])
@@ -771,17 +790,29 @@ class LogViewerApp:
         return "\n".join(lines_final), src_map_final
 
     # --- Filter & Display ---
-    def toggle_filter(self):
-        self.use_keyword_filter = not self.use_keyword_filter
-        self.btn_kw_filter.config(text=f"フィルタ: {'ON' if self.use_keyword_filter else 'OFF'}", bg="#bbdefb" if self.use_keyword_filter else "SystemButtonFace")
-        t = self.get_current_tab()
-        if t: self.apply_display_update(t)
+    def toggle_filter(self, force_update=False):
+        if not force_update:
+            self.use_keyword_filter = not self.use_keyword_filter
+        if self.use_keyword_filter:
+            self.btn_kw_filter.config(text="フィルタ: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+        else:
+            self.btn_kw_filter.config(text="フィルタ: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
+        
+        if not force_update:
+            t = self.get_current_tab()
+            if t: self.apply_display_update(t)
 
-    def toggle_vsync_display(self):
-        self.show_vsync_lines = not self.show_vsync_lines
-        self.btn_vsync_toggle.config(text=f"V周期表示: {'ON' if self.show_vsync_lines else 'OFF'}")
-        t = self.get_current_tab()
-        if t: self.apply_display_update(t)
+    def toggle_vsync_display(self, force_update=False):
+        if not force_update:
+            self.show_vsync_lines = not self.show_vsync_lines
+        if self.show_vsync_lines:
+            self.btn_vsync_toggle.config(text="V周期表示: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+        else:
+            self.btn_vsync_toggle.config(text="V周期表示: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
+            
+        if not force_update:
+            t = self.get_current_tab()
+            if t: self.apply_display_update(t)
 
     def apply_display_update(self, tab: LogTab):
         data = tab.original_content
@@ -1008,14 +1039,14 @@ class LogViewerApp:
                 "file_pat_re": re.compile(".*"),
                 "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
                 "comment": "タイマー満了",
-                "color": "#ffe0b2",
+                "color": "#ffe8d6",
                 "extra": 0
             })
 
         for idx in range(len(lines)):
             if "<<< [V-SYNC 起点]" in lines[idx]:
                 if line_attrs[idx]["priority"] < 30:
-                    line_attrs[idx]["color"] = "#ffb6c1" 
+                    line_attrs[idx]["color"] = UIColors.ROSE 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
                     line_attrs[idx]["priority"] = 30
 
@@ -1033,7 +1064,7 @@ class LogViewerApp:
                         break
 
         visible_mapping = {}
-        is_visible = [True] * len(lines)
+        is_visible =[True] * len(lines)
         
         for i in range(len(lines)):
             if not self.show_vsync_lines and VSYNC_MARKER in lines[i]:
@@ -1100,7 +1131,7 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
-        flines, fcmts, ftimediffs = [],[], []
+        flines, fcmts, ftimediffs = [],[],[]
         main_tags =[]
         final_st_lines = {fn:[] for fn in tab.source_file_names}
         final_st_tags = {fn:[] for fn in tab.source_file_names}
@@ -1183,17 +1214,18 @@ class LogViewerApp:
         self.find_window_ref = tk.Toplevel(self.root)
         self.find_window_ref.title("検索")
         self.find_window_ref.geometry("350x120")
+        self.find_window_ref.configure(bg=UIColors.BG)
         self.find_window_ref.transient(self.root) 
 
-        tk.Label(self.find_window_ref, text="検索文字列:").pack(pady=(10, 0))
+        tk.Label(self.find_window_ref, text="検索文字列:", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9, "bold")).pack(pady=(10, 0))
         
-        entry = tk.Entry(self.find_window_ref, width=40)
+        entry = tk.Entry(self.find_window_ref, width=40, relief=tk.SOLID, bd=1, highlightthickness=0)
         entry.pack(pady=5, padx=10)
         entry.insert(0, self.last_search_keyword)
         entry.select_range(0, tk.END)
         entry.focus_set()
 
-        btn_frame = tk.Frame(self.find_window_ref)
+        btn_frame = tk.Frame(self.find_window_ref, bg=UIColors.BG)
         btn_frame.pack(pady=10)
 
         def do_find_next():
@@ -1204,8 +1236,8 @@ class LogViewerApp:
             self.last_search_keyword = entry.get()
             self.find_prev()
 
-        tk.Button(btn_frame, text="次を検索 (Enter)", command=do_find_next).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="前を検索 (Shift+Ent)", command=do_find_prev).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="次を検索 (Enter)", command=do_find_next, bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), cursor="hand2").pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="前を検索 (Shift+Ent)", command=do_find_prev, bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), cursor="hand2").pack(side=tk.LEFT, padx=5)
 
         entry.bind('<Return>', lambda e: do_find_next())
         entry.bind('<Shift-Return>', lambda e: do_find_prev())
@@ -1259,101 +1291,112 @@ class LogViewerApp:
         dlg = tk.Toplevel(self.root)
         dlg.title(title)
         dlg.geometry("1400x550")
+        dlg.configure(bg=UIColors.BG)
         setattr(self, ref_attr, dlg)
         
-        fr = tk.Frame(dlg)
+        fr = tk.Frame(dlg, bg=UIColors.BG)
         fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        l_fr = tk.Frame(fr, relief=tk.GROOVE, borderwidth=1)
+        l_fr = tk.Frame(fr, bg=UIColors.BG, relief=tk.FLAT, highlightbackground=UIColors.BORDER, highlightthickness=1)
         l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        hdr = tk.Frame(l_fr)
-        hdr.pack(fill=tk.X, padx=5, pady=2)
+        wrapper = tk.Frame(l_fr, bg=UIColors.BG)
+        wrapper.pack(fill=tk.BOTH, expand=True)
         
-        cv = tk.Canvas(l_fr)
-        sc = tk.Scrollbar(l_fr, command=cv.yview)
-        sf = tk.Frame(cv)
-        cv.configure(yscrollcommand=sc.set)
-        sc.pack(side=tk.RIGHT, fill=tk.Y)
+        hdr = tk.Frame(wrapper, bg=UIColors.HEADER_BG)
+        hdr.pack(fill=tk.X)
+        
+        cv = tk.Canvas(wrapper, bg=UIColors.PANEL_BG, highlightthickness=0)
+        sc_y = tk.Scrollbar(wrapper, orient=tk.VERTICAL, command=cv.yview)
+        sc_x = tk.Scrollbar(wrapper, orient=tk.HORIZONTAL, command=cv.xview)
+        sf = tk.Frame(cv, bg=UIColors.PANEL_BG)
+        cv.configure(yscrollcommand=sc_y.set, xscrollcommand=sc_x.set)
+        
+        sc_y.pack(side=tk.RIGHT, fill=tk.Y)
+        sc_x.pack(side=tk.BOTTOM, fill=tk.X)
         cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
         win = cv.create_window((0,0), window=sf, anchor="nw")
-        sf.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind("<Configure>", lambda e: cv.itemconfig(win, width=e.width))
+        
+        def on_configure(e):
+            cv.configure(scrollregion=cv.bbox("all"))
+        sf.bind("<Configure>", on_configure)
 
         col_defs =[]
         col_idx = 1
-        col_defs.append((0, "btn", "", 150))
+        col_defs.append((0, "btn", "", 135))
         for f in fields:
-            if f == "file_pattern": col_defs.append((col_idx, f, "対象ファイル(正規表現)", 140))
-            elif f == "pattern": col_defs.append((col_idx, f, "正規表現", 160))
-            elif f == "search": col_defs.append((col_idx, f, "検索文字列", 160))
-            elif f == "name": col_defs.append((col_idx, f, "区間名", 110))
-            elif f == "start": col_defs.append((col_idx, f, "開始パターン", 110))
-            elif f == "start_wait": col_defs.append((col_idx, f, "+V待", 40))
-            elif f == "end": col_defs.append((col_idx, f, "終了パターン", 140))
-            elif f == "end_wait": col_defs.append((col_idx, f, "+V待", 40))
-            elif f == "duration_ms": col_defs.append((col_idx, f, "持続(ms)", 60))
-            elif f == "color": col_defs.append((col_idx, f, "色", 100))
-            elif f == "replace": col_defs.append((col_idx, f, "置換/説明", 160))
-            elif f == "comment": col_defs.append((col_idx, f, "コメント", 140))
-            elif f == "extra_lines": col_defs.append((col_idx, f, "+行", 40))
+            if f == "file_pattern": col_defs.append((col_idx, f, "対象ファイル(正規表現)", 145))
+            elif f == "pattern": col_defs.append((col_idx, f, "正規表現", 165))
+            elif f == "search": col_defs.append((col_idx, f, "検索文字列", 165))
+            elif f == "name": col_defs.append((col_idx, f, "区間名", 115))
+            elif f == "start": col_defs.append((col_idx, f, "開始パターン", 115))
+            elif f == "start_wait": col_defs.append((col_idx, f, "+V待", 45))
+            elif f == "end": col_defs.append((col_idx, f, "終了パターン", 145))
+            elif f == "end_wait": col_defs.append((col_idx, f, "+V待", 45))
+            elif f == "duration_ms": col_defs.append((col_idx, f, "持続(ms)", 65))
+            elif f == "color": col_defs.append((col_idx, f, "色", 105))
+            elif f == "replace": col_defs.append((col_idx, f, "置換/説明", 165))
+            elif f == "comment": col_defs.append((col_idx, f, "コメント", 145))
+            elif f == "extra_lines": col_defs.append((col_idx, f, "+行", 45))
             col_idx += 1
 
         for c_idx, c_id, c_txt, c_w in col_defs:
-            hdr.columnconfigure(c_idx, minsize=c_w, weight=0)
-            sf.columnconfigure(c_idx, minsize=c_w, weight=0)
+            h_cell = tk.Frame(hdr, bg=UIColors.HEADER_BG, width=c_w, height=28)
+            h_cell.pack_propagate(False)
+            h_cell.grid(row=0, column=c_idx, sticky="w", padx=2, pady=2)
             if c_txt:
-                tk.Label(hdr, text=c_txt, anchor="w").grid(row=0, column=c_idx, sticky="w", padx=4)
-            else:
-                tk.Frame(hdr, width=c_w, height=1).grid(row=0, column=c_idx)
+                tk.Label(h_cell, text=c_txt, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), anchor="w").pack(side=tk.LEFT, fill=tk.BOTH)
 
         entries =[]
         def refresh():
             for w in sf.winfo_children(): w.destroy()
             for i, item in enumerate(entries):
-                f_btn = tk.Frame(sf)
+                f_btn = tk.Frame(sf, bg=UIColors.PANEL_BG, width=135, height=28)
+                f_btn.pack_propagate(False)
                 f_btn.grid(row=i, column=0, sticky="w", padx=2, pady=2)
                 
-                tk.Checkbutton(f_btn, variable=item["enabled"]).pack(side=tk.LEFT)
-                tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1)).pack(side=tk.LEFT)
-                tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1)).pack(side=tk.LEFT)
-                tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx)).pack(side=tk.LEFT, padx=2)
+                tk.Checkbutton(f_btn, variable=item["enabled"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
+                tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
+                tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
+                tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx), bg="#e8c5c5", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=2)
                 
                 for c_idx, c_id, c_txt, c_w in col_defs:
                     if c_id == "btn": continue
                     
-                    f_cell = tk.Frame(sf)
-                    f_cell.grid(row=i, column=c_idx, sticky="we", padx=2, pady=2)
+                    f_cell = tk.Frame(sf, bg=UIColors.PANEL_BG, width=c_w, height=28)
+                    f_cell.pack_propagate(False)
+                    f_cell.grid(row=i, column=c_idx, sticky="w", padx=2, pady=2)
                     
                     if c_id == "file_pattern":
-                        tk.Entry(f_cell, textvariable=item["file_pattern"], width=10).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["file_pattern"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "pattern":
-                        tk.Entry(f_cell, textvariable=item["pattern"], width=10).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["pattern"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "search":
-                        tk.Entry(f_cell, textvariable=item["search"], width=10).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["search"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "name":
-                        tk.Entry(f_cell, textvariable=item["name"], width=8).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["name"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "start":
-                        tk.Entry(f_cell, textvariable=item["start"], width=8).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["start"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "start_wait":
-                        tk.Checkbutton(f_cell, variable=item["start_wait"]).pack(side=tk.LEFT)
+                        tk.Checkbutton(f_cell, variable=item["start_wait"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
                     elif c_id == "end":
-                        tk.Entry(f_cell, textvariable=item["end"], width=8).pack(side=tk.LEFT, fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                         if key == "sections":
-                             tk.Button(f_cell, text="V周期", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg="#e1bee7").pack(side=tk.LEFT, padx=1)
+                             tk.Button(f_cell, text="V周期", width=5, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
                     elif c_id == "end_wait":
-                        tk.Checkbutton(f_cell, variable=item["end_wait"]).pack(side=tk.LEFT)
+                        tk.Checkbutton(f_cell, variable=item["end_wait"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
                     elif c_id == "duration_ms":
-                        tk.Entry(f_cell, textvariable=item["duration_ms"], width=5).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["duration_ms"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "color":
-                        tk.Entry(f_cell, textvariable=item["color"], width=7).pack(side=tk.LEFT, fill=tk.X, expand=True)
-                        tk.Button(f_cell, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get())).pack(side=tk.LEFT)
+                        tk.Entry(f_cell, textvariable=item["color"], width=7, relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                        tk.Button(f_cell, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get()), bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
                     elif c_id == "replace":
-                        tk.Entry(f_cell, textvariable=item["replace"], width=10).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["replace"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "comment":
-                        tk.Entry(f_cell, textvariable=item["comment"], width=10).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["comment"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
                     elif c_id == "extra_lines":
-                        tk.Entry(f_cell, textvariable=item["extra_lines"], width=3).pack(fill=tk.X, expand=True)
+                        tk.Entry(f_cell, textvariable=item["extra_lines"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
 
         def add(data=None):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
@@ -1380,10 +1423,10 @@ class LogViewerApp:
         for c in cfg: add(c)
         if not entries: add()
 
-        btn_fr = tk.Frame(fr, width=250)
+        btn_fr = tk.Frame(fr, bg=UIColors.BG, width=250)
         btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
         btn_fr.pack_propagate(False)
-        tk.Button(btn_fr, text="行を追加", command=add, width=20, height=2).pack(pady=5)
+        tk.Button(btn_fr, text="行を追加", command=add, width=20, height=2, bg=UIColors.ACCENT, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2").pack(pady=5)
         
         info_text = ""
         if key == "sections":
@@ -1391,7 +1434,7 @@ class LogViewerApp:
                 "【区間設定の使い方】\n\n"
                 "■開始パターン\n"
                 " 区間の開始条件(正規表現)です。\n"
-                " [+V待]で、合致後の次のV周期から\n"
+                "[+V待]で、合致後の次のV周期から\n"
                 " 区間を開始します。\n\n"
                 "■終了パターン\n"
                 " 区間の終了条件(正規表現)です。\n"
@@ -1438,7 +1481,7 @@ class LogViewerApp:
             )
 
         if info_text:
-            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#ffffe0", relief=tk.SOLID, bd=1, padx=8, pady=8, font=("MS UI Gothic", 9), wraplength=230)
+            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#faf9f6", fg=UIColors.TEXT, relief=tk.FLAT, bd=1, highlightbackground=UIColors.BORDER, highlightthickness=1, padx=12, pady=12, font=("Yu Gothic UI", 9), wraplength=230)
             info_lbl.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def save():
@@ -1461,7 +1504,7 @@ class LogViewerApp:
                     if isinstance(w, LogTab): self.apply_display_update(w)
                 except: pass
 
-        tk.Button(btn_fr, text="OK", command=save, width=20, bg="#ddddff", height=2).pack(side=tk.BOTTOM, pady=5)
+        tk.Button(btn_fr, text="OK", command=save, width=20, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2", height=2).pack(side=tk.BOTTOM, pady=5)
 
     # --- IO ---
     def load_config_dialog(self):
