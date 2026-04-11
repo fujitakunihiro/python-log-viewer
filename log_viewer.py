@@ -119,7 +119,7 @@ class LogTab(tk.Frame):
         left_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
-        header_text = "[Merged View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
+        header_text = "[View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
         tk.Label(left_frame, text=header_text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
@@ -134,7 +134,8 @@ class LogTab(tk.Frame):
         
         self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
-        self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
+        if not self.is_merged:
+            self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
 
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
@@ -224,7 +225,7 @@ class LogTab(tk.Frame):
 class LogViewerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Log Viewer - French Elegance")
+        self.root.title("Log Viewer")
         self.root.geometry("1450x850")
         self.root.configure(bg=UIColors.BG)
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -241,7 +242,7 @@ class LogViewerApp:
         self.vsync_config = DEFAULT_CONFIG["vsync_auto_insert"].copy()
         
         self.use_keyword_filter = False
-        self.show_vsync_lines = True 
+        self.show_vsync_lines = False 
         self.last_merge_ts_len = 19
         
         self.keywords_dlg_ref = None
@@ -538,8 +539,7 @@ class LogViewerApp:
                 "manual_ms": ms,
                 "start_time_val": e_start_time.get()
             }
-            self.save_config_dialog_silent() 
-            messagebox.showinfo("保存", "設定を保存しました。次回ファイルオープン時から適用されます。")
+            messagebox.showinfo("保存", "設定は次回ファイルオープン時から適用されます。保存するには『設定 > 設定保存...』を選択してください。")
             dlg.destroy()
 
         btn_box = tk.Frame(dlg, bg=UIColors.BG)
@@ -1522,7 +1522,6 @@ class LogViewerApp:
                     new_cfg.append(d)
             
             setattr(self, f"{key}_config", new_cfg)
-            self.save_config_dialog_silent()
             dlg.destroy()
             for tab_id in self.notebook.tabs():
                 try:
