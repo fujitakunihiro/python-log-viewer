@@ -310,6 +310,10 @@ class LogViewerApp:
         
         self.btn_vsync_toggle = tk.Button(toolbar, text="V周期表示: ON", width=14, command=self.toggle_vsync_display, bg=UIColors.ROSE, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ROSE_HOVER, activeforeground="white", cursor="hand2")
         self.btn_vsync_toggle.pack(side=tk.LEFT, padx=5)
+        
+        self.lbl_vsync_info = tk.Label(toolbar, text="", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9))
+        self.lbl_vsync_info.pack(side=tk.LEFT, padx=10)
+        self._update_vsync_info_label()
 
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -540,6 +544,7 @@ class LogViewerApp:
                 "start_time_val": e_start_time.get()
             }
             messagebox.showinfo("保存", "設定は次回ファイルオープン時から適用されます。保存するには『設定 > 設定保存...』を選択してください。")
+            self._update_vsync_info_label()
             dlg.destroy()
 
         btn_box = tk.Frame(dlg, bg=UIColors.BG)
@@ -830,10 +835,17 @@ class LogViewerApp:
             self.btn_vsync_toggle.config(text="V周期表示: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
         else:
             self.btn_vsync_toggle.config(text="V周期表示: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
+        
+        self._update_vsync_info_label()
             
         if not force_update:
             t = self.get_current_tab()
             if t: self.apply_display_update(t)
+    
+    def _update_vsync_info_label(self):
+        start_time = self.vsync_config.get("start_time_val", "0.0")
+        manual_ms = self.vsync_config.get("manual_ms", 16.666)
+        self.lbl_vsync_info.config(text=f"起点: {start_time}秒 / 間隔: {manual_ms}ms")
 
     def apply_display_update(self, tab: LogTab):
         data = tab.original_content
@@ -1409,7 +1421,7 @@ class LogViewerApp:
                     elif c_id == "end":
                         tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                         if key == "sections":
-                             tk.Button(f_cell, text="V周期", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
+                             tk.Button(f_cell, text="V", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
                     elif c_id == "end_wait":
                         tk.Checkbutton(f_cell, variable=item["end_wait"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
                     elif c_id == "duration_ms":
@@ -1550,6 +1562,7 @@ class LogViewerApp:
                 self.sections_config = d.get("sections",[])
                 self.replace_patterns_config = d.get("replace_patterns",[])
                 self.vsync_config = d.get("vsync_auto_insert", self.vsync_config)
+            self._update_vsync_info_label()
             t = self.get_current_tab()
             if t: self.apply_display_update(t)
         except: pass
