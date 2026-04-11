@@ -106,6 +106,7 @@ class LogTab(tk.Frame):
         self.source_file_names = source_files_list if source_files_list else ([os.path.basename(path)] if path else[])
         self.line_source_map: List[str] =[]
         self.status_texts: Dict[str, tk.Text] = {}
+        self.status_frames: Dict[str, tk.Frame] = {}  # 区間フレームを保存
         self.configure(bg=UIColors.BG)
         self._create_layout()
 
@@ -155,7 +156,10 @@ class LogTab(tk.Frame):
         
         for fname in self.source_file_names:
             st_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
-            self.paned_window.add(st_frame, minsize=50, stretch="always", width=120)
+            self.status_frames[fname] = st_frame  # フレームを保存（add の前に保存）
+            # Advanced ON時のみ paned_window に追加
+            if self.app.advance_mode:
+                self.paned_window.add(st_frame, minsize=50, stretch="always", width=120)
             tk.Label(st_frame, text=f"{fname}の区間", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
             
             hsb = tk.Scrollbar(st_frame, orient=tk.HORIZONTAL)
@@ -243,6 +247,7 @@ class LogViewerApp:
         
         self.use_keyword_filter = False
         self.show_vsync_lines = False 
+        self.advance_mode = False
         self.last_merge_ts_len = 19
         
         self.keywords_dlg_ref = None
@@ -288,6 +293,7 @@ class LogViewerApp:
         menubar.add_cascade(label="編集", menu=emenu)
 
         cmenu = tk.Menu(menubar, tearoff=0)
+        self.cmenu = cmenu
         cmenu.add_command(label="設定読み込み...", command=self.load_config_dialog)
         cmenu.add_command(label="設定保存...", command=self.save_config_dialog)
         cmenu.add_separator()
@@ -296,9 +302,18 @@ class LogViewerApp:
         cmenu.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog)
         cmenu.add_separator()
         cmenu.add_command(label="V周期(仮想)挿入の設定...", command=self.open_vsync_settings_dialog)
+        cmenu.add_separator()
+        cmenu.add_command(label="Advancedモード", command=self.toggle_advance_mode)
         menubar.add_cascade(label="設定", menu=cmenu)
         
         self.root.config(menu=menubar)
+        
+        # Advanced OFF時の初期状態：メニュー項目を無効化
+        try:
+            cmenu.entryconfig(4, state='disabled')  # 区間設定の編集
+            cmenu.entryconfig(7, state='disabled')  # V周期(仮想)挿入の設定
+        except:
+            pass
         
         toolbar = tk.Frame(self.root, bg=UIColors.BG)
         toolbar.pack(fill=tk.X, padx=5, pady=8)
@@ -308,12 +323,15 @@ class LogViewerApp:
         
         tk.Button(toolbar, text="ログをマージ", command=self.merge_logs_action, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.BORDER, cursor="hand2", padx=10).pack(side=tk.LEFT, padx=10)
         
-        self.btn_vsync_toggle = tk.Button(toolbar, text="V周期表示: ON", width=14, command=self.toggle_vsync_display, bg=UIColors.ROSE, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ROSE_HOVER, activeforeground="white", cursor="hand2")
-        self.btn_vsync_toggle.pack(side=tk.LEFT, padx=5)
+        self.btn_vsync_toggle = tk.Button(toolbar, text="仮想V周期表示: ON", width=18, command=self.toggle_vsync_display, bg=UIColors.ROSE, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ROSE_HOVER, activeforeground="white", cursor="hand2")
+        # Advanced OFF時は非表示のため、pack は toggle_advance_mode()で行う
         
         self.lbl_vsync_info = tk.Label(toolbar, text="", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9))
-        self.lbl_vsync_info.pack(side=tk.LEFT, padx=10)
+        # Advanced OFF時は非表示のため、pack は toggle_advance_mode()で行う
         self._update_vsync_info_label()
+        
+        self.btn_advance = tk.Button(toolbar, text="Advanced: OFF", width=14, command=self.toggle_advance_mode, bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ACCENT_HOVER, cursor="hand2")
+        self.btn_advance.pack(side=tk.LEFT, padx=5)
 
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -832,15 +850,70 @@ class LogViewerApp:
         if not force_update:
             self.show_vsync_lines = not self.show_vsync_lines
         if self.show_vsync_lines:
-            self.btn_vsync_toggle.config(text="V周期表示: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+            self.btn_vsync_toggle.config(text="仮想V周期表示: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
         else:
-            self.btn_vsync_toggle.config(text="V周期表示: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
+            self.btn_vsync_toggle.config(text="仮想V周期表示: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
         
         self._update_vsync_info_label()
             
         if not force_update:
             t = self.get_current_tab()
             if t: self.apply_display_update(t)
+    
+    def toggle_advance_mode(self):
+        self.advance_mode = not self.advance_mode
+        if self.advance_mode:
+            self.btn_advance.config(text="Advanced: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+        else:
+            self.btn_advance.config(text="Advanced: OFF", bg=UIColors.BORDER, activebackground=UIColors.ACCENT_HOVER)
+        
+        # メニュー項目を表示/非表示 (インデックスで制御)
+        try:
+            if self.advance_mode:
+                # Advanced ON時：メニュー項目を有効に
+                self.cmenu.entryconfig(4, state='normal')  # 区間設定の編集
+                self.cmenu.entryconfig(7, state='normal')  # V周期(仮想)挿入の設定
+            else:
+                # Advanced OFF時：メニュー項目を無効に
+                self.cmenu.entryconfig(4, state='disabled')  # 区間設定の編集
+                self.cmenu.entryconfig(7, state='disabled')  # V周期(仮想)挿入の設定
+        except:
+            pass
+        
+        # V周期表示ボタンを表示/非表示
+        if self.advance_mode:
+            # Advanced ON時：V周期ボタン表示
+            self.btn_vsync_toggle.pack(side=tk.LEFT, padx=5)
+            self.lbl_vsync_info.pack(side=tk.LEFT, padx=10)
+        else:
+            # Advanced OFF時：V周期ボタン非表示
+            self.btn_vsync_toggle.pack_forget()
+            self.lbl_vsync_info.pack_forget()
+        
+        # すべてのタブの区間フレームを追加/削除
+        for tab_idx in range(len(self.notebook.tabs())):
+            try:
+                tab = self.notebook.nametowidget(self.notebook.tabs()[tab_idx])
+                if isinstance(tab, LogTab):
+                    for fn, st_frame in tab.status_frames.items():
+                        if self.advance_mode:
+                            # Advanced ON：フレームを paned_window に追加
+                            try:
+                                tab.paned_window.add(st_frame, minsize=50, stretch="always", width=120)
+                            except:
+                                pass  # 既に追加されている場合
+                        else:
+                            # Advanced OFF：フレームを paned_window から削除
+                            try:
+                                tab.paned_window.remove(st_frame)
+                            except:
+                                pass  # 既に削除されている場合
+            except:
+                pass
+        
+        # 現在のタブを更新して区間情報を再表示
+        t = self.get_current_tab()
+        if t: self.apply_display_update(t)
     
     def _update_vsync_info_label(self):
         start_time = self.vsync_config.get("start_time_val", "0.0")
@@ -1214,17 +1287,20 @@ class LogViewerApp:
         tab.comment_text.delete("1.0", tk.END)
         tab.comment_text.insert("1.0", "\n".join(fcmts))
         
-        for fn in tab.source_file_names:
-            w = tab.status_texts[fn]
-            w.delete("1.0", tk.END)
-            w.insert("1.0", "\n".join(final_st_lines[fn]))
-            
-            for tag in w.tag_names():
-                 if tag.startswith("st_"): w.tag_delete(tag)
-            for ln, col in final_st_tags[fn]:
-                tn = f"st_{col.replace('#','')}"
-                w.tag_configure(tn, background=col)
-                w.tag_add(tn, f"{ln}.0", f"{ln}.end")
+        # Advanced モード時のみ区間情報を表示
+        if self.advance_mode:
+            # Advanced ON時：区間フレームの内容を更新
+            for fn in tab.source_file_names:
+                w = tab.status_texts[fn]
+                w.delete("1.0", tk.END)
+                w.insert("1.0", "\n".join(final_st_lines[fn]))
+                
+                for tag in w.tag_names():
+                     if tag.startswith("st_"): w.tag_delete(tag)
+                for ln, col in final_st_tags[fn]:
+                    tn = f"st_{col.replace('#','')}"
+                    w.tag_configure(tn, background=col)
+                    w.tag_add(tn, f"{ln}.0", f"{ln}.end")
 
         for tag in tab.text.tag_names():
             if tag.startswith("kw_"): tab.text.tag_delete(tag)
@@ -1368,11 +1444,11 @@ class LogViewerApp:
             elif f == "pattern": col_defs.append((col_idx, f, "正規表現", 165))
             elif f == "search": col_defs.append((col_idx, f, "検索文字列", 165))
             elif f == "name": col_defs.append((col_idx, f, "区間名", 115))
-            elif f == "start": col_defs.append((col_idx, f, "開始パターン", 115))
-            elif f == "start_wait": col_defs.append((col_idx, f, "+V待", 45))
-            elif f == "end": col_defs.append((col_idx, f, "終了パターン", 145))
-            elif f == "end_wait": col_defs.append((col_idx, f, "+V待", 45))
-            elif f == "duration_ms": col_defs.append((col_idx, f, "持続(ms)", 65))
+            elif f == "start": col_defs.append((col_idx, f, "【開始】開始パターン", 115))
+            elif f == "start_wait": col_defs.append((col_idx, f, "【開始】+V待", 45))
+            elif f == "end": col_defs.append((col_idx, f, "【終了】終了パターン", 145))
+            elif f == "end_wait": col_defs.append((col_idx, f, "【終了】+V待", 45))
+            elif f == "duration_ms": col_defs.append((col_idx, f, "【終了】持続(ms)", 95))
             elif f == "color": col_defs.append((col_idx, f, "色", 105))
             elif f == "replace": col_defs.append((col_idx, f, "置換/説明", 165))
             elif f == "comment": col_defs.append((col_idx, f, "コメント", 145))
