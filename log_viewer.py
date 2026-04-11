@@ -66,7 +66,7 @@ DEFAULT_CONFIG = {
     "sections":[
         {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "duration_ms": "", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
         {"name": "初期化(Client)", "start": "CLI_BOOT",       "start_wait": False, "end": "CLI_READY",     "end_wait": False, "duration_ms": "", "color": "#e0f2f1", "file_pattern": "client.*", "enabled": True},
-        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "DISCONNECT",    "end_wait": False, "duration_ms": "", "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
+        {"name": "通信処理",       "start": "CONNECT",        "start_wait": False, "end": "",    "end_wait": False, "duration_ms": "40", "color": "#fff3e0", "file_pattern": ".*",       "enabled": True}
     ],
     "replace_patterns":[],
     "vsync_auto_insert": {
@@ -134,7 +134,8 @@ class LogTab(tk.Frame):
         
         self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", yscrollcommand=self.vsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
-        self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
+        if not self.is_merged:
+            self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
 
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
@@ -517,8 +518,7 @@ class LogViewerApp:
                 "manual_ms": ms,
                 "start_time_val": e_start_time.get()
             }
-            self.save_config_dialog_silent() 
-            messagebox.showinfo("保存", "設定を保存しました。次回ファイルオープン時から適用されます。")
+            messagebox.showinfo("保存", "設定は次回ファイルオープン時から適用されます。保存するには『設定 > 設定保存...』を選択してください。")
             dlg.destroy()
 
         btn_box = tk.Frame(dlg, bg=UIColors.BG)
@@ -1496,7 +1496,6 @@ class LogViewerApp:
                     new_cfg.append(d)
             
             setattr(self, f"{key}_config", new_cfg)
-            self.save_config_dialog_silent()
             dlg.destroy()
             for tab_id in self.notebook.tabs():
                 try:
