@@ -1130,16 +1130,30 @@ class LogViewerApp:
                     status_buffers[fn].append(("", "#ffffff"))
 
         kw_rules =[]
+        ml_rules =[]  # 複数行マッチ用ルール
         for itm in self.keywords_config:
             if itm.get("enabled", True):
-                try: kw_rules.append({
+                try:
+                    extra_lines = int(itm.get("extra_lines", 0))
+                    # +行が1以上の場合、複数行マッチとして処理
+                    is_multiline = extra_lines >= 1
+                    flags = re.I | (re.DOTALL if is_multiline else 0)
+                    
+                    rule = {
                         "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
-                        "regex": re.compile(itm["pattern"], re.I),
+                        "regex": re.compile(itm["pattern"], flags),
                         "comment": itm.get("comment", ""),
                         "color": itm.get("color", "#ffffff"),
-                        "extra": int(itm.get("extra_lines", 0))
-                    })
-                except: pass
+                        "extra": extra_lines,
+                        "multiline": is_multiline
+                    }
+                    
+                    if is_multiline:
+                        ml_rules.append(rule)
+                    else:
+                        kw_rules.append(rule)
+                except: 
+                    pass
                 
         has_timer_rule = any("VIRTUAL TIMER" in str(r.get("pattern", "")) for r in self.keywords_config)
         if not has_timer_rule:
@@ -1148,8 +1162,60 @@ class LogViewerApp:
                 "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
                 "comment": "タイマー満了",
                 "color": "#ffe8d6",
-                "extra": 0
+                "extra": 0,
+                "multiline": False
             })
+
+        # 複数行マッチの処理
+        full_text = "\n".join(lines)
+        multiline_matches = {}  # {行番号: ルールインデックス} の辞書
+        
+        for rule_idx, ml_rule in enumerate(ml_rules):
+            try:
+                # 複数行正規表現マッチを実行
+                for match in ml_rule["regex"].finditer(full_text):
+                    start_pos = match.start()
+                    end_pos = match.end()
+                    
+                    # 開始位置から行番号を計算
+                    start_line = full_text[:start_pos].count("\n")
+                    end_line = full_text[:end_pos].count("\n")
+                    
+                    # ファイルパターンチェック
+                    file_pattern_ok = False
+                    for src_idx in range(start_line, min(end_line + 1, len(srcs))):
+                        if ml_rule["file_pat_re"].search(srcs[src_idx]):
+                            file_pattern_ok = True
+                            break
+                    
+                    if not file_pattern_ok:
+                        continue
+                    
+                    # マッチの開始行から「extra_lines」分の行を色付け対象に追加
+                    # +行が設定されていればそれを使用、なければマッチ範囲全体を使用
+                    if ml_rule["extra"] > 0:
+                        # +行が指定されている場合
+                        color_end = min(start_line + ml_rule["extra"] + 1, len(lines))
+                    else:
+                        # +行が0の場合、マッチ範囲全体を色付け
+                        color_end = min(end_line + 1, len(lines))
+                    
+                    for idx in range(start_line, color_end):
+                        if idx not in multiline_matches:
+                            multiline_matches[idx] = rule_idx
+            except Exception as e:
+                print(f"Multiline regex error: {e}")
+
+        # マッチして色付けを実施
+        for idx, rule_idx in multiline_matches.items():
+            if idx < len(line_attrs) and rule_idx < len(ml_rules):
+                ml_rule = ml_rules[rule_idx]
+                if line_attrs[idx]["priority"] < 20:
+                    line_attrs[idx]["color"] = ml_rule["color"]
+                    base_cmt = line_attrs[idx]["comment"]
+                    new_cmt = ml_rule["comment"]
+                    line_attrs[idx]["comment"] = f"{base_cmt} {new_cmt}".strip()
+                    line_attrs[idx]["priority"] = 20
 
         for idx in range(len(lines)):
             if "<<< [V-SYNC 起点]" in lines[idx]:
@@ -1574,8 +1640,8 @@ class LogViewerApp:
                 "■+行\n"
                 " マッチした行のさらに下何行分まで\n"
                 " 同じ色を適用するかを指定します。\n"
-                " スタックトレース等をまとめて\n"
-                " 色付けしたい場合に便利です。"
+                " 複数行以上を指定すると、複数行\n"
+                " マッチに自動的に対応します。"
             )
         elif key == "replace_patterns":
             info_text = (
