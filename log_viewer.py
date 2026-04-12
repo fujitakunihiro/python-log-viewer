@@ -1652,9 +1652,16 @@ class LogViewerApp:
                 " (例: client.* , server.*)\n\n"
                 "■+行\n"
                 " マッチした行のさらに下何行分まで\n"
-                " 同じ色を適用するかを指定します。\n"
-                " 複数行以上を指定すると、複数行\n"
-                " マッチに自動的に対応します。"
+                " 抽出対象に含めるかを指定します。\n\n"
+                "■制約\n"
+                " 正規表現の先頭、末尾に.*を付けないでください。\n"
+                " 例：[100013.500000] [INFO] System Halting...\n"
+                "                     xxxx\n"
+                "                     yyyy\n"
+                "                     zzzz\n"
+                " を抽出したい場合は、正規表現に\n"
+                " System.*Halting.*xxxx.*yyyy.*zzzz\n"
+                " と設定してください。"
             )
         elif key == "replace_patterns":
             info_text = (
