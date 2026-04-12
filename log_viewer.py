@@ -267,7 +267,16 @@ class LogViewerApp:
         self.root.bind('<Shift-F3>', lambda e: self.find_prev())
         
         if os.path.exists(self.config_path):
-            self.load_config(self.config_path)
+            try:
+                self.load_config(self.config_path)
+            except Exception as e:
+                print(f"Failed to load config: {e}")
+        else:
+            # config.jsonが存在しない場合は初期設定を保存
+            try:
+                self.save_config(self.config_path)
+            except:
+                pass
             
         self.toggle_vsync_display(force_update=True)
         self.toggle_filter(force_update=True)
@@ -574,6 +583,10 @@ class LogViewerApp:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e: 
             print(f"Config Save Error: {e}")
+    
+    def save_config(self, filepath=None):
+        """configを保存（ダイアログなし）"""
+        self.save_config_dialog_silent(filepath)
 
     def _parse_time_seconds(self, ts_str: str) -> Optional[float]:
         try:
@@ -1673,6 +1686,9 @@ class LogViewerApp:
                     new_cfg.append(d)
             
             setattr(self, f"{key}_config", new_cfg)
+            # 設定変更時に自動的にconfig.jsonを保存
+            self.save_config()
+            
             dlg.destroy()
             for tab_id in self.notebook.tabs():
                 try:
@@ -1701,10 +1717,18 @@ class LogViewerApp:
                 self.sections_config = d.get("sections",[])
                 self.replace_patterns_config = d.get("replace_patterns",[])
                 self.vsync_config = d.get("vsync_auto_insert", self.vsync_config)
+            
             self._update_vsync_info_label()
-            t = self.get_current_tab()
-            if t: self.apply_display_update(t)
-        except: pass
+            # すべてのタブに対して表示を更新
+            for tab_id in self.notebook.tabs():
+                try:
+                    w = self.notebook.nametowidget(tab_id)
+                    if isinstance(w, LogTab):
+                        self.apply_display_update(w)
+                except:
+                    pass
+        except Exception as e:
+            print(f"Failed to load config from {p}: {e}")
 
     def export_to_excel(self):
         tab = self.get_current_tab()
