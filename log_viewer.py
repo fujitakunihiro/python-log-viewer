@@ -25,6 +25,51 @@ VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]"
 VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---"
 VIRTUAL_SRC_NAME = "(Virtual)"
 
+class Tooltip:
+    """Hover tooltip for displaying text on mouse over"""
+    def __init__(self):
+        self.tooltip = None
+        self.id = None
+        
+    def show(self, event, text):
+        """Show tooltip at mouse position"""
+        if not text or not text.strip():
+            self.hide()
+            return
+        
+        # Cancel any pending hide
+        if self.id:
+            event.widget.after_cancel(self.id)
+            self.id = None
+            
+        # Remove old tooltip if exists
+        self.hide()
+        
+        # Create tooltip window
+        self.tooltip = tw = tk.Toplevel(event.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+        
+        # Create label with text
+        label = tk.Label(tw, text=text, background="#ffffcc", foreground="#000000", 
+                         relief=tk.SOLID, borderwidth=1, font=("Consolas", 9),
+                         padx=5, pady=3, wraplength=300)
+        label.pack()
+        
+        # Position tooltip near cursor
+        x = event.x_root + 10
+        y = event.y_root + 10
+        tw.wm_geometry(f"+{x}+{y}")
+        
+    def hide(self):
+        """Hide tooltip"""
+        if self.tooltip:
+            try:
+                self.tooltip.destroy()
+            except:
+                pass
+            self.tooltip = None
+
 class UIColors:
     BG = "#efe6d5"          # 全体の背景（ライムストーン）
     PANEL_BG = "#ffffff"    # パネルやキャンバスの背景（クリーンな白）
@@ -96,7 +141,7 @@ class LineNumberCanvas(tk.Canvas):
             i = self.text_widget.index(f"{i}+1line")
 
 class LogTab(tk.Frame):
-    def __init__(self, master, app, path, content, source_files_list=None, is_merged=False):
+    def __init__(self, master, app, path, content, source_files_list=None, source_file_paths=None, is_merged=False):
         super().__init__(master)
         self.app = app
         self.file_path = path
@@ -104,6 +149,11 @@ class LogTab(tk.Frame):
         self.is_merged = is_merged
         
         self.source_file_names = source_files_list if source_files_list else ([os.path.basename(path)] if path else[])
+        # Store full paths for each source file (for tooltip display)
+        self.source_file_paths = source_file_paths if source_file_paths else {}
+        if not self.source_file_paths and path and path != "Merged":
+            self.source_file_paths = {os.path.basename(path): path}
+        
         self.line_source_map: List[str] =[]
         self.status_texts: Dict[str, tk.Text] = {}
         self.status_frames: Dict[str, tk.Frame] = {}  # 区間フレームを保存
@@ -337,6 +387,11 @@ class LogViewerApp:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
+        # Bind tooltip events to notebook tabs
+        self.notebook.bind('<Motion>', self._on_notebook_motion)
+        self.notebook.bind('<Leave>', self._on_notebook_leave)
+        self.notebook_tooltip = Tooltip()
+        
         self.status_var = tk.StringVar(value="準備完了")
         tk.Label(self.root, textvariable=self.status_var, anchor="w", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=2)
 
@@ -347,6 +402,33 @@ class LogViewerApp:
     def get_current_tab(self) -> Optional[LogTab]:
         cid = self.notebook.select()
         return self.notebook.nametowidget(cid) if cid else None
+    
+    def _on_notebook_motion(self, event):
+        """Show tooltip when hovering over notebook tabs"""
+        try:
+            # Get which tab is at the cursor position
+            tab_id = self.notebook.index(f"@{event.x},{event.y}")
+            if tab_id is None:
+                self.notebook_tooltip.hide()
+                return
+            
+            # Get the tab widget
+            tab = self.notebook.nametowidget(self.notebook.tabs()[tab_id])
+            
+            if isinstance(tab, LogTab):
+                # Get file path
+                if tab.file_path and tab.file_path != "Merged":
+                    self.notebook_tooltip.show(event, tab.file_path)
+                else:
+                    self.notebook_tooltip.hide()
+            else:
+                self.notebook_tooltip.hide()
+        except:
+            self.notebook_tooltip.hide()
+    
+    def _on_notebook_leave(self, event):
+        """Hide tooltip when mouse leaves notebook"""
+        self.notebook_tooltip.hide()
 
     # --- File/Merge ---
     def open_file(self):
@@ -417,13 +499,13 @@ class LogViewerApp:
         fname = os.path.basename(path)
         if self.vsync_config.get("enabled", True):
             new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()), [fname])
-            tab = LogTab(self.notebook, self, path, new_content, source_files_list=[fname], is_merged=True)
+            tab = LogTab(self.notebook, self, path, new_content, source_files_list=[fname], source_file_paths={fname: path}, is_merged=True)
             tab.line_source_map = new_src_map
             self.notebook.add(tab, text=fname)
             self.notebook.select(tab)
             self.apply_display_update(tab)
         else:
-            tab = LogTab(self.notebook, self, path, content, source_files_list=[fname])
+            tab = LogTab(self.notebook, self, path, content, source_files_list=[fname], source_file_paths={fname: path})
             self.notebook.add(tab, text=fname)
             self.notebook.select(tab)
             self.apply_display_update(tab)
@@ -455,10 +537,13 @@ class LogViewerApp:
                 
         all_blocks =[]
         unique_srcs =[]
+        src_paths_map = {}  # Map source names to full paths
         
         for t in target_tabs:
             fn = os.path.basename(t.file_path)
-            if fn not in unique_srcs: unique_srcs.append(fn)
+            if fn not in unique_srcs: 
+                unique_srcs.append(fn)
+                src_paths_map[fn] = t.file_path  # Store full path
             
             raw_lines = t.original_content.splitlines()
             if not raw_lines: continue
@@ -511,7 +596,7 @@ class LogViewerApp:
             final_lines.extend(bl)
             final_src.extend([src_name] * len(bl))
             
-        m_tab = LogTab(self.notebook, self, "Merged", "\n".join(final_lines), source_files_list=unique_srcs, is_merged=True)
+        m_tab = LogTab(self.notebook, self, "Merged", "\n".join(final_lines), source_files_list=unique_srcs, source_file_paths=src_paths_map, is_merged=True)
         m_tab.line_source_map = final_src
         self.notebook.add(m_tab, text="[マージ結果]")
         self.notebook.select(m_tab)
@@ -1186,7 +1271,11 @@ class LogViewerApp:
         for rule_idx, ml_rule in enumerate(ml_rules):
             try:
                 # 複数行正規表現マッチを実行
-                for match in ml_rule["regex"].finditer(full_text):
+                matches_found = list(ml_rule["regex"].finditer(full_text))
+                pattern_str = ml_rule["regex"].pattern
+                print(f"[DEBUG] Rule {rule_idx}: pattern='{pattern_str}' found {len(matches_found)} matches")
+                
+                for match in matches_found:
                     start_pos = match.start()
                     end_pos = match.end()
                     
@@ -1194,15 +1283,25 @@ class LogViewerApp:
                     start_line = full_text[:start_pos].count("\n")
                     end_line = full_text[:end_pos].count("\n")
                     
+                    print(f"  Match: start_line={start_line}, end_line={end_line}")
+                    print(f"  Match text: {repr(match.group()[:50])}")
+                    
                     # ファイルパターンチェック
                     file_pattern_ok = False
                     for src_idx in range(start_line, min(end_line + 1, len(srcs))):
-                        if ml_rule["file_pat_re"].search(srcs[src_idx]):
+                        src = srcs[src_idx]
+                        if ml_rule["file_pat_re"].search(src):
                             file_pattern_ok = True
+                            print(f"    src_idx={src_idx}, src='{src}' -> OK")
                             break
+                        else:
+                            print(f"    src_idx={src_idx}, src='{src}' -> NOT OK")
                     
                     if not file_pattern_ok:
+                        print(f"  File pattern check FAILED")
                         continue
+                    
+                    print(f"  File pattern check PASSED")
                     
                     # マッチの開始行から「extra_lines」分の行を色付け対象に追加
                     # +行が設定されていればそれを使用、なければマッチ範囲全体を使用
