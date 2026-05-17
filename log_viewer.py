@@ -390,7 +390,13 @@ class LogViewerApp:
         # Bind tooltip events to notebook tabs
         self.notebook.bind('<Motion>', self._on_notebook_motion)
         self.notebook.bind('<Leave>', self._on_notebook_leave)
+        
+        # Bind drag-drop events for tab reordering
+        self.notebook.bind('<Button-1>', self._on_tab_press)
+        self.notebook.bind('<ButtonRelease-1>', self._on_tab_release)
+        
         self.notebook_tooltip = Tooltip()
+        self._dragged_tab_idx = None
         
         self.status_var = tk.StringVar(value="準備完了")
         tk.Label(self.root, textvariable=self.status_var, anchor="w", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=2)
@@ -429,6 +435,84 @@ class LogViewerApp:
     def _on_notebook_leave(self, event):
         """Hide tooltip when mouse leaves notebook"""
         self.notebook_tooltip.hide()
+    
+    def _on_tab_press(self, event):
+        """Record which tab is being dragged"""
+        try:
+            self._dragged_tab_idx = self.notebook.index(f"@{event.x},{event.y}")
+        except:
+            self._dragged_tab_idx = None
+    
+    def _on_tab_release(self, event):
+        """Handle tab reordering on mouse release"""
+        if self._dragged_tab_idx is None:
+            return
+        
+        try:
+            drop_idx = self.notebook.index(f"@{event.x},{event.y}")
+        except:
+            self._dragged_tab_idx = None
+            return
+        
+        # If dropped on same tab or invalid position, do nothing
+        if drop_idx is None or drop_idx == self._dragged_tab_idx:
+            self._dragged_tab_idx = None
+            return
+        
+        # Get tab ID and move it
+        try:
+            tabs = list(self.notebook.tabs())
+            dragged_tab_id = tabs[self._dragged_tab_idx]
+
+            # Resolve actual widget for the dragged tab
+            dragged_widget = self.notebook.nametowidget(dragged_tab_id)
+
+            # Preserve tab options (text, image, compound, etc.) if any
+            try:
+                tab_opts = self.notebook.tab(dragged_tab_id)
+            except Exception:
+                tab_opts = {}
+
+            # Remove the tab (keeps the widget alive)
+            try:
+                self.notebook.forget(dragged_widget)
+            except Exception:
+                # fallback: forget by id
+                try:
+                    self.notebook.forget(dragged_tab_id)
+                except Exception:
+                    pass
+
+            # Re-insert at new position
+            new_idx = drop_idx if drop_idx < self._dragged_tab_idx else drop_idx - 1
+            try:
+                # Insert the widget and restore its text (and other options if present)
+                if 'text' in tab_opts:
+                    self.notebook.insert(new_idx, dragged_widget, text=tab_opts.get('text', ''))
+                else:
+                    self.notebook.insert(new_idx, dragged_widget)
+
+                # Restore other tab options (safely)
+                try:
+                    restore = {k: v for k, v in tab_opts.items() if k != 'text'}
+                    if restore:
+                        self.notebook.tab(dragged_widget, **restore)
+                except Exception:
+                    pass
+
+                # Reselect the moved tab
+                self.notebook.select(dragged_widget)
+            except Exception:
+                # If insertion by widget fails, attempt a fallback using tab id
+                try:
+                    self.notebook.insert(new_idx, dragged_tab_id)
+                    self.notebook.select(dragged_tab_id)
+                except Exception:
+                    pass
+        except:
+            pass
+        finally:
+            self._dragged_tab_idx = None
 
     # --- File/Merge ---
     def open_file(self):
