@@ -25,51 +25,6 @@ VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]"
 VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---"
 VIRTUAL_SRC_NAME = "(Virtual)"
 
-class Tooltip:
-    """Hover tooltip for displaying text on mouse over"""
-    def __init__(self):
-        self.tooltip = None
-        self.id = None
-        
-    def show(self, event, text):
-        """Show tooltip at mouse position"""
-        if not text or not text.strip():
-            self.hide()
-            return
-        
-        # Cancel any pending hide
-        if self.id:
-            event.widget.after_cancel(self.id)
-            self.id = None
-            
-        # Remove old tooltip if exists
-        self.hide()
-        
-        # Create tooltip window
-        self.tooltip = tw = tk.Toplevel(event.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_attributes("-topmost", True)
-        
-        # Create label with text
-        label = tk.Label(tw, text=text, background="#ffffcc", foreground="#000000", 
-                         relief=tk.SOLID, borderwidth=1, font=("Consolas", 9),
-                         padx=5, pady=3, wraplength=300)
-        label.pack()
-        
-        # Position tooltip near cursor
-        x = event.x_root + 10
-        y = event.y_root + 10
-        tw.wm_geometry(f"+{x}+{y}")
-        
-    def hide(self):
-        """Hide tooltip"""
-        if self.tooltip:
-            try:
-                self.tooltip.destroy()
-            except:
-                pass
-            self.tooltip = None
-
 class UIColors:
     BG = "#efe6d5"          # 全体の背景（ライムストーン）
     PANEL_BG = "#ffffff"    # パネルやキャンバスの背景（クリーンな白）
@@ -98,6 +53,81 @@ def apply_french_theme(widget):
         pass
     for child in widget.winfo_children():
         apply_french_theme(child)
+
+def _normalize_user_pattern(pat: str) -> str:
+        """Normalize user-entered pattern shortcuts to valid regex.
+
+        - Replace unescaped percent signs (%) with '\\s*' so users can use
+            '%' as a short-hand for whitespace sequences.
+        """
+        if not isinstance(pat, str):
+            return pat
+        p = pat.strip()
+        # Simple and safe replacement: treat '%' as '\\s*'
+        p = p.replace('%', r'\\s*')
+
+        # If user wrapped pattern with leading/trailing '.*' (e.g. '.*PATTERN.*'),
+        # strip them so per-line search will still find the core pattern.
+        # Keep a single '.*' (pattern becomes '.*') as-is.
+        if len(p) > 4 and p.startswith('.*') and p.endswith('.*'):
+            p = p[2:-2].strip()
+
+        # Handle anchored variant '^.*PATTERN.*$'
+        if len(p) > 6 and p.startswith('^.*') and p.endswith('.*$'):
+            p = p[3:-3].strip()
+
+        return p
+
+class Tooltip:
+    """Hover tooltip for displaying text on mouse over"""
+    def __init__(self):
+        self.tooltip = None
+        self.id = None
+
+    def show(self, event, text):
+        """Show tooltip at mouse position"""
+        if not text or not text.strip():
+            self.hide()
+            return
+
+        # Cancel any pending hide
+        if self.id:
+            try:
+                event.widget.after_cancel(self.id)
+            except Exception:
+                pass
+            self.id = None
+
+        # Remove old tooltip if exists
+        self.hide()
+
+        # Create tooltip window
+        self.tooltip = tw = tk.Toplevel(event.widget)
+        tw.wm_overrideredirect(True)
+        try:
+            tw.wm_attributes("-topmost", True)
+        except Exception:
+            pass
+
+        # Create label with text
+        label = tk.Label(tw, text=text, background="#ffffcc", foreground="#000000",
+                         relief=tk.SOLID, borderwidth=1, font=("Consolas", 9),
+                         padx=5, pady=3, wraplength=300)
+        label.pack()
+
+        # Position tooltip near cursor
+        x = event.x_root + 10
+        y = event.y_root + 10
+        tw.wm_geometry(f"+{x}+{y}")
+
+    def hide(self):
+        """Hide tooltip"""
+        if self.tooltip:
+            try:
+                self.tooltip.destroy()
+            except:
+                pass
+            self.tooltip = None
 
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
@@ -170,7 +200,7 @@ class LogTab(tk.Frame):
         left_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
-        header_text = "[View]" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
+        header_text = "View" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
         tk.Label(left_frame, text=header_text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
@@ -197,7 +227,7 @@ class LogTab(tk.Frame):
         self.hsb_cmt = tk.Scrollbar(cmt_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
         
-        tk.Label(cmt_frame, text="Comment / Tags", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(cmt_frame, text="Comment", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
@@ -502,6 +532,18 @@ class LogViewerApp:
 
                 # Reselect the moved tab
                 self.notebook.select(dragged_widget)
+
+                # Refresh all LogTab displays to fix possible layout corruption
+                try:
+                    for tid in self.notebook.tabs():
+                        w = self.notebook.nametowidget(tid)
+                        if isinstance(w, LogTab):
+                            try:
+                                self.apply_display_update(w)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             except Exception:
                 # If insertion by widget fails, attempt a fallback using tab id
                 try:
@@ -604,8 +646,9 @@ class LogViewerApp:
         if auto_ts_len is not None:
             ts_len = auto_ts_len
         else:
-            ts_len = simpledialog.askinteger("マージ", "時刻ソート用の先頭文字数:", initialvalue=self.last_merge_ts_len, minvalue=0)
-            if ts_len is None: return
+            ts_len = self._ask_merge_ts_len(initial=self.last_merge_ts_len)
+            if ts_len is None:
+                return
             self.last_merge_ts_len = ts_len
         
         kw_rules =[]
@@ -614,7 +657,7 @@ class LogViewerApp:
                 try: 
                     kw_rules.append((
                         re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
-                        re.compile(itm["pattern"], re.I), 
+                        re.compile(_normalize_user_pattern(itm["pattern"]), re.I), 
                         int(itm.get("extra_lines", 0))
                     ))
                 except: pass
@@ -682,7 +725,7 @@ class LogViewerApp:
             
         m_tab = LogTab(self.notebook, self, "Merged", "\n".join(final_lines), source_files_list=unique_srcs, source_file_paths=src_paths_map, is_merged=True)
         m_tab.line_source_map = final_src
-        self.notebook.add(m_tab, text="[マージ結果]")
+        self.notebook.add(m_tab, text="マージ結果")
         self.notebook.select(m_tab)
         self.apply_display_update(m_tab)
 
@@ -739,6 +782,66 @@ class LogViewerApp:
         btn_box.pack(pady=10, fill=tk.X)
         tk.Button(btn_box, text="OK", command=save_conf, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2", width=15).pack(side=tk.RIGHT, padx=10)
 
+    def _ask_merge_ts_len(self, initial=19) -> Optional[int]:
+        """Custom ask-integer dialog for merge timestamp length.
+
+        Uses a slightly wider Toplevel to avoid title being clipped on some
+        platforms / DPI settings.
+        """
+        dlg = tk.Toplevel(self.root)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.title("マージ")
+        # Provide a comfortable width so title isn't truncated
+        dlg.geometry("420x120")
+        dlg.minsize(360, 110)
+        try:
+            dlg.configure(bg=UIColors.BG)
+        except tk.TclError:
+            pass
+
+        res = {"value": None}
+
+        tk.Label(dlg, text="時刻ソート用の先頭文字数:", anchor="w", font=("Yu Gothic UI", 9, "bold"), bg=UIColors.BG, fg=UIColors.TEXT).pack(pady=(12, 6), padx=12, fill=tk.X)
+        entry_frame = tk.Frame(dlg, bg=UIColors.BG)
+        entry_frame.pack(padx=12, fill=tk.X)
+        ent = tk.Entry(entry_frame, width=10, relief=tk.SOLID, bd=1, highlightthickness=0)
+        ent.pack(side=tk.LEFT)
+        ent.insert(0, str(initial))
+
+        btn_frame = tk.Frame(dlg, bg=UIColors.BG)
+        btn_frame.pack(pady=10)
+
+        def on_ok():
+            try:
+                v = int(ent.get())
+                if v < 0:
+                    return
+                res["value"] = v
+            except Exception:
+                res["value"] = None
+            dlg.destroy()
+
+        def on_cancel():
+            dlg.destroy()
+
+        ok = tk.Button(btn_frame, text="OK", width=8, command=on_ok)
+        ok.pack(side=tk.LEFT, padx=6)
+        cancel = tk.Button(btn_frame, text="Cancel", width=8, command=on_cancel)
+        cancel.pack(side=tk.LEFT, padx=6)
+
+        dlg.bind('<Return>', lambda e: on_ok())
+        dlg.bind('<Escape>', lambda e: on_cancel())
+
+        # Apply theme to children
+        try:
+            apply_french_theme(dlg)
+        except Exception:
+            pass
+
+        ent.focus_set()
+        self.root.wait_window(dlg)
+        return res["value"]
     def save_config_dialog_silent(self, filepath=None):
         target_path = filepath if filepath else self.config_path
         data = {
@@ -1323,7 +1426,7 @@ class LogViewerApp:
                     
                     rule = {
                         "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
-                        "regex": re.compile(itm["pattern"], flags),
+                        "regex": re.compile(_normalize_user_pattern(itm["pattern"]), flags),
                         "comment": itm.get("comment", ""),
                         "color": itm.get("color", "#ffffff"),
                         "extra": extra_lines,
