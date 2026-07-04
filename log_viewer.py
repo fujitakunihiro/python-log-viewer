@@ -1826,7 +1826,9 @@ class LogViewerApp:
 
         entries =[]
         def refresh():
-            for w in sf.winfo_children(): w.destroy()
+            for w in sf.winfo_children():
+                w.destroy()
+
             for i, item in enumerate(entries):
                 f_btn = tk.Frame(sf, bg=UIColors.PANEL_BG, width=135, height=28)
                 f_btn.pack_propagate(False)
@@ -1874,7 +1876,7 @@ class LogViewerApp:
                     elif c_id == "extra_lines":
                         tk.Entry(f_cell, textvariable=item["extra_lines"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
 
-        def add(data=None):
+        def add(data=None, refresh_ui=True):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
             for f in fields:
                 if f in["start_wait", "end_wait"]:
@@ -1884,7 +1886,8 @@ class LogViewerApp:
                     val = data.get(f, def_val) if data and f in data else def_val
                     item[f] = tk.StringVar(value=str(val))
             entries.append(item)
-            refresh()
+            if refresh_ui:
+                refresh()
             
         def delete(i): 
             del entries[i]
@@ -1896,8 +1899,11 @@ class LogViewerApp:
                 refresh()
 
         cfg = getattr(self, f"{key}_config")
-        for c in cfg: add(c)
-        if not entries: add()
+        for c in cfg:
+            add(c, refresh_ui=False)
+        if not entries:
+            add(None, refresh_ui=False)
+        refresh()
 
         btn_fr = tk.Frame(fr, bg=UIColors.BG, width=250)
         btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
