@@ -566,75 +566,56 @@ class LogViewerApp:
 
     def reload_file(self):
         tab = self.get_current_tab()
-        if not tab: return
-        
+        if not tab:
+            return
+
         if getattr(tab, "file_path", "") == "Merged":
             self.notebook.forget(tab)
-            tabs =[self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
-            target_tabs =[t for t in tabs if getattr(t, "file_path", "") and t.file_path != "Merged"]
-            
+            tabs = [self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
+            target_tabs = [t for t in tabs if getattr(t, "file_path", "") and t.file_path != "Merged"]
+
             for t in target_tabs:
                 if os.path.exists(t.file_path):
-                    content = ""
-                    for enc in['utf-8', 'cp932', 'shift_jis', 'latin-1']:
-                        try:
-                            with open(t.file_path, "r", encoding=enc) as f: content = f.read(); break
-                        except: continue
-                    
-                    if self.vsync_config.get("enabled", True):
-                        fname = os.path.basename(t.file_path)
-                        new_content, new_src_map = self._process_vsync_insertion(content, [fname]*len(content.splitlines()), [fname])
-                        t.original_content = new_content
-                        t.line_source_map = new_src_map
-                    else: 
-                        t.original_content = content
-                        t.line_source_map =[] 
+                    content = self._read_text_file(t.file_path)
+                    self._refresh_tab_content(t, content)
                     self.apply_display_update(t)
-            
+
             if len(target_tabs) >= 2:
                 self.merge_logs_action(auto_ts_len=self.last_merge_ts_len)
             return
 
-        if not tab.file_path or not os.path.exists(tab.file_path): return
-        
-        content = ""
-        for enc in['utf-8', 'cp932', 'shift_jis', 'latin-1']:
-            try:
-                with open(tab.file_path, "r", encoding=enc) as f: content = f.read(); break
-            except: continue
-        
-        if self.vsync_config.get("enabled", True):
-            fname = os.path.basename(tab.file_path)
-            new_content, new_src_map = self._process_vsync_insertion(content, [fname]*len(content.splitlines()), [fname])
-            tab.original_content = new_content
-            tab.line_source_map = new_src_map
-        else: 
-            tab.original_content = content
-            tab.line_source_map =[] 
-            
+        if not tab.file_path or not os.path.exists(tab.file_path):
+            return
+
+        content = self._read_text_file(tab.file_path)
+        self._refresh_tab_content(tab, content)
         self.apply_display_update(tab)
         self.status_var.set(f"再読み込み完了: {os.path.basename(tab.file_path)}")
 
+    def _refresh_tab_content(self, tab: LogTab, content: str) -> None:
+        fname = os.path.basename(tab.file_path) if getattr(tab, "file_path", "") else ""
+        if self.vsync_config.get("enabled", True) and fname:
+            lines = content.splitlines()
+            new_content, new_src_map = self._process_vsync_insertion(content, [fname] * len(lines), [fname])
+            tab.original_content = new_content
+            tab.line_source_map = new_src_map
+        else:
+            tab.original_content = content
+            tab.line_source_map = []
+
     def _open_file_path(self, path: str):
-        content = ""
-        for enc in['utf-8', 'cp932', 'shift_jis', 'latin-1']:
-            try:
-                with open(path, "r", encoding=enc) as f: content = f.read(); break
-            except: continue
-            
+        content = self._read_text_file(path)
         fname = os.path.basename(path)
         if self.vsync_config.get("enabled", True):
-            new_content, new_src_map = self._process_vsync_insertion(content,[fname]*len(content.splitlines()), [fname])
+            lines = content.splitlines()
+            new_content, new_src_map = self._process_vsync_insertion(content, [fname] * len(lines), [fname])
             tab = LogTab(self.notebook, self, path, new_content, source_files_list=[fname], source_file_paths={fname: path}, is_merged=True)
             tab.line_source_map = new_src_map
-            self.notebook.add(tab, text=fname)
-            self.notebook.select(tab)
-            self.apply_display_update(tab)
         else:
             tab = LogTab(self.notebook, self, path, content, source_files_list=[fname], source_file_paths={fname: path})
-            self.notebook.add(tab, text=fname)
-            self.notebook.select(tab)
-            self.apply_display_update(tab)
+        self.notebook.add(tab, text=fname)
+        self.notebook.select(tab)
+        self.apply_display_update(tab)
 
     def merge_logs_action(self, auto_ts_len=None):
         tabs =[self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
@@ -873,6 +854,93 @@ class LogViewerApp:
         except:
             return None
 
+    def _read_text_file(self, path: str) -> str:
+        if not path or not os.path.exists(path):
+            return ""
+        for encoding in ("utf-8", "cp932", "shift_jis", "latin-1"):
+            try:
+                with open(path, "r", encoding=encoding) as fh:
+                    return fh.read()
+            except (UnicodeDecodeError, OSError):
+                continue
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                return fh.read()
+        except OSError:
+            return ""
+
+    def _compile_section_rules(self) -> List[dict]:
+        section_rules = []
+        for s in self.sections_config:
+            if not s.get("enabled", True):
+                continue
+            try:
+                fp = s.get("file_pattern", ".*") or ".*"
+                end_pat = s["end"]
+                is_vsync_end = False
+                if end_pat == VSYNC_TAG:
+                    end_pat = VSYNC_REGEX
+                    is_vsync_end = True
+
+                end_re = re.compile(end_pat, re.I) if end_pat else None
+                try:
+                    dur_ms = float(s.get("duration_ms", 0) or 0)
+                except Exception:
+                    dur_ms = 0.0
+
+                section_rules.append({
+                    "start": re.compile(s["start"], re.I),
+                    "start_wait": s.get("start_wait", False),
+                    "end": end_re,
+                    "end_str": end_pat,
+                    "end_wait": s.get("end_wait", False),
+                    "duration_ms": dur_ms,
+                    "name": s["name"],
+                    "color": s.get("color", "#ffffff"),
+                    "file_pat_re": re.compile(fp, re.I),
+                    "is_vsync_end": is_vsync_end,
+                })
+            except Exception as exc:
+                print(f"Regex error in section setup: {exc}")
+        return section_rules
+
+    def _compile_keyword_rules(self):
+        kw_rules = []
+        ml_rules = []
+        for itm in self.keywords_config:
+            if not itm.get("enabled", True):
+                continue
+            try:
+                extra_lines = int(itm.get("extra_lines", 0))
+                is_multiline = extra_lines >= 1
+                flags = re.I | (re.DOTALL if is_multiline else 0)
+                rule = {
+                    "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
+                    "regex": re.compile(_normalize_user_pattern(itm["pattern"]), flags),
+                    "comment": itm.get("comment", ""),
+                    "color": itm.get("color", "#ffffff"),
+                    "extra": extra_lines,
+                    "multiline": is_multiline,
+                }
+                if is_multiline:
+                    ml_rules.append(rule)
+                else:
+                    kw_rules.append(rule)
+            except Exception:
+                continue
+
+        has_timer_rule = any("VIRTUAL TIMER" in str(r.get("pattern", "")) for r in self.keywords_config)
+        if not has_timer_rule:
+            kw_rules.append({
+                "file_pat_re": re.compile(".*"),
+                "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
+                "comment": "タイマー満了",
+                "color": "#ffe8d6",
+                "extra": 0,
+                "multiline": False,
+            })
+        return kw_rules, ml_rules
+
     def _process_vsync_insertion(self, content: str, src_map: List[str], src_file_names: List[str]) -> Tuple[str, List[str]]:
         lines_temp = content.splitlines()
         src_map_temp = src_map if len(src_map) == len(lines_temp) else src_map + [""] * (len(lines_temp) - len(src_map))
@@ -953,37 +1021,11 @@ class LogViewerApp:
             timestamps_v = timestamps_temp
 
         # === PASS 2: Virtual Timer Insertion ===
-        section_rules =[]
-        for s in self.sections_config:
-            if s.get("enabled", True):
-                try: 
-                    fp = s.get("file_pattern", ".*") or ".*"
-                    end_pat = s["end"]
-                    is_vsync_end = False
-                    if end_pat == VSYNC_TAG: 
-                        end_pat = VSYNC_REGEX
-                        is_vsync_end = True
-                        
-                    end_re = re.compile(end_pat, re.I) if end_pat else None
-                    try: dur_ms = float(s.get("duration_ms", 0) or 0)
-                    except: dur_ms = 0.0
-                    
-                    section_rules.append({
-                        "start": re.compile(s["start"], re.I),
-                        "start_wait": s.get("start_wait", False),
-                        "end": end_re,
-                        "end_str": end_pat,
-                        "end_wait": s.get("end_wait", False),
-                        "duration_ms": dur_ms,
-                        "name": s["name"],
-                        "file_pat_re": re.compile(fp, re.I),
-                        "is_vsync_end": is_vsync_end
-                    })
-                except: pass
+        section_rules = self._compile_section_rules()
 
         try:
             re_vsync = re.compile(VSYNC_REGEX, re.I)
-        except:
+        except Exception:
             re_vsync = re.compile(r"V_START", re.I)
 
         lines_final =[]
@@ -1212,36 +1254,7 @@ class LogViewerApp:
         srcs = tab.line_source_map if tab.line_source_map else (tab.source_file_names * len(lines))
         if len(srcs) < len(lines): srcs.extend([""] * (len(lines) - len(srcs))) 
 
-        section_rules =[]
-        for s in self.sections_config:
-            if s.get("enabled", True):
-                try: 
-                    fp = s.get("file_pattern", ".*") or ".*"
-                    end_pat = s["end"]
-                    is_vsync_end = False
-                    if end_pat == VSYNC_TAG: 
-                        end_pat = VSYNC_REGEX
-                        is_vsync_end = True
-                        
-                    end_re = re.compile(end_pat, re.I) if end_pat else None
-                    
-                    try: dur_ms = float(s.get("duration_ms", 0) or 0)
-                    except: dur_ms = 0.0
-                    
-                    section_rules.append({
-                        "start": re.compile(s["start"], re.I),
-                        "start_wait": s.get("start_wait", False),
-                        "end": end_re,
-                        "end_str": end_pat,
-                        "end_wait": s.get("end_wait", False),
-                        "duration_ms": dur_ms,
-                        "name": s["name"],
-                        "color": s["color"],
-                        "file_pat_re": re.compile(fp, re.I),
-                        "is_vsync_end": is_vsync_end
-                    })
-                except Exception as e: 
-                    print(f"Regex error in section setup: {e}")
+        section_rules = self._compile_section_rules()
 
         ts_pat = self.vsync_config.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?")
         try:
@@ -1414,96 +1427,36 @@ class LogViewerApp:
                 else: 
                     status_buffers[fn].append(("", "#ffffff"))
 
-        kw_rules =[]
-        ml_rules =[]  # 複数行マッチ用ルール
-        for itm in self.keywords_config:
-            if itm.get("enabled", True):
-                try:
-                    extra_lines = int(itm.get("extra_lines", 0))
-                    # +行が1以上の場合、複数行マッチとして処理
-                    is_multiline = extra_lines >= 1
-                    flags = re.I | (re.DOTALL if is_multiline else 0)
-                    
-                    rule = {
-                        "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
-                        "regex": re.compile(_normalize_user_pattern(itm["pattern"]), flags),
-                        "comment": itm.get("comment", ""),
-                        "color": itm.get("color", "#ffffff"),
-                        "extra": extra_lines,
-                        "multiline": is_multiline
-                    }
-                    
-                    if is_multiline:
-                        ml_rules.append(rule)
-                    else:
-                        kw_rules.append(rule)
-                except: 
-                    pass
-                
-        has_timer_rule = any("VIRTUAL TIMER" in str(r.get("pattern", "")) for r in self.keywords_config)
-        if not has_timer_rule:
-            kw_rules.append({
-                "file_pat_re": re.compile(".*"),
-                "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
-                "comment": "タイマー満了",
-                "color": "#ffe8d6",
-                "extra": 0,
-                "multiline": False
-            })
+        kw_rules, ml_rules = self._compile_keyword_rules()
 
         # 複数行マッチの処理
-        full_text = "\n".join(lines)
-        multiline_matches = {}  # {行番号: ルールインデックス} の辞書
-        
-        for rule_idx, ml_rule in enumerate(ml_rules):
-            try:
-                # 複数行正規表現マッチを実行
-                matches_found = list(ml_rule["regex"].finditer(full_text))
-                pattern_str = ml_rule["regex"].pattern
-                print(f"[DEBUG] Rule {rule_idx}: pattern='{pattern_str}' found {len(matches_found)} matches")
-                
-                for match in matches_found:
-                    start_pos = match.start()
-                    end_pos = match.end()
-                    
-                    # 開始位置から行番号を計算
-                    start_line = full_text[:start_pos].count("\n")
-                    end_line = full_text[:end_pos].count("\n")
-                    
-                    print(f"  Match: start_line={start_line}, end_line={end_line}")
-                    print(f"  Match text: {repr(match.group()[:50])}")
-                    
-                    # ファイルパターンチェック
-                    file_pattern_ok = False
-                    for src_idx in range(start_line, min(end_line + 1, len(srcs))):
-                        src = srcs[src_idx]
-                        if ml_rule["file_pat_re"].search(src):
-                            file_pattern_ok = True
-                            print(f"    src_idx={src_idx}, src='{src}' -> OK")
-                            break
+        multiline_matches = {}
+        if ml_rules:
+            full_text = "\n".join(lines)
+            for rule_idx, ml_rule in enumerate(ml_rules):
+                try:
+                    for match in ml_rule["regex"].finditer(full_text):
+                        start_pos = match.start()
+                        end_pos = match.end()
+                        start_line = full_text[:start_pos].count("\n")
+                        end_line = full_text[:end_pos].count("\n")
+                        file_pattern_ok = False
+                        for src_idx in range(start_line, min(end_line + 1, len(srcs))):
+                            src = srcs[src_idx]
+                            if ml_rule["file_pat_re"].search(src):
+                                file_pattern_ok = True
+                                break
+                        if not file_pattern_ok:
+                            continue
+                        if ml_rule["extra"] > 0:
+                            color_end = min(start_line + ml_rule["extra"] + 1, len(lines))
                         else:
-                            print(f"    src_idx={src_idx}, src='{src}' -> NOT OK")
-                    
-                    if not file_pattern_ok:
-                        print(f"  File pattern check FAILED")
-                        continue
-                    
-                    print(f"  File pattern check PASSED")
-                    
-                    # マッチの開始行から「extra_lines」分の行を色付け対象に追加
-                    # +行が設定されていればそれを使用、なければマッチ範囲全体を使用
-                    if ml_rule["extra"] > 0:
-                        # +行が指定されている場合
-                        color_end = min(start_line + ml_rule["extra"] + 1, len(lines))
-                    else:
-                        # +行が0の場合、マッチ範囲全体を色付け
-                        color_end = min(end_line + 1, len(lines))
-                    
-                    for idx in range(start_line, color_end):
-                        if idx not in multiline_matches:
-                            multiline_matches[idx] = rule_idx
-            except Exception as e:
-                print(f"Multiline regex error: {e}")
+                            color_end = min(end_line + 1, len(lines))
+                        for idx in range(start_line, color_end):
+                            if idx not in multiline_matches:
+                                multiline_matches[idx] = rule_idx
+                except Exception:
+                    continue
 
         # マッチして色付けを実施
         for idx, rule_idx in multiline_matches.items():
@@ -1604,73 +1557,81 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
-        flines, fcmts, ftimediffs = [],[], []
-        main_tags =[]
-        final_st_lines = {fn:[] for fn in tab.source_file_names}
-        final_st_tags = {fn:[] for fn in tab.source_file_names}
-        
+        flines, fcmts, ftimediffs = [], [], []
+        main_tags = []
+        final_st_lines = {fn: [] for fn in tab.source_file_names}
+        final_st_tags = {fn: [] for fn in tab.source_file_names}
+
         line_count = 0
         base_ts = None
-        
+
         for i in range(len(lines)):
             if not is_visible[i]:
                 continue
-            
+
             if base_ts is None and timestamps[i] is not None:
                 base_ts = timestamps[i]
-            
+
             line_count += 1
             flines.append(lines[i])
             s_name = f"[{srcs[i]}] " if (tab.is_merged and srcs[i]) else ""
-            
+
             if timestamps[i] is not None and base_ts is not None:
                 ftimediffs.append(f"{(timestamps[i] - base_ts):.6f}")
             else:
                 ftimediffs.append("")
-            
+
             base_cmt = f"{s_name}{line_attrs[i]['comment']}"
             fcmts.append(base_cmt)
-            
+
             if line_attrs[i]["color"] != "#ffffff":
                 main_tags.append((line_count, line_attrs[i]["color"]))
-            
+
             for fn in tab.source_file_names:
                 txt, col = status_buffers[fn][i]
                 final_st_lines[fn].append(txt)
                 if col != "#ffffff":
                     final_st_tags[fn].append((line_count, col))
-                    
-        tab.text.delete("1.0", tk.END)
-        tab.text.insert("1.0", "\n".join(flines))
-        
-        tab.timediff_text.delete("1.0", tk.END)
-        tab.timediff_text.insert("1.0", "\n".join(ftimediffs))
-        
-        tab.comment_text.delete("1.0", tk.END)
-        tab.comment_text.insert("1.0", "\n".join(fcmts))
-        
+
+        if flines:
+            tab.text.delete("1.0", tk.END)
+            tab.text.insert("1.0", "\n".join(flines))
+
+            tab.timediff_text.delete("1.0", tk.END)
+            tab.timediff_text.insert("1.0", "\n".join(ftimediffs))
+
+            tab.comment_text.delete("1.0", tk.END)
+            tab.comment_text.insert("1.0", "\n".join(fcmts))
+        else:
+            tab.text.delete("1.0", tk.END)
+            tab.timediff_text.delete("1.0", tk.END)
+            tab.comment_text.delete("1.0", tk.END)
+
         # Advanced モード時のみ区間情報を表示
         if self.advance_mode:
-            # Advanced ON時：区間フレームの内容を更新
             for fn in tab.source_file_names:
                 w = tab.status_texts[fn]
-                w.delete("1.0", tk.END)
-                w.insert("1.0", "\n".join(final_st_lines[fn]))
-                
-                for tag in w.tag_names():
-                     if tag.startswith("st_"): w.tag_delete(tag)
+                if final_st_lines[fn]:
+                    w.delete("1.0", tk.END)
+                    w.insert("1.0", "\n".join(final_st_lines[fn]))
+                else:
+                    w.delete("1.0", tk.END)
+                for tag in list(w.tag_names()):
+                    if tag.startswith("st_"):
+                        w.tag_delete(tag)
                 for ln, col in final_st_tags[fn]:
                     tn = f"st_{col.replace('#','')}"
                     w.tag_configure(tn, background=col)
                     w.tag_add(tn, f"{ln}.0", f"{ln}.end")
 
-        for tag in tab.text.tag_names():
-            if tag.startswith("kw_"): tab.text.tag_delete(tag)
+        for tag in list(tab.text.tag_names()):
+            if tag.startswith("kw_"):
+                tab.text.tag_delete(tag)
         for ln, col in main_tags:
             tn = f"kw_{col.replace('#','')}"
             tab.text.tag_configure(tn, background=col)
             tab.text.tag_add(tn, f"{ln}.0", f"{ln}.end")
-            
+
         tab.linenumbers.redraw()
         tab.update_cursor_line()
 
