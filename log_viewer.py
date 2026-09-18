@@ -78,6 +78,49 @@ def _normalize_user_pattern(pat: str) -> str:
 
         return p
 
+
+def _group_log_entries(lines: List[str], sources: List[str]) -> List[Tuple[int, int]]:
+    """Return (start, end) ranges for logical, possibly multiline log entries."""
+    if not lines:
+        return []
+
+    groups: List[Tuple[int, int]] = []
+    start = 0
+    for idx in range(1, len(lines)):
+        source_changed = idx < len(sources) and sources[idx] != sources[idx - 1]
+        is_continuation = not lines[idx] or lines[idx][0].isspace()
+        if source_changed or not is_continuation:
+            groups.append((start, idx))
+            start = idx
+    groups.append((start, len(lines)))
+    return groups
+
+
+def _find_keyword_matches(
+    lines: List[str], sources: List[str], rules: List[Dict[str, Any]]
+) -> Tuple[Dict[int, int], Dict[int, int]]:
+    """Return matched lines and the matched entry starts used for comments."""
+    matches: Dict[int, int] = {}
+    match_starts: Dict[int, int] = {}
+    for start, end in _group_log_entries(lines, sources):
+        entry_text = "\n".join(lines[start:end])
+        entry_source = sources[start] if start < len(sources) else ""
+        for rule_idx, rule in enumerate(rules):
+            if not rule["file_pat_re"].search(entry_source):
+                continue
+            if not rule["regex"].search(entry_text):
+                continue
+
+            # Select the complete entry. +行 can extend a single-line entry
+            # farther and remains compatible with existing configurations.
+            color_end = min(max(end, start + rule["extra"] + 1), len(lines))
+            for idx in range(start, color_end):
+                matches.setdefault(idx, rule_idx)
+            if matches.get(start) == rule_idx:
+                match_starts[start] = rule_idx
+            break
+    return matches, match_starts
+
 class Tooltip:
     """Hover tooltip for displaying text on mouse over"""
     def __init__(self):
@@ -764,18 +807,12 @@ class LogViewerApp:
         tk.Button(btn_box, text="OK", command=save_conf, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2", width=15).pack(side=tk.RIGHT, padx=10)
 
     def _ask_merge_ts_len(self, initial=19) -> Optional[int]:
-        """Custom ask-integer dialog for merge timestamp length.
-
-        Uses a slightly wider Toplevel to avoid title being clipped on some
-        platforms / DPI settings.
-        """
+        """Custom ask-integer dialog for merge timestamp length."""
         dlg = tk.Toplevel(self.root)
         dlg.transient(self.root)
         dlg.grab_set()
         dlg.title("マージ")
-        # Provide a comfortable width so title isn't truncated
-        dlg.geometry("420x120")
-        dlg.minsize(360, 110)
+        dlg.resizable(False, False)
         try:
             dlg.configure(bg=UIColors.BG)
         except tk.TclError:
@@ -783,15 +820,18 @@ class LogViewerApp:
 
         res = {"value": None}
 
-        tk.Label(dlg, text="時刻ソート用の先頭文字数:", anchor="w", font=("Yu Gothic UI", 9, "bold"), bg=UIColors.BG, fg=UIColors.TEXT).pack(pady=(12, 6), padx=12, fill=tk.X)
-        entry_frame = tk.Frame(dlg, bg=UIColors.BG)
-        entry_frame.pack(padx=12, fill=tk.X)
-        ent = tk.Entry(entry_frame, width=10, relief=tk.SOLID, bd=1, highlightthickness=0)
-        ent.pack(side=tk.LEFT)
+        content = tk.Frame(dlg, bg=UIColors.BG)
+        content.pack(padx=16, pady=14)
+
+        input_frame = tk.Frame(content, bg=UIColors.BG)
+        input_frame.pack(fill=tk.X)
+        tk.Label(input_frame, text="時刻ソート用の先頭文字数:", anchor="w", font=("Yu Gothic UI", 9, "bold"), bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
+        ent = tk.Entry(input_frame, width=7, justify=tk.RIGHT, relief=tk.SOLID, bd=1, highlightthickness=0)
+        ent.pack(side=tk.LEFT, padx=(10, 0))
         ent.insert(0, str(initial))
 
-        btn_frame = tk.Frame(dlg, bg=UIColors.BG)
-        btn_frame.pack(pady=10)
+        btn_frame = tk.Frame(content, bg=UIColors.BG)
+        btn_frame.pack(anchor="e", pady=(14, 0))
 
         def on_ok():
             try:
@@ -806,10 +846,10 @@ class LogViewerApp:
         def on_cancel():
             dlg.destroy()
 
-        ok = tk.Button(btn_frame, text="OK", width=8, command=on_ok)
-        ok.pack(side=tk.LEFT, padx=6)
-        cancel = tk.Button(btn_frame, text="Cancel", width=8, command=on_cancel)
-        cancel.pack(side=tk.LEFT, padx=6)
+        ok = tk.Button(btn_frame, text="OK", width=10, command=on_ok, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2")
+        ok.pack(side=tk.LEFT, padx=(0, 8))
+        cancel = tk.Button(btn_frame, text="キャンセル", width=10, command=on_cancel, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2")
+        cancel.pack(side=tk.LEFT)
 
         dlg.bind('<Return>', lambda e: on_ok())
         dlg.bind('<Escape>', lambda e: on_cancel())
@@ -905,41 +945,33 @@ class LogViewerApp:
         return section_rules
 
     def _compile_keyword_rules(self):
-        kw_rules = []
-        ml_rules = []
+        rules = []
         for itm in self.keywords_config:
             if not itm.get("enabled", True):
                 continue
             try:
                 extra_lines = int(itm.get("extra_lines", 0))
-                is_multiline = extra_lines >= 1
-                flags = re.I | (re.DOTALL if is_multiline else 0)
                 rule = {
                     "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
-                    "regex": re.compile(_normalize_user_pattern(itm["pattern"]), flags),
+                    "regex": re.compile(_normalize_user_pattern(itm["pattern"]), re.I | re.DOTALL),
                     "comment": itm.get("comment", ""),
                     "color": itm.get("color", "#ffffff"),
                     "extra": extra_lines,
-                    "multiline": is_multiline,
                 }
-                if is_multiline:
-                    ml_rules.append(rule)
-                else:
-                    kw_rules.append(rule)
+                rules.append(rule)
             except Exception:
                 continue
 
         has_timer_rule = any("VIRTUAL TIMER" in str(r.get("pattern", "")) for r in self.keywords_config)
         if not has_timer_rule:
-            kw_rules.append({
+            rules.append({
                 "file_pat_re": re.compile(".*"),
                 "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
                 "comment": "タイマー満了",
                 "color": "#ffe8d6",
                 "extra": 0,
-                "multiline": False,
             })
-        return kw_rules, ml_rules
+        return rules
 
     def _process_vsync_insertion(self, content: str, src_map: List[str], src_file_names: List[str]) -> Tuple[str, List[str]]:
         lines_temp = content.splitlines()
@@ -1427,46 +1459,20 @@ class LogViewerApp:
                 else: 
                     status_buffers[fn].append(("", "#ffffff"))
 
-        kw_rules, ml_rules = self._compile_keyword_rules()
+        keyword_rules = self._compile_keyword_rules()
 
-        # 複数行マッチの処理
-        multiline_matches = {}
-        if ml_rules:
-            full_text = "\n".join(lines)
-            for rule_idx, ml_rule in enumerate(ml_rules):
-                try:
-                    for match in ml_rule["regex"].finditer(full_text):
-                        start_pos = match.start()
-                        end_pos = match.end()
-                        start_line = full_text[:start_pos].count("\n")
-                        end_line = full_text[:end_pos].count("\n")
-                        file_pattern_ok = False
-                        for src_idx in range(start_line, min(end_line + 1, len(srcs))):
-                            src = srcs[src_idx]
-                            if ml_rule["file_pat_re"].search(src):
-                                file_pattern_ok = True
-                                break
-                        if not file_pattern_ok:
-                            continue
-                        if ml_rule["extra"] > 0:
-                            color_end = min(start_line + ml_rule["extra"] + 1, len(lines))
-                        else:
-                            color_end = min(end_line + 1, len(lines))
-                        for idx in range(start_line, color_end):
-                            if idx not in multiline_matches:
-                                multiline_matches[idx] = rule_idx
-                except Exception:
-                    continue
-
-        # マッチして色付けを実施
-        for idx, rule_idx in multiline_matches.items():
-            if idx < len(line_attrs) and rule_idx < len(ml_rules):
-                ml_rule = ml_rules[rule_idx]
+        # 字下げされた継続行を先頭行とまとめて、1件のログとして判定する。
+        keyword_matches, match_starts = _find_keyword_matches(lines, srcs, keyword_rules)
+        for idx, rule_idx in keyword_matches.items():
+            if idx < len(line_attrs) and rule_idx < len(keyword_rules):
+                rule = keyword_rules[rule_idx]
                 if line_attrs[idx]["priority"] < 20:
-                    line_attrs[idx]["color"] = ml_rule["color"]
-                    base_cmt = line_attrs[idx]["comment"]
-                    new_cmt = ml_rule["comment"]
-                    line_attrs[idx]["comment"] = f"{base_cmt} {new_cmt}".strip()
+                    line_attrs[idx]["color"] = rule["color"]
+                    # 複数行ログは全行を色付けするが、コメントは先頭行だけに表示する。
+                    if match_starts.get(idx) == rule_idx:
+                        base_cmt = line_attrs[idx]["comment"]
+                        new_cmt = rule["comment"]
+                        line_attrs[idx]["comment"] = f"{base_cmt} {new_cmt}".strip()
                     line_attrs[idx]["priority"] = 20
 
         for idx in range(len(lines)):
@@ -1475,19 +1481,6 @@ class LogViewerApp:
                     line_attrs[idx]["color"] = UIColors.ROSE 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
                     line_attrs[idx]["priority"] = 30
-
-            line_src = srcs[idx]
-            for rule in kw_rules:
-                if rule["file_pat_re"].search(line_src):
-                    if rule["regex"].search(lines[idx]):
-                        for j in range(idx, min(idx + rule["extra"] + 1, len(lines))):
-                            if line_attrs[j]["priority"] < 20:
-                                line_attrs[j]["color"] = rule["color"]
-                                base_cmt = line_attrs[j]["comment"]
-                                new_cmt = rule["comment"]
-                                line_attrs[j]["comment"] = f"{base_cmt} {new_cmt}".strip()
-                                line_attrs[j]["priority"] = 20
-                        break
 
         visible_mapping = {}
         is_visible =[True] * len(lines)
@@ -1898,13 +1891,15 @@ class LogViewerApp:
         elif key == "keywords":
             info_text = (
                 "【フィルタ設定の使い方】\n\n"
-                "正規表現で検索し、マッチした行を\n"
-                "抽出・色付け・コメント付与します。\n\n"
+                "正規表現で検索し、マッチしたログを\n"
+                "抽出・色付け・コメント付与します。\n"
+                "字下げされた継続行は、直前の行と\n"
+                "まとめて1件のログとして判定します。\n\n"
                 "■対象ファイル\n"
                 " 適用するファイル名(正規表現)です。\n"
                 " (例: client.* , server.*)\n\n"
                 "■+行\n"
-                " マッチした行のさらに下何行分まで\n"
+                " マッチしたログの先頭からさらに下何行分まで\n"
                 " 抽出対象に含めるかを指定します。\n\n"
                 "■制約\n"
                 " 正規表現の先頭、末尾に.*を付けないでください。\n"
@@ -1914,7 +1909,8 @@ class LogViewerApp:
                 "                     zzzz\n"
                 " を抽出したい場合は、正規表現に\n"
                 " System.*Halting.*xxxx.*yyyy.*zzzz\n"
-                " と設定してください。"
+                " と設定してください。xxxxだけを指定しても、\n"
+                " 上記4行をまとめて抽出できます。"
             )
         elif key == "replace_patterns":
             info_text = (
