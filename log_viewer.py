@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import re
 import html
 import tkinter as tk
-from datetime import datetime, timedelta
-from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Dict, List, Tuple, Optional, Any
 
 # --- DnD Support ---
@@ -55,28 +53,24 @@ def apply_french_theme(widget):
         apply_french_theme(child)
 
 def _normalize_user_pattern(pat: str) -> str:
-        """Normalize user-entered pattern shortcuts to valid regex.
+    """Normalize user-entered pattern shortcuts to valid regex.
 
-        - Replace unescaped percent signs (%) with '\\s*' so users can use
-            '%' as a short-hand for whitespace sequences.
-        """
-        if not isinstance(pat, str):
-            return pat
-        p = pat.strip()
-        # Simple and safe replacement: treat '%' as '\\s*'
-        p = p.replace('%', r'\\s*')
+    - Replace percent signs (%) with '\\s*' so users can use '%' as a
+      short-hand for whitespace sequences.
+    """
+    if not isinstance(pat, str):
+        return pat
+    p = pat.strip()
+    p = p.replace('%', r'\\s*')
 
-        # If user wrapped pattern with leading/trailing '.*' (e.g. '.*PATTERN.*'),
-        # strip them so per-line search will still find the core pattern.
-        # Keep a single '.*' (pattern becomes '.*') as-is.
-        if len(p) > 4 and p.startswith('.*') and p.endswith('.*'):
-            p = p[2:-2].strip()
+    # Keep a single '.*' as-is, but trim redundant wrappers around a pattern.
+    if len(p) > 4 and p.startswith('.*') and p.endswith('.*'):
+        p = p[2:-2].strip()
 
-        # Handle anchored variant '^.*PATTERN.*$'
-        if len(p) > 6 and p.startswith('^.*') and p.endswith('.*$'):
-            p = p[3:-3].strip()
+    if len(p) > 6 and p.startswith('^.*') and p.endswith('.*$'):
+        p = p[3:-3].strip()
 
-        return p
+    return p
 
 
 def _group_log_entries(lines: List[str], sources: List[str]) -> List[Tuple[int, int]]:
@@ -1720,7 +1714,6 @@ class LogViewerApp:
         
         dlg = tk.Toplevel(self.root)
         dlg.title(title)
-        dlg.geometry("1400x550")
         dlg.configure(bg=UIColors.BG)
         setattr(self, ref_attr, dlg)
         
@@ -1728,7 +1721,6 @@ class LogViewerApp:
         fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         l_fr = tk.Frame(fr, bg=UIColors.BG, relief=tk.FLAT, highlightbackground=UIColors.BORDER, highlightthickness=1)
-        l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         wrapper = tk.Frame(l_fr, bg=UIColors.BG)
         wrapper.pack(fill=tk.BOTH, expand=True)
@@ -1746,10 +1738,23 @@ class LogViewerApp:
         sc_x.pack(side=tk.BOTTOM, fill=tk.X)
         cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        win = cv.create_window((0,0), window=sf, anchor="nw")
-        
-        def on_configure(e):
-            cv.configure(scrollregion=cv.bbox("all"))
+        cv.create_window((0,0), window=sf, anchor="nw")
+
+        scroll_update_id = {"value": None}
+        def update_scroll_region():
+            scroll_update_id["value"] = None
+            if dlg.winfo_exists():
+                cv.configure(scrollregion=cv.bbox("all"))
+
+        def on_configure(_event=None):
+            # Hundreds of child widgets can emit a configure event each. Collapse
+            # them into one scroll-region update after the current render batch.
+            if scroll_update_id["value"] is not None:
+                try:
+                    dlg.after_cancel(scroll_update_id["value"])
+                except Exception:
+                    pass
+            scroll_update_id["value"] = dlg.after_idle(update_scroll_region)
         sf.bind("<Configure>", on_configure)
 
         col_defs =[]
@@ -1771,6 +1776,17 @@ class LogViewerApp:
             elif f == "extra_lines": col_defs.append((col_idx, f, "+行", 45))
             col_idx += 1
 
+        config_count = len(getattr(self, f"{key}_config"))
+        table_width = sum(column[3] + 4 for column in col_defs)
+        desired_width = min(dlg.winfo_screenwidth() - 60, max(820, table_width + 310))
+        minimum_height = 470 if key == "sections" else 310
+        desired_height = min(
+            dlg.winfo_screenheight() - 80,
+            max(minimum_height, 185 + min(max(config_count, 1), 12) * 30),
+        )
+        dlg.geometry(f"{desired_width}x{desired_height}")
+        dlg.minsize(min(820, desired_width), min(300, desired_height))
+
         for c_idx, c_id, c_txt, c_w in col_defs:
             h_cell = tk.Frame(hdr, bg=UIColors.HEADER_BG, width=c_w, height=28)
             h_cell.pack_propagate(False)
@@ -1779,56 +1795,64 @@ class LogViewerApp:
                 tk.Label(h_cell, text=c_txt, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), anchor="w").pack(side=tk.LEFT, fill=tk.BOTH)
 
         entries =[]
-        def refresh():
-            for w in sf.winfo_children():
-                w.destroy()
+        render_state = {"generation": 0}
+        simple_entry_fields = {"file_pattern", "pattern", "search", "name", "start", "duration_ms", "replace", "comment", "extra_lines"}
+        render_batch_size = 8
 
-            for i, item in enumerate(entries):
-                f_btn = tk.Frame(sf, bg=UIColors.PANEL_BG, width=135, height=28)
-                f_btn.pack_propagate(False)
-                f_btn.grid(row=i, column=0, sticky="w", padx=2, pady=2)
-                
-                tk.Checkbutton(f_btn, variable=item["enabled"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
-                tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
-                tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
-                tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx), bg="#e8c5c5", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=2)
-                
-                for c_idx, c_id, c_txt, c_w in col_defs:
-                    if c_id == "btn": continue
-                    
-                    f_cell = tk.Frame(sf, bg=UIColors.PANEL_BG, width=c_w, height=28)
-                    f_cell.pack_propagate(False)
-                    f_cell.grid(row=i, column=c_idx, sticky="w", padx=2, pady=2)
-                    
-                    if c_id == "file_pattern":
-                        tk.Entry(f_cell, textvariable=item["file_pattern"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "pattern":
-                        tk.Entry(f_cell, textvariable=item["pattern"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "search":
-                        tk.Entry(f_cell, textvariable=item["search"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "name":
-                        tk.Entry(f_cell, textvariable=item["name"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "start":
-                        tk.Entry(f_cell, textvariable=item["start"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "start_wait":
-                        tk.Checkbutton(f_cell, variable=item["start_wait"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
-                    elif c_id == "end":
-                        tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                        if key == "sections":
-                             tk.Button(f_cell, text="V", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
-                    elif c_id == "end_wait":
-                        tk.Checkbutton(f_cell, variable=item["end_wait"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
-                    elif c_id == "duration_ms":
-                        tk.Entry(f_cell, textvariable=item["duration_ms"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "color":
-                        tk.Entry(f_cell, textvariable=item["color"], width=7, relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                        tk.Button(f_cell, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get()), bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
-                    elif c_id == "replace":
-                        tk.Entry(f_cell, textvariable=item["replace"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "comment":
-                        tk.Entry(f_cell, textvariable=item["comment"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                    elif c_id == "extra_lines":
-                        tk.Entry(f_cell, textvariable=item["extra_lines"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
+        def render_row(i, item):
+            f_btn = tk.Frame(sf, bg=UIColors.PANEL_BG, width=135, height=28)
+            f_btn.pack_propagate(False)
+            f_btn.grid(row=i, column=0, sticky="w", padx=2, pady=2)
+
+            tk.Checkbutton(f_btn, variable=item["enabled"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
+            tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
+            tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
+            tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx), bg="#e8c5c5", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=2)
+
+            for c_idx, c_id, _c_txt, c_w in col_defs:
+                if c_id == "btn":
+                    continue
+
+                f_cell = tk.Frame(sf, bg=UIColors.PANEL_BG, width=c_w, height=28)
+                f_cell.pack_propagate(False)
+                f_cell.grid(row=i, column=c_idx, sticky="w", padx=2, pady=2)
+
+                if c_id in simple_entry_fields:
+                    tk.Entry(f_cell, textvariable=item[c_id], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
+                elif c_id in {"start_wait", "end_wait"}:
+                    tk.Checkbutton(f_cell, variable=item[c_id], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
+                elif c_id == "end":
+                    tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                    if key == "sections":
+                        tk.Button(f_cell, text="V", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
+                elif c_id == "color":
+                    tk.Entry(f_cell, textvariable=item["color"], width=7, relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                    tk.Button(f_cell, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get()), bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
+
+        def refresh():
+            render_state["generation"] += 1
+            generation = render_state["generation"]
+            for widget in sf.winfo_children():
+                widget.destroy()
+
+            loading = tk.Label(sf, text="設定を読み込み中...", bg=UIColors.PANEL_BG, fg=UIColors.TEXT, padx=20, pady=12)
+            loading.grid(row=0, column=0, sticky="w")
+
+            def render_batch(start=0):
+                if generation != render_state["generation"] or not dlg.winfo_exists():
+                    return
+                if start == 0:
+                    loading.destroy()
+                end = min(start + render_batch_size, len(entries))
+                for row_index in range(start, end):
+                    render_row(row_index, entries[row_index])
+                if end < len(entries):
+                    dlg.after(1, lambda: render_batch(end))
+                else:
+                    on_configure()
+
+            # Return control to Tk first so the dialog itself appears immediately.
+            dlg.after_idle(render_batch)
 
         def add(data=None, refresh_ui=True):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
@@ -1862,6 +1886,9 @@ class LogViewerApp:
         btn_fr = tk.Frame(fr, bg=UIColors.BG, width=250)
         btn_fr.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
         btn_fr.pack_propagate(False)
+        # Reserve the operation panel first. Packing the expanding table first
+        # pushed these controls outside the visible area on narrower screens.
+        l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tk.Button(btn_fr, text="行を追加", command=add, width=20, height=2, bg=UIColors.ACCENT, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2").pack(pady=5)
         
         info_text = ""
@@ -1890,27 +1917,10 @@ class LogViewerApp:
             )
         elif key == "keywords":
             info_text = (
-                "【フィルタ設定の使い方】\n\n"
-                "正規表現で検索し、マッチしたログを\n"
-                "抽出・色付け・コメント付与します。\n"
-                "字下げされた継続行は、直前の行と\n"
-                "まとめて1件のログとして判定します。\n\n"
-                "■対象ファイル\n"
-                " 適用するファイル名(正規表現)です。\n"
-                " (例: client.* , server.*)\n\n"
-                "■+行\n"
-                " マッチしたログの先頭からさらに下何行分まで\n"
-                " 抽出対象に含めるかを指定します。\n\n"
-                "■制約\n"
-                " 正規表現の先頭、末尾に.*を付けないでください。\n"
-                " 例：[100013.500000] [INFO] System Halting...\n"
-                "                     xxxx\n"
-                "                     yyyy\n"
-                "                     zzzz\n"
-                " を抽出したい場合は、正規表現に\n"
-                " System.*Halting.*xxxx.*yyyy.*zzzz\n"
-                " と設定してください。xxxxだけを指定しても、\n"
-                " 上記4行をまとめて抽出できます。"
+                "【使い方】\n\n"
+                "正規表現に一致したログを抽出し、色とコメントを付けます。\n\n"
+                "字下げされた行は、直前の行とまとめて1件として判定します。\n\n"
+                "「対象ファイル」はファイル名の正規表現、「+行」は追加で表示する行数です。"
             )
         elif key == "replace_patterns":
             info_text = (
