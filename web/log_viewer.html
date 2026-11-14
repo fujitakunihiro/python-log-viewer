@@ -2480,7 +2480,7 @@ function openEditor(key) {
   $("edErr").textContent = ""; $("scErr").textContent = ""; $("scNew").value = "";
   const hcols = fieldsFor(def);
   // 優先度の見出しにカーソルを合わせると、3 が最優先であることを出す
-  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${hcols.map((f, i) => `<th class="${groupClass(f).trim()}${isGroupEdge(hcols, i) ? " edge" : ""}" style="min-width:${FIELDS[f].w}px" data-tip="${escapeHtml(FIELDS[f].tip || "")}">${FIELDS[f].label}</th>`).join("")}</tr>`;
+  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${hcols.map((f, i) => `<th class="${groupClass(f).trim()}${isGroupEdge(hcols, i) ? " edge" : ""}" style="min-width:${FIELDS[f].w}px" data-edtip="${escapeHtml(FIELDS[f].tip || "")}">${FIELDS[f].label}</th>`).join("")}</tr>`;
   renderScopes();
   renderEditorRows();
   $("editDlg").showModal();
@@ -2641,14 +2641,14 @@ tipChip.className = "tip-chip";
 $("editDlg").appendChild(tipChip);
 let chipTimer = 0, chipTh = null;
 $("edHead").addEventListener("mouseover", (e) => {
-  const th = e.target.closest("th[data-tip]");
+  const th = e.target.closest("th[data-edtip]");
   if (th && th === chipTh) return;          // 同じ見出しの中の移動では出し直さない
   chipTh = th;
   clearTimeout(chipTimer);
   tipChip.classList.remove("show");         // 前のチップは、新しいものが出る前に消す
-  if (!th || !th.dataset.tip) return;
+  if (!th || !th.dataset.edtip) return;
   chipTimer = setTimeout(() => {
-    tipChip.textContent = th.dataset.tip;
+    tipChip.textContent = th.dataset.edtip;
     tipChip.style.left = "0px";             // 前の位置に幅を縛られないよう、測る前に左端へ戻す
     const r = th.getBoundingClientRect(), w = tipChip.offsetWidth;
     tipChip.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left))}px`;
