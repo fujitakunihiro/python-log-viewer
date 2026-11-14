@@ -329,6 +329,26 @@
   .dlg .sub { margin: -8px 0 0; font-size: 13px; color: var(--text-2); }
   #editDlg { width: 1280px; }
   .ed-body { display: flex; gap: 16px; min-height: 0; flex: 1; }
+  .ed-scopes { width: 220px; flex: none; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .sc-title { font: 600 11.5px var(--ui); color: var(--text-2); padding: 2px 4px 0; }
+  .sc-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; padding: 6px; max-height: calc(100vh - 290px);
+             background: var(--surface-2); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--sep); }
+  .sc { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; color: var(--text); flex: none; }
+  .sc:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+  .sc.on { background: var(--accent); color: #fff; }
+  .sc-ic { display: grid; place-items: center; width: 18px; flex: none; color: var(--text-3); }
+  .sc.on .sc-ic { color: rgba(255, 255, 255, .92); }
+  .sc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .sc.closed:not(.on) .sc-name { color: var(--text-2); }
+  .sc-n { flex: none; min-width: 20px; padding: 0 6px; border-radius: 999px; text-align: center; font-size: 11px; line-height: 18px; background: var(--surface-3); color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .sc-n:empty { display: none; }
+  .sc.on .sc-n { background: rgba(255, 255, 255, .26); color: #fff; }
+  .sc-add { display: flex; gap: 6px; }
+  .sc-add input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border: 1px solid var(--sep-strong); border-radius: 8px; background: var(--surface); font: 12px var(--ui); color: var(--text); }
+  .sc-add input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .sc-add button { flex: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; cursor: pointer; }
+  .sc-add button:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .empty-row td { padding: 36px 18px; text-align: center; color: var(--text-2); line-height: 1.7; border-bottom: 0; }
   .ed-table-wrap { flex: 1; min-width: 0; overflow: auto; background: var(--surface-2); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--sep); max-height: calc(100vh - 190px); }
   .ed-table { border-collapse: separate; border-spacing: 0; font-size: 12px; width: 100%; }
   .ed-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--text-2); text-align: left; padding: 10px 6px 8px; white-space: nowrap;
@@ -387,6 +407,9 @@
   @media (max-width: 900px) {
     .ed-body { flex-direction: column; flex: none; }
     .ed-side { width: auto; }
+    .ed-scopes { width: auto; }
+    .sc-list { flex-direction: row; max-height: none; overflow-x: auto; overflow-y: hidden; }
+    .sc { width: auto; }
     .dlg { overflow: auto; padding: 18px; }
     .ed-info { max-height: 90px; min-height: 0; flex: none; }
     .ed-table-wrap { flex: none; min-height: 160px; max-height: max(160px, calc(100vh - 340px)); }
@@ -511,6 +534,15 @@
       <h2 id="edTitle"></h2>
       <p class="sub" id="edSub"></p>
       <div class="ed-body">
+        <div class="ed-scopes hidden" id="edScopes">
+          <div class="sc-title">対象ファイル</div>
+          <div class="sc-list" id="scList"></div>
+          <div class="sc-add">
+            <input id="scNew" type="text" placeholder="ファイル名・パターンを追加" aria-label="対象ファイルを追加" autocomplete="off" spellcheck="false" title="ファイル名（例: server.log）か、正規表現（例: server.*）を入力して Enter">
+            <button type="button" id="scNewBtn" title="追加" aria-label="追加">＋</button>
+          </div>
+          <div class="ed-err" id="scErr"></div>
+        </div>
         <div class="ed-table-wrap"><table class="ed-table"><thead id="edHead"></thead><tbody id="edRows"></tbody></table></div>
         <div class="ed-side">
           <button class="btn secondary wide" id="edAdd" type="button">＋ 行を追加</button>
@@ -2251,8 +2283,8 @@ const FIELDS = {
 const EDITORS = {
   keywords: {
     title: "フィルタ設定の編集", sub: "正規表現にマッチした行を抽出し、指定の色とコメントを付与します。",
-    fields: ["file_pattern", "pattern", "color", "comment"], required: "pattern",
-    info: "【使い方】\n\n正規表現に一致したログを抽出し、色とコメントを付けます。\n\n字下げされた行は、直前の行とまとめて1件として判定します。\n\n「対象ファイル」はファイル名の正規表現です。\n\n上にある行ほど優先されます（1件に付く色は最初に一致した1つ）。\n\n「%」は空白の省略記法です（例: Temp%=）。",
+    fields: ["file_pattern", "pattern", "color", "comment"], required: "pattern", scoped: true,
+    info: "【使い方】\n\n正規表現に一致したログを抽出し、色とコメントを付けます。\n\n■ファイルごとのフィルタ\n左の一覧でファイルを選ぶと、そのファイル専用のフィルタを作れます。「すべてのファイル（共通）」はどのファイルにも使います。\n\n専用のフィルタは共通のフィルタより先に判定されます。1件に付く色は、最初に一致した1つです。\n\n一覧の下の欄に、まだ開いていないファイル名や、server.* のような正規表現も追加できます。\n\n字下げされた行は、直前の行とまとめて1件として判定します。\n\n「%」は空白の省略記法です（例: Temp%=）。",
   },
   sections: {
     title: "区間設定の編集", sub: "ファイル毎に開始～終了パターンを定義して色分けします。",
@@ -2265,7 +2297,7 @@ const EDITORS = {
     info: "【説明パターンの使い方】\n\nログ内の難解な文字列を、読みやすい説明に置換(付記)します。\n\n■検索文字列\n 検索対象の正規表現を指定します。\n\n■置換/説明\n 置換後の文字列を指定します。\n マッチした文字列の直後に\n 検索文字列(置換/説明)\n の形式で表示されます。\n \\1 や \\g<名前> でグループを参照できます。",
   },
 };
-const editor = { key: null, rows: [], original: "" };
+const editor = { key: null, rows: [], original: "", scoped: false, scope: ".*", extraScopes: [] };
 function fieldError(f, v) {
   const kind = FIELDS[f].kind;
   try {
@@ -2276,9 +2308,70 @@ function fieldError(f, v) {
   if (kind === "number" && v !== "" && isNaN(pyFloat(v))) return "数値を入力してください";
   return "";
 }
+
+// ---- 対象ファイルごとの分け方（フィルタ設定のみ）----
+// 設定ファイルの形は変えない: ファイルの指定は従来どおり「対象ファイル(正規表現)」に、
+// ファイル名は ^名前$ の形で保存する（Python 版でもそのまま読める）
+const COMMON = ".*";
+const escRegexText = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const filePattern = (name) => `^${escRegexText(name)}$`;
+const patOf = (r) => { const p = String(r.file_pattern ?? "").trim(); return p === "" ? COMMON : p; };
+function plainName(p) {            // ^名前$ の形なら名前、そうでなければ null（正規表現として扱う）
+  const m = /^\^(.*)\$$/.exec(p);
+  if (!m) return null;
+  const un = m[1].replace(/\\([.*+?^${}()|[\]\\])/g, "$1");
+  return escRegexText(un) === m[1] ? un : null;
+}
+const scopeLabel = (p) => (p === COMMON ? "すべてのファイル（共通）" : (plainName(p) ?? p));
+function editorScopes() {
+  const list = [COMMON], add = (p) => { if (!list.includes(p)) list.push(p); };
+  for (const d of state.docs) if (!d.isMerged) add(filePattern(d.name));   // 開いているファイル
+  for (const r of editor.rows) add(patOf(r));                              // すでにフィルタがある対象
+  for (const p of editor.extraScopes) add(p);                              // 追加した対象
+  add(editor.scope);
+  return list;
+}
+const fieldsFor = (def) => (def.scoped ? def.fields.filter((f) => f !== "file_pattern") : def.fields);
+const SC_ICON = {
+  all: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
+  re: '<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 8l12 8M18 8 6 16"/></svg>',
+};
+function renderScopes() {
+  $("edScopes").classList.toggle("hidden", !editor.scoped);
+  if (!editor.scoped) return;
+  const open = new Set(state.docs.filter((d) => !d.isMerged).map((d) => filePattern(d.name)));
+  $("scList").innerHTML = editorScopes().map((p) => {
+    const n = editor.rows.filter((r) => patOf(r) === p && String(r.pattern).trim() !== "").length;
+    const common = p === COMMON, plain = plainName(p) !== null;
+    const tip = common ? "どのファイルにも使うフィルタ" : plain ? `ファイル名: ${scopeLabel(p)}${open.has(p) ? "" : "（今は開いていません）"}` : `正規表現: ${p}`;
+    return `<button type="button" class="sc${p === editor.scope ? " on" : ""}${!common && !open.has(p) ? " closed" : ""}" data-s="${escapeHtml(p)}" title="${escapeHtml(tip)}">` +
+      `<span class="sc-ic">${common ? SC_ICON.all : plain ? ICON.doc : SC_ICON.re}</span><span class="sc-name">${escapeHtml(scopeLabel(p))}</span><span class="sc-n">${n || ""}</span></button>`;
+  }).join("");
+}
+function switchScope(p) {
+  editor.scope = p;
+  $("scErr").textContent = "";
+  renderScopes(); renderEditorRows();
+  document.querySelector(".ed-table-wrap").scrollTop = 0;
+}
+$("scList").addEventListener("click", (e) => { const b = e.target.closest(".sc"); if (b) switchScope(b.dataset.s); });
+function addScopeFromInput() {
+  const raw = $("scNew").value.trim(), err = $("scErr");
+  err.textContent = "";
+  if (!raw) return;
+  // 正規表現に使う記号が入っていれば正規表現、なければファイル名として扱う
+  const pat = /[*+?^$()[\]{}|\\]/.test(raw) ? raw : filePattern(raw);
+  try { new RegExp(pyToJsRegex(pat)); } catch (e) { err.textContent = "パターンが正しくありません: " + e.message.replace(/^Invalid regular expression: /, ""); return; }
+  if (pat !== COMMON && !editor.extraScopes.includes(pat)) editor.extraScopes.push(pat);
+  $("scNew").value = "";
+  switchScope(pat);
+}
+$("scNewBtn").onclick = addScopeFromInput;
+$("scNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addScopeFromInput(); } });
+
 function openEditor(key) {
   const def = EDITORS[key];
-  editor.key = key;
+  editor.key = key; editor.scoped = !!def.scoped; editor.extraScopes = [];
   editor.rows = (state.config[key] || []).map((c) => {
     const r = { enabled: c.enabled !== false };
     for (const f of def.fields) r[f] = FIELDS[f].kind === "bool" ? !!c[f] : String(c[f] ?? FIELDS[f].def ?? "");
@@ -2286,11 +2379,18 @@ function openEditor(key) {
   });
   if (!editor.rows.length) editor.rows.push(blankRow(def));
   editor.original = JSON.stringify(editor.rows);
+  // 最初に見せる対象: 表示中のタブのファイルに専用のフィルタがあればそのファイル、なければ共通
+  editor.scope = COMMON;
+  if (editor.scoped) {
+    const doc = cur();
+    if (doc && !doc.isMerged && editor.rows.some((r) => patOf(r) === filePattern(doc.name))) editor.scope = filePattern(doc.name);
+  }
   $("edTitle").textContent = def.title;
   $("edSub").textContent = def.sub;
   $("edInfo").textContent = def.info;
-  $("edErr").textContent = "";
-  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${def.fields.map((f) => `<th style="min-width:${FIELDS[f].w}px">${FIELDS[f].label}</th>`).join("")}</tr>`;
+  $("edErr").textContent = ""; $("scErr").textContent = ""; $("scNew").value = "";
+  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${fieldsFor(def).map((f) => `<th style="min-width:${FIELDS[f].w}px">${FIELDS[f].label}</th>`).join("")}</tr>`;
+  renderScopes();
   renderEditorRows();
   $("editDlg").showModal();
 }
@@ -2300,9 +2400,10 @@ function blankRow(def) {
   return r;
 }
 function renderEditorRows() {
-  const def = EDITORS[editor.key];
-  $("edRows").innerHTML = editor.rows.map((r, i) => {
-    const cells = def.fields.map((f) => {
+  const def = EDITORS[editor.key], cols = fieldsFor(def);
+  const html = editor.rows.map((r, i) => {
+    if (editor.scoped && patOf(r) !== editor.scope) return "";
+    const cells = cols.map((f) => {
       const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" ? "" : fieldError(f, v);
       const text = (extra = "") => `<input type="text" data-i="${i}" data-f="${f}" value="${escapeHtml(v)}" class="${err ? "bad" : ""}" title="${escapeHtml(err)}"${extra}>`;
       if (kind === "bool") return `<td style="text-align:center"><input type="checkbox" data-i="${i}" data-f="${f}"${v ? " checked" : ""}></td>`;
@@ -2317,6 +2418,8 @@ function renderEditorRows() {
       ` <button type="button" data-move="${i}" data-d="-1" title="上へ">↑</button><button type="button" data-move="${i}" data-d="1" title="下へ">↓</button>` +
       ` <button type="button" class="del" data-del="${i}">削除</button></td>${cells}</tr>`;
   }).join("");
+  const none = editor.scope === COMMON ? "共通のフィルタはまだありません。" : `「${escapeHtml(scopeLabel(editor.scope))}」専用のフィルタはまだありません。`;
+  $("edRows").innerHTML = html || `<tr class="empty-row"><td colspan="${cols.length + 1}">${none}<br>右上の「＋ 行を追加」で作れます。${editor.scope === COMMON ? "" : "専用のフィルタは共通のフィルタより先に判定されます。"}</td></tr>`;
 }
 $("edRows").addEventListener("input", (e) => {
   const t = e.target, i = +t.dataset.i, f = t.dataset.f;
@@ -2336,23 +2439,29 @@ $("edRows").addEventListener("input", (e) => {
     t.classList.toggle("bad", !!err); t.title = err;
     const pick = t.parentElement.querySelector('input[type="color"]');
     if (pick && /^#[0-9a-f]{6}$/i.test(t.value)) pick.value = t.value;
+    if (editor.scoped && f === "pattern") renderScopes();   // 一覧の件数を更新
   }
 });
 $("edRows").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.vsync !== undefined) { editor.rows[+b.dataset.vsync].end = VSYNC_TAG; renderEditorRows(); return; }
-  if (b.dataset.del !== undefined) { editor.rows.splice(+b.dataset.del, 1); renderEditorRows(); return; }
+  if (b.dataset.del !== undefined) { editor.rows.splice(+b.dataset.del, 1); renderScopes(); renderEditorRows(); return; }
   if (b.dataset.move !== undefined) {
-    const i = +b.dataset.move, j = i + +b.dataset.d;
+    const i = +b.dataset.move, step = +b.dataset.d;
+    let j = i + step;
+    // 対象ファイルごとの表示では、同じ対象の行のあいだで入れ替える
+    while (editor.scoped && j >= 0 && j < editor.rows.length && patOf(editor.rows[j]) !== editor.scope) j += step;
     if (j < 0 || j >= editor.rows.length) return;
     [editor.rows[i], editor.rows[j]] = [editor.rows[j], editor.rows[i]];
     renderEditorRows();
   }
 });
 $("edAdd").onclick = () => {
-  editor.rows.push(blankRow(EDITORS[editor.key]));
-  renderEditorRows();
+  const r = blankRow(EDITORS[editor.key]);
+  if (editor.scoped) r.file_pattern = editor.scope;
+  editor.rows.push(r);
+  renderScopes(); renderEditorRows();
   const wrap = document.querySelector(".ed-table-wrap");
   wrap.scrollTop = wrap.scrollHeight;
   wrap.querySelector("tbody tr:last-child input[type=text]")?.focus();
@@ -2366,18 +2475,25 @@ $("editDlg").addEventListener("cancel", (e) => { e.preventDefault(); closeEditor
 $("edOk").onclick = () => {
   const def = EDITORS[editor.key];
   // Python 版と同じく、必須欄が空の行は保存しない
-  const rows = editor.rows.filter((r) => String(r[def.required]).trim() !== "");
+  let rows = editor.rows.filter((r) => String(r[def.required]).trim() !== "");
   const errs = [];
   rows.forEach((r) => {
     if (!r.enabled) return;
     for (const f of def.fields) {
       if (FIELDS[f].kind === "bool") continue;
       const err = fieldError(f, r[f]);
-      if (err) errs.push(`${editor.rows.indexOf(r) + 1}行目「${FIELDS[f].label}」: ${err}`);
+      if (!err) continue;
+      const where = def.scoped ? `「${scopeLabel(patOf(r))}」の${rows.filter((x) => patOf(x) === patOf(r)).indexOf(r) + 1}行目` : `${editor.rows.indexOf(r) + 1}行目`;
+      errs.push(`${where}「${FIELDS[f].label}」: ${err}`);
     }
   });
   if (errs.length) { $("edErr").textContent = "修正が必要です（無効にすれば保存できます）:\n" + errs.join("\n"); return; }
-  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = r[f]; d.enabled = r.enabled; return d; });
+  if (def.scoped) {
+    // 専用のフィルタを先に、共通を最後に並べる（1件に付く色は最初に一致した 1 つなので、専用が優先される）
+    const order = editorScopes().filter((p) => p !== COMMON).concat(COMMON);
+    rows = order.flatMap((p) => rows.filter((r) => patOf(r) === p));
+  }
+  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = r[f]; d.enabled = r.enabled; if (def.scoped) d.file_pattern = patOf(r); return d; });
   $("editDlg").close();
   applyConfig(Object.assign({}, state.config, { [editor.key]: out }));
   setStatus(`${def.title}: 保存しました（ブラウザに記憶されます。ファイルにするには 設定 > 設定保存）`);
