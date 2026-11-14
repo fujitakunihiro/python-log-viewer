@@ -392,12 +392,6 @@
                      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2386868b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
                      background-repeat: no-repeat; background-position: right 8px center; transition: border-color .15s, box-shadow .15s; }
   .lv-chips { display: inline-flex; gap: 4px; align-items: center; }
-  .lv-legend { margin-left: 8px; vertical-align: middle; }
-  .lv-legend .lv { min-width: 0; height: 20px; padding: 0 6px; font-size: 11px; cursor: default; }
-  .lv-legend .lv.l1 { background: var(--surface-3); color: var(--text-2); border-color: transparent; }
-  .lv-legend .lv.l2 { background: color-mix(in srgb, var(--accent) 35%, var(--surface)); color: var(--accent-text); border-color: transparent; }
-  .lv-legend .lv.l3 { background: var(--accent); color: #fff; border-color: transparent; }
-  .lv-legend .lv-arrow { font: 500 10.5px var(--ui); color: var(--text-3); margin-left: 2px; white-space: nowrap; }
   .lv-chips .lv { min-width: 28px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--sep-strong); background: var(--surface);
                   color: var(--text-3); font: 600 12px var(--ui); cursor: pointer; transition: background-color .12s, color .12s, transform .05s; }
   .lv-chips .lv:hover { color: var(--text); }
@@ -2479,10 +2473,9 @@ function openEditor(key) {
   $("edInfo").textContent = def.info + "\n\n■並べ替え\n行の左のつまみ（⋮⋮）をドラッグして並べ替えられます。" + (def.scoped ? "左の対象ファイルの一覧にドロップすると、その対象へ移せます。" : "") + "Esc で取り消せます。";
   $("edErr").textContent = ""; $("scErr").textContent = ""; $("scNew").value = "";
   const hcols = fieldsFor(def);
-  const headLabel = (f) => f === "priority"
-    ? `${FIELDS[f].label}<span class="lv-chips lv-legend" title="数字が大きいほど強い（3が一番強い）"><span class="lv l1">1</span><span class="lv l2">2</span><span class="lv l3">3</span><span class="lv-arrow">強い →</span></span>`
-    : FIELDS[f].label;
-  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${hcols.map((f, i) => `<th class="${groupClass(f).trim()}${isGroupEdge(hcols, i) ? " edge" : ""}" style="min-width:${FIELDS[f].w}px">${headLabel(f)}</th>`).join("")}</tr>`;
+  // 優先度の見出しにカーソルを合わせると、3 が最優先であることを出す
+  const headTitle = (f) => (f === "priority" ? "ログレベル 3が最優先（1が最弱）" : "");
+  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${hcols.map((f, i) => `<th class="${groupClass(f).trim()}${isGroupEdge(hcols, i) ? " edge" : ""}" style="min-width:${FIELDS[f].w}px" title="${escapeHtml(headTitle(f))}">${FIELDS[f].label}</th>`).join("")}</tr>`;
   renderScopes();
   renderEditorRows();
   $("editDlg").showModal();
