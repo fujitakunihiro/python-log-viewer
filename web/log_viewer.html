@@ -2463,7 +2463,6 @@ function renderEditorRows() {
       return `<td>${text()}</td>`;
     }).join("");
     return `<tr class="${r.enabled ? "" : "off"}" data-row="${i}"><td class="ops"><span class="grip-h" title="ドラッグで並べ替え">${GRIP}</span><input type="checkbox" data-i="${i}" data-f="enabled"${r.enabled ? " checked" : ""} title="有効">` +
-      ` <button type="button" data-move="${i}" data-d="-1" title="上へ">↑</button><button type="button" data-move="${i}" data-d="1" title="下へ">↓</button>` +
       ` <button type="button" class="del" data-del="${i}">削除</button></td>${cells}</tr>`;
   }).join("");
   const none = editor.scope === COMMON ? `共通の${def.noun}はまだありません。` : `「${escapeHtml(scopeLabel(editor.scope))}」専用の${def.noun}はまだありません。`;
@@ -2495,15 +2494,6 @@ $("edRows").addEventListener("click", (e) => {
   if (!b) return;
   if (b.dataset.vsync !== undefined) { editor.rows[+b.dataset.vsync].end = VSYNC_TAG; renderEditorRows(); return; }
   if (b.dataset.del !== undefined) { editor.rows.splice(+b.dataset.del, 1); renderScopes(); renderEditorRows(); return; }
-  if (b.dataset.move !== undefined) {
-    const i = +b.dataset.move, step = +b.dataset.d;
-    let j = i + step;
-    // 対象ファイルごとの表示では、同じ対象の行のあいだで入れ替える
-    while (editor.scoped && j >= 0 && j < editor.rows.length && patOf(editor.rows[j]) !== editor.scope) j += step;
-    if (j < 0 || j >= editor.rows.length) return;
-    [editor.rows[i], editor.rows[j]] = [editor.rows[j], editor.rows[i]];
-    renderEditorRows();
-  }
 });
 // ---- 行をドラッグ＆ドロップで並べ替え ----
 const GRIP = '<svg viewBox="0 0 8 14" aria-hidden="true"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="6" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="6" cy="12" r="1.2"/></svg>';
