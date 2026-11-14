@@ -124,8 +124,7 @@
 
   /* iOS 風スイッチ */
   .switch { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 2px; border: 0; background: none; cursor: pointer; font-weight: 500; color: var(--text); white-space: nowrap; }
-  .lvl-sel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
-  .lvl-sel select { height: 26px; padding: 0 6px; border: 1px solid var(--sep-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: 12px var(--ui); }
+    .filter-sel { height: 30px; padding: 0 26px 0 10px; font: 12.5px var(--ui); white-space: nowrap; border-radius: 9px; cursor: pointer;  border: 1px solid var(--sep-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: 12px var(--ui); }
   .switch .track { position: relative; width: 34px; height: 20px; border-radius: 999px; background: var(--switch-off); transition: background-color .2s; flex: none; }
   .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
                           box-shadow: 0 2px 4px rgba(0, 0, 0, .2), 0 0 1px rgba(0, 0, 0, .15); transition: transform .22s cubic-bezier(.3, .7, .4, 1.2); }
@@ -540,9 +539,9 @@
     <input type="file" id="fileInput" multiple class="hidden">
     <span class="tsep"></span>
     <div class="group">
-      <label class="lvl-sel" title="フィルタをONにしたとき、この優先度以上のフィルタに一致した行だけを表示">優先度
-        <select id="minLevel" aria-label="表示する優先度の下限"><option value="1">1以上</option><option value="2">2以上</option><option value="3">3のみ（3以上）</option></select></label>
-      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付きの行（フィルタに一致した行）だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
+      <select id="filterSel" class="filter-sel" aria-label="フィルタ" title="フィルタ: 選んだ優先度以上のフィルタに一致した行だけを表示">
+        <option value="0">フィルタなし</option><option value="1">優先度 1以上</option><option value="2">優先度 2以上</option><option value="3">優先度 3以上</option>
+      </select>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
       <span class="vs-inline hidden" id="vsyncInfo">
@@ -671,7 +670,7 @@
           <dl><dt><kbd>Ctrl</kbd><kbd>O</kbd></dt><dd>ファイルを開く</dd>
           <dt><kbd>F5</kbd></dt><dd>表示中のタブを再読み込み</dd>
           <dt><kbd>Ctrl</kbd><kbd>W</kbd></dt><dd>タブを閉じる</dd>
-          <dt><kbd>F2</kbd></dt><dd>色付きの行だけ表示</dd>
+          <dt>上部の「フィルタ」</dt><dd>優先度以上の行だけ表示</dd>
           <dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></dt><dd>集中モード</dd></dl></section>
         <section><h3>検索・移動</h3>
           <dl><dt><kbd>Ctrl</kbd><kbd>F</kbd></dt><dd>検索欄へ</dd>
@@ -698,7 +697,7 @@
       <strong>ログを開きましょう</strong>
       <p>ファイルをここにドロップするか、「開く」から選んでください。複数のファイルを開いてマージもできます。</p>
       <button class="btn primary wide" id="btnOpenEmpty" type="button">ファイルを開く</button>
-      <div class="keys"><span><kbd>F2</kbd> フィルタ</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
+      <div class="keys"><span>「フィルタ」 優先度で絞り込み</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
     </div>
   </main>
   <div class="peek-zone" id="peekZone"></div>
@@ -2716,7 +2715,14 @@ function styleToggle(btn, label, on) {
   const lbl = btn.querySelector(".label");
   if (lbl) lbl.textContent = label; else btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
 }
-function setFilter(on) { state.filterOn = on; styleToggle($("btnFilter"), "フィルタ", on); refreshView(); }
+// フィルタ: 0 = なし、1〜3 = その優先度以上のフィルタに一致した行だけ表示
+function syncFilterSel() { $("filterSel").value = state.filterOn ? String(state.minLevel) : "0"; }
+function setFilter(on) { state.filterOn = !!on; syncFilterSel(); refreshView(); }
+function setFilterLevel(v) {
+  const n = Number(v);
+  if (n > 0) { state.minLevel = clampLevel(n); state.filterOn = true; } else state.filterOn = false;
+  syncFilterSel(); refreshView();
+}
 function setShowVsync(on) { state.showVsync = on; styleToggle($("btnVsync"), "仮想V周期", on); refreshView(); }
 function setAdvanced(on) {
   state.advanced = on;
@@ -2768,8 +2774,7 @@ for (const id of ["vsStartIn", "vsMsIn"]) {
   // 別の場所をクリックしたら確定。不正な値なら元に戻して知らせる
   el.addEventListener("blur", () => { if (!commitVsyncInline(el)) updateVsyncInfo(); });
 }
-$("btnFilter").onclick = () => setFilter(!state.filterOn);
-$("minLevel").addEventListener("change", (e) => { state.minLevel = clampLevel(e.target.value); if (state.filterOn) refreshView(); });
+$("filterSel").addEventListener("change", (e) => setFilterLevel(e.target.value));
 $("helpClose").onclick = () => $("helpDlg").close();
 $("btnVsync").onclick = () => setShowVsync(!state.showVsync);
 $("btnAdvanced").onclick = () => setAdvanced(!state.advanced);
@@ -2971,7 +2976,6 @@ document.addEventListener("keydown", (e) => {
   if (ctrl && key === "o") { e.preventDefault(); openPicker(); return; }
   if (e.key === "F5" && !ctrl) { e.preventDefault(); reloadCurrent(); return; }
   if (ctrl && key === "w" && doc) { e.preventDefault(); closeDoc(state.active); return; }
-  if (e.key === "F2") { e.preventDefault(); setFilter(!state.filterOn); return; }
   if (e.key === "F3") { e.preventDefault(); goHit(e.shiftKey ? -1 : 1); return; }
   if (e.key === "F8") { e.preventDefault(); nextColored(e.shiftKey ? -1 : 1); return; }
   if (e.target.tagName === "INPUT" || !doc || !doc.view.length) return;
