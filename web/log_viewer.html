@@ -124,6 +124,8 @@
 
   /* iOS 風スイッチ */
   .switch { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 2px; border: 0; background: none; cursor: pointer; font-weight: 500; color: var(--text); white-space: nowrap; }
+  .lvl-sel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+  .lvl-sel select { height: 26px; padding: 0 6px; border: 1px solid var(--sep-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: 12px var(--ui); }
   .switch .track { position: relative; width: 34px; height: 20px; border-radius: 999px; background: var(--switch-off); transition: background-color .2s; flex: none; }
   .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
                           box-shadow: 0 2px 4px rgba(0, 0, 0, .2), 0 0 1px rgba(0, 0, 0, .15); transition: transform .22s cubic-bezier(.3, .7, .4, 1.2); }
@@ -524,6 +526,8 @@
     <input type="file" id="fileInput" multiple class="hidden">
     <span class="tsep"></span>
     <div class="group">
+      <label class="lvl-sel" title="フィルタをONにしたとき、この優先度以上のフィルタに一致した行だけを表示">優先度
+        <select id="minLevel" aria-label="表示する優先度の下限"><option value="1">1以上</option><option value="2">2以上</option><option value="3">3のみ（3以上）</option></select></label>
       <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付きの行（フィルタに一致した行）だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
@@ -723,7 +727,7 @@ const OVERSCAN = 20;
 
 const $ = (id) => document.getElementById(id);
 const state = {
-  docs: [], active: -1, filterOn: false, showVsync: false, advanced: false, mergeTsLen: 19,
+  docs: [], active: -1, filterOn: false, minLevel: 1, showVsync: false, advanced: false, mergeTsLen: 19,
   config: null, rules: [], sections: [], errors: [], strictTs: false,
 };
 let rowH = 20, charW = 7.2;
@@ -766,6 +770,8 @@ function normalizePattern(p) {
 function pyToJsRegex(p) {
   return String(p).replace(/^\(\?i\)/, "").replace(/\(\?P</g, "(?<").replace(/\(\?P=(\w+)\)/g, String.raw`\k<$1>`);
 }
+// 優先度: 1〜3（3が一番強い）。書式が違えば 1
+const clampLevel = (v) => { const n = Number(v); return n === 2 || n === 3 ? n : 1; };
 function compileRules() {
   const cfg = state.config;
   state.rules = []; state.sections = []; state.errors = [];
@@ -776,11 +782,12 @@ function compileRules() {
         filePat: new RegExp(pyToJsRegex(k.file_pattern || ".*"), "i"),
         re: new RegExp(normalizePattern(k.pattern), "is"),
         color: k.color || WHITE, comment: k.comment || "", label: k.comment || k.pattern,
+        level: clampLevel(k.priority),
       });
     } catch (e) { state.errors.push(`フィルタ${i + 1}「${k.pattern}」: ${e.message}`); }
   });
   if (!cfg.keywords.some((k) => String(k.pattern ?? "").includes("VIRTUAL TIMER"))) {
-    state.rules.push({ filePat: /.*/, re: /\[VIRTUAL TIMER\]/i, color: "#ffe8d6", comment: "タイマー満了", label: "タイマー満了" });
+    state.rules.push({ filePat: /.*/, re: /\[VIRTUAL TIMER\]/i, color: "#ffe8d6", comment: "タイマー満了", label: "タイマー満了", level: 1 });
   }
   cfg.sections.forEach((s, i) => {
     if (s.enabled === false) return;
@@ -1091,7 +1098,7 @@ function applyReplacements(text) {
 // キーワードの判定（字下げされた継続行は先頭行とまとめて 1 件）
 function findKeywordMatches(lines, srcs, rules) {
   const n = lines.length;
-  const rule = new Int16Array(n).fill(-1), isStart = new Uint8Array(n);
+  const rule = new Int16Array(n).fill(-1), isStart = new Uint8Array(n), level = new Uint8Array(n);
   const counts = new Array(rules.length).fill(0);
   const bySource = new Map();
   let start = 0;
@@ -1101,16 +1108,17 @@ function findKeywordMatches(lines, srcs, rules) {
     const source = srcs[start] ?? "";
     let applicable = bySource.get(source);
     if (!applicable) { applicable = []; rules.forEach((r, ri) => { if (r.filePat.test(source)) applicable.push(ri); }); bySource.set(source, applicable); }
+    let best = -1;
     for (const ri of applicable) {
-      if (rules[ri].re.test(text)) {
-        for (let j = start; j < i; j++) rule[j] = ri;
-        isStart[start] = 1; counts[ri]++;
-        break;
-      }
+      if (rules[ri].re.test(text) && (best < 0 || rules[ri].level > rules[best].level)) best = ri;
+    }
+    if (best >= 0) {
+      for (let j = start; j < i; j++) { rule[j] = best; level[j] = rules[best].level; }
+      isStart[start] = 1; counts[best]++;
     }
     start = i;
   }
-  return { rule, isStart, counts };
+  return { rule, isStart, counts, level };
 }
 
 // 文書の解析（Python: _analyze_tab）
@@ -1145,7 +1153,7 @@ function analyze(doc) {
   const mergedNo = new Int32Array(n);
   let realNo = 0;
   for (let i = 0; i < n; i++) if (orig[i] > 0) mergedNo[i] = ++realNo;
-  Object.assign(doc, { lines, srcs, orig, ts, isVsync, status, colors, comments, prio, rule: km.rule, isStart: km.isStart, counts: km.counts, maxLen, mergedNo });
+  Object.assign(doc, { lines, srcs, orig, ts, isVsync, status, colors, comments, prio, level: km.level, rule: km.rule, isStart: km.isStart, counts: km.counts, maxLen, mergedNo });
 }
 
 // 表示行の決定（Python: _compute_visibility）+ 絞り込み欄
@@ -1159,7 +1167,7 @@ function computeVisible(doc) {
     if (!state.showVsync && line.includes(VSYNC_MARKER)) vis[i] = 0;
     else if (state.filterOn) {
       if (line.includes(TIMER_MARK) || line.includes(ORIGIN_MARK)) continue;
-      if (prio[i] === 0) vis[i] = 0;
+      if (prio[i] === 0 || doc.level[i] < state.minLevel) vis[i] = 0;
       else if (isVsync[i] && !inSection(i)) vis[i] = 0;
     }
   }
@@ -2283,6 +2291,7 @@ const FIELDS = {
   end: { label: "【終了】終了パターン", w: 190, kind: "end" },
   end_wait: { label: "【終了】+V待", w: 70, kind: "bool" },
   duration_ms: { label: "【終了】持続(ms)", w: 90, kind: "number" },
+  priority: { label: "優先度", w: 90, kind: "level", def: "1" },
   color: { label: "色", w: 120, kind: "color" },
   replace: { label: "置換/説明", w: 210, kind: "text" },
   comment: { label: "コメント", w: 180, kind: "text" },
@@ -2290,8 +2299,8 @@ const FIELDS = {
 const EDITORS = {
   keywords: {
     title: "フィルタ設定の編集", sub: "正規表現にマッチした行を抽出し、指定の色とコメントを付与します。",
-    fields: ["file_pattern", "pattern", "color", "comment"], required: "pattern", scoped: true, noun: "フィルタ",
-    info: "【フィルタの使い方】\nログの行を正規表現で探し、色とコメントを付けます。\n\n■基本の流れ\n1. 左の一覧で対象を選ぶ\n2. ＋ 行を追加 を押す\n3. 正規表現・色・コメントを入れる\n4. 保存を押す\n\n■対象（左の一覧）\n・すべてのファイル（共通）：どのファイルにも使う\n・ファイル名：そのファイルだけに使う\n・下の欄に、まだ開いていないファイル名や\n  server.* のような正規表現を入れると追加できます。\n\n■優先順位\n・ファイル専用のフィルタが、共通より先に調べられます。\n・1行に複数一致したら、最初に一致した1つの色とコメントが付きます。\n\n■ヒント\n・「%」は空白の繰り返し（0個以上）を表します。\n  例: Temp%= は「Temp=」にも「Temp  =」にも一致します。\n・字下げされた行は、直前の行とまとめて1件として扱います。\n・行の左のつまみ（⋮⋮）をドラッグすると並べ替えられます。\n  左の一覧の対象にドロップすると、その対象へ移せます。\n・Ctrl+Z で直前の操作を取り消せます。",
+    fields: ["file_pattern", "pattern", "priority", "color", "comment"], required: "pattern", scoped: true, noun: "フィルタ",
+    info: "【フィルタの使い方】\nログの行を正規表現で探し、色とコメントを付けます。\n\n■基本の流れ\n1. 左の一覧で対象を選ぶ\n2. ＋ 行を追加 を押す\n3. 正規表現・色・コメントを入れる\n4. 保存を押す\n\n■対象（左の一覧）\n・すべてのファイル（共通）：どのファイルにも使う\n・ファイル名：そのファイルだけに使う\n・下の欄に、まだ開いていないファイル名や\n  server.* のような正規表現を入れると追加できます。\n\n■優先順位\n・ファイル専用のフィルタが、共通より先に調べられます。\n・1行に複数一致したら、優先度が一番強いものの色とコメントが付きます。同じ強さなら、上にあるものが優先されます。\n\n■優先度（1〜3、3が一番強い）\n1〜3の数字で強さを決めます。ツールバーの「優先度」で、その強さ以上のフィルタに一致した行だけを表示できます。\n\n■ヒント\n・「%」は空白の繰り返し（0個以上）を表します。\n  例: Temp%= は「Temp=」にも「Temp  =」にも一致します。\n・字下げされた行は、直前の行とまとめて1件として扱います。\n・行の左のつまみ（⋮⋮）をドラッグすると並べ替えられます。\n  左の一覧の対象にドロップすると、その対象へ移せます。\n・Ctrl+Z で直前の操作を取り消せます。",
   },
   sections: {
     title: "区間設定の編集", sub: "ファイル毎に開始～終了パターンを定義して色分けします。",
@@ -2466,8 +2475,9 @@ function renderEditorRows() {
     if (editor.scoped && patOf(r) !== editor.scope) return "";
     const cells = cols.map((f, ci) => {
       const cls = `${groupClass(f)}${isGroupEdge(cols, ci) ? " edge" : ""}`.trim();
-      const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" ? "" : fieldError(f, v);
+      const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" || kind === "level" ? "" : fieldError(f, v);
       const text = (extra = "") => `<input type="text" data-i="${i}" data-f="${f}" value="${escapeHtml(v)}" class="${err ? "bad" : ""}" title="${escapeHtml(err)}"${extra}>`;
+      if (kind === "level") return `<td class="${cls}"><select data-i="${i}" data-f="${f}" title="3が一番強い">${[3, 2, 1].map((n) => `<option value="${n}"${Number(v) === n ? " selected" : ""}>${n}</option>`).join("")}</select></td>`;
       if (kind === "bool") return `<td class="${cls}" style="text-align:center"><input type="checkbox" data-i="${i}" data-f="${f}"${v ? " checked" : ""}></td>`;
       if (kind === "color") {
         const pick = /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
@@ -2632,7 +2642,7 @@ $("edOk").onclick = () => {
   rows.forEach((r) => {
     if (!r.enabled) return;
     for (const f of def.fields) {
-      if (FIELDS[f].kind === "bool") continue;
+      if (FIELDS[f].kind === "bool" || FIELDS[f].kind === "level") continue;
       const err = fieldError(f, r[f]);
       if (!err) continue;
       const where = def.scoped ? `「${scopeLabel(patOf(r))}」の${rows.filter((x) => patOf(x) === patOf(r)).indexOf(r) + 1}行目` : `${editor.rows.indexOf(r) + 1}行目`;
@@ -2645,7 +2655,7 @@ $("edOk").onclick = () => {
     const order = editorScopes().filter((p) => p !== COMMON).concat(COMMON);
     rows = order.flatMap((p) => rows.filter((r) => patOf(r) === p));
   }
-  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = r[f]; d.enabled = r.enabled; if (def.scoped) d.file_pattern = patOf(r); return d; });
+  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = FIELDS[f].kind === "level" ? clampLevel(r[f]) : r[f]; d.enabled = r.enabled; if (def.scoped) d.file_pattern = patOf(r); return d; });
   $("editDlg").close();
   applyConfig(Object.assign({}, state.config, { [editor.key]: out }));
   setStatus(`${def.title}: 保存しました（ブラウザに記憶されます。ファイルにするには 設定 > 設定保存）`);
@@ -2743,6 +2753,7 @@ for (const id of ["vsStartIn", "vsMsIn"]) {
   el.addEventListener("blur", () => { if (!commitVsyncInline(el)) updateVsyncInfo(); });
 }
 $("btnFilter").onclick = () => setFilter(!state.filterOn);
+$("minLevel").addEventListener("change", (e) => { state.minLevel = clampLevel(e.target.value); if (state.filterOn) refreshView(); });
 $("helpClose").onclick = () => $("helpDlg").close();
 $("btnVsync").onclick = () => setShowVsync(!state.showVsync);
 $("btnAdvanced").onclick = () => setAdvanced(!state.advanced);
