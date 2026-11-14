@@ -416,6 +416,12 @@
   .ed-info { background: var(--surface-2); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--sep); padding: 12px 14px; font-size: 12px; line-height: 1.65;
              color: var(--text-2); white-space: pre-wrap; overflow: auto; flex: 1; min-height: 80px; }
   .ed-err { color: var(--red); font-size: 12px; white-space: pre-wrap; }
+  .help-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; }
+  .help-toggle input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+  .ed-side.help-off .ed-info { display: none; }
+  .tip-chip { position: fixed; z-index: 100; max-width: 280px; padding: 6px 10px; border-radius: 8px; background: rgba(30, 30, 32, .94); color: #fff; font: 12px/1.5 var(--ui);
+              box-shadow: 0 6px 18px rgba(0, 0, 0, .25); pointer-events: none; opacity: 0; transition: opacity .12s; }
+  .tip-chip.show { opacity: 1; }
   .ed-actions { display: flex; gap: 8px; justify-content: flex-end; }
   .form-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
   .form-row input[type=text] { height: 30px; border: 1px solid var(--sep-strong); border-radius: 8px; padding: 0 10px; width: 150px; font: 13px var(--mono); background: var(--surface); color: var(--text); }
@@ -600,6 +606,7 @@
         <div class="ed-table-wrap"><table class="ed-table"><thead id="edHead"></thead><tbody id="edRows"></tbody></table></div>
         <div class="ed-side">
           <button class="btn secondary wide" id="edAdd" type="button">＋ 行を追加</button>
+          <label class="help-toggle" title="初心者向けの使い方を表示します。慣れたら外すと、画面を広く使えます"><input type="checkbox" id="edHelpOn" checked> 使い方を表示</label>
           <div class="ed-info" id="edInfo"></div>
           <div class="ed-err" id="edErr"></div>
           <div class="ed-actions">
@@ -2295,19 +2302,19 @@ function downloadConfig() {
 
 // ================= 表形式の設定エディタ（Python: _edit_dlg） =================
 const FIELDS = {
-  file_pattern: { label: "対象ファイル(正規表現)", w: 150, kind: "regex", def: ".*" },
-  pattern: { label: "正規表現", w: 210, kind: "pattern" },
-  search: { label: "検索文字列", w: 210, kind: "regex" },
-  name: { label: "区間名", w: 130, kind: "text" },
-  start: { label: "【開始】開始パターン", w: 160, kind: "regex" },
-  start_wait: { label: "【開始】+V待", w: 70, kind: "bool" },
-  end: { label: "【終了】終了パターン", w: 190, kind: "end" },
-  end_wait: { label: "【終了】+V待", w: 70, kind: "bool" },
-  duration_ms: { label: "【終了】持続(ms)", w: 90, kind: "number" },
-  priority: { label: "優先度", w: 90, kind: "level", def: "1" },
-  color: { label: "色", w: 120, kind: "color" },
-  replace: { label: "置換/説明", w: 210, kind: "text" },
-  comment: { label: "コメント", w: 180, kind: "text" },
+  file_pattern: { label: "対象ファイル(正規表現)", w: 150, kind: "regex", def: ".*", tip: "どのファイルに使うか（正規表現）。.* はすべてのファイル" },
+  pattern: { label: "正規表現", w: 210, kind: "pattern", tip: "ログの行に一致させる正規表現。一致した行に色とコメントが付く" },
+  search: { label: "検索文字列", w: 210, kind: "regex", tip: "置換前の文字列（正規表現）" },
+  name: { label: "区間名", w: 130, kind: "text", tip: "区間の名前" },
+  start: { label: "【開始】開始パターン", w: 160, kind: "regex", tip: "区間の開始になる行（正規表現）" },
+  start_wait: { label: "【開始】+V待", w: 70, kind: "bool", tip: "ON: 条件を満たした直後のV周期から開始する" },
+  end: { label: "【終了】終了パターン", w: 190, kind: "end", tip: "区間の終わりになる行（正規表現）。空欄なら持続(ms)だけで終わる" },
+  end_wait: { label: "【終了】+V待", w: 70, kind: "bool", tip: "ON: 条件を満たした直後のV周期で終了する" },
+  duration_ms: { label: "【終了】持続(ms)", w: 90, kind: "number", tip: "この時間（ms）が経つと区間が終わる" },
+  priority: { label: "優先度", w: 90, kind: "level", def: "1", tip: "ログレベル 3が最優先（1が最弱）" },
+  color: { label: "色", w: 120, kind: "color", tip: "一致した行の背景色" },
+  replace: { label: "置換/説明", w: 210, kind: "text", tip: "置換後の文字列、または行に付ける説明" },
+  comment: { label: "コメント", w: 180, kind: "text", tip: "一致した行に付けるコメント" },
 };
 const EDITORS = {
   keywords: {
@@ -2473,8 +2480,7 @@ function openEditor(key) {
   $("edErr").textContent = ""; $("scErr").textContent = ""; $("scNew").value = "";
   const hcols = fieldsFor(def);
   // 優先度の見出しにカーソルを合わせると、3 が最優先であることを出す
-  const headTitle = (f) => (f === "priority" ? "ログレベル 3が最優先（1が最弱）" : "");
-  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${hcols.map((f, i) => `<th class="${groupClass(f).trim()}${isGroupEdge(hcols, i) ? " edge" : ""}" style="min-width:${FIELDS[f].w}px" title="${escapeHtml(headTitle(f))}">${FIELDS[f].label}</th>`).join("")}</tr>`;
+  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${hcols.map((f, i) => `<th class="${groupClass(f).trim()}${isGroupEdge(hcols, i) ? " edge" : ""}" style="min-width:${FIELDS[f].w}px" data-tip="${escapeHtml(FIELDS[f].tip || "")}">${FIELDS[f].label}</th>`).join("")}</tr>`;
   renderScopes();
   renderEditorRows();
   $("editDlg").showModal();
@@ -2629,6 +2635,31 @@ document.addEventListener("pointercancel", () => endRowDrag(false));
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && rowDrag && rowDrag.started) { e.preventDefault(); e.stopPropagation(); endRowDrag(false); }
 }, true);
+// ---- 見出しの説明チップ（カーソルを合わせると出る） ----
+const tipChip = document.createElement("div");
+tipChip.className = "tip-chip";
+$("editDlg").appendChild(tipChip);
+let chipTimer = 0;
+$("edHead").addEventListener("mouseover", (e) => {
+  const th = e.target.closest("th[data-tip]");
+  clearTimeout(chipTimer);
+  if (!th || !th.dataset.tip) { tipChip.classList.remove("show"); return; }
+  chipTimer = setTimeout(() => {
+    tipChip.textContent = th.dataset.tip;
+    const r = th.getBoundingClientRect(), w = tipChip.offsetWidth;
+    tipChip.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left))}px`;
+    tipChip.style.top = `${r.bottom + 6}px`;
+    tipChip.classList.add("show");
+  }, 250);
+});
+$("edHead").addEventListener("mouseleave", () => { clearTimeout(chipTimer); tipChip.classList.remove("show"); });
+// ---- 使い方の表示・非表示（選んだ状態は覚えておく） ----
+const HELP_KEY = "logviewer.editHelp";
+let helpOn = true;
+try { helpOn = localStorage.getItem(HELP_KEY) !== "0"; } catch (e) { /* 無視 */ }
+function applyHelp() { $("edHelpOn").checked = helpOn; document.querySelector(".ed-side").classList.toggle("help-off", !helpOn); }
+$("edHelpOn").addEventListener("change", (e) => { helpOn = e.target.checked; try { localStorage.setItem(HELP_KEY, helpOn ? "1" : "0"); } catch (err) { /* 無視 */ } applyHelp(); });
+applyHelp();
 $("edAdd").onclick = () => {
   snapEdit();
   const r = blankRow(EDITORS[editor.key]);
