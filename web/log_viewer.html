@@ -37,6 +37,14 @@
   .tab { padding: 6px 10px 6px 14px; background: var(--border); border-radius: 4px 4px 0 0; cursor: pointer;
          font-weight: 700; font-size: 12px; white-space: nowrap; display: flex; gap: 8px; align-items: center; }
   .tab.active { background: var(--panel); color: #000; }
+  .tab.dragging { opacity: .45; }
+  .tab.drop-before { box-shadow: inset 3px 0 0 var(--rose-hover); }
+  .tab.drop-after { box-shadow: inset -3px 0 0 var(--rose-hover); }
+  .tip { position: fixed; z-index: 50; background: #2f3337; color: #fff; font-size: 12px; line-height: 1.7; padding: 8px 12px;
+         border-radius: 4px; max-width: min(460px, calc(100vw - 16px)); pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.25); word-break: break-all; }
+  .tip b { font-size: 13px; display: block; margin-bottom: 2px; }
+  .tip .k { color: #b9c0c8; display: inline-block; min-width: 6em; }
+  .tip .note { color: #f6c87a; }
   .tab .x { color: var(--muted); border: 0; background: none; cursor: pointer; padding: 0 2px; }
   .tab .x:hover { color: #000; }
 
@@ -139,6 +147,7 @@
 <body>
   <div class="toolbar">
     <button class="btn plain" id="btnOpen" title="Ctrl+O">開く…</button>
+    <button class="btn plain" id="btnReload" title="F5: 表示中のタブをファイルから読み直す（マージ結果は元ファイルから作り直す）">再読み込み</button>
     <input type="file" id="fileInput" multiple class="hidden">
     <button class="btn" id="btnFilter" title="F2">フィルタ: OFF</button>
     <button class="btn plain" id="btnMerge" title="開いているファイルを時刻順にマージ">ログをマージ</button>
@@ -747,12 +756,12 @@ function lowerBound(view, idx) {
 function newDoc(name, fields) {
   return Object.assign({ name, isMerged: false, sel: -1, base: -1, scrollTop: 0, scrollLeft: 0, view: new Int32Array(0) }, fields);
 }
-function buildFileDoc(name, rawText) {
+function buildFileDoc(name, rawText, source = null) {
   const raw = splitLines(rawText);
   const orig = raw.map((_, i) => i + 1);
   let proc = { lines: raw, srcs: new Array(raw.length).fill(name), orig };
   if (state.config.vsync_auto_insert.enabled !== false) proc = processVsync(raw, proc.srcs, orig, [name]);
-  return newDoc(name, { rawText, fileNames: [name], procLines: proc.lines, procSrcs: proc.srcs, procOrig: proc.orig });
+  return newDoc(name, { rawText, source, fileNames: [name], procLines: proc.lines, procSrcs: proc.srcs, procOrig: proc.orig });
 }
 // Python: merge_logs_action（先頭 tsLen 文字の時刻文字列で安定ソート）
 function buildMergedDoc(sources, tsLen) {
@@ -956,9 +965,103 @@ $("chips").addEventListener("click", (e) => {
 // ================= タブ =================
 function renderTabs() {
   $("tabs").innerHTML = state.docs.map((d, i) =>
-    `<div class="tab${i === state.active ? " active" : ""}" data-t="${i}" title="${escapeHtml(d.isMerged ? d.fileNames.join(" + ") : d.name)}">${escapeHtml(d.name)}<button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
+    `<div class="tab${i === state.active ? " active" : ""}" data-t="${i}" draggable="true">${escapeHtml(d.name)}<button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
   ).join("");
 }
+
+// ---- タブのドラッグで並べ替え ----
+let dragTab = -1;
+const tabsEl = $("tabs");
+const clearDropMarks = () => tabsEl.querySelectorAll(".drop-before, .drop-after, .dragging").forEach((t) => t.classList.remove("drop-before", "drop-after", "dragging"));
+function dropIndex(e) {
+  const t = e.target.closest(".tab");
+  if (!t) return state.docs.length;
+  const r = t.getBoundingClientRect();
+  return +t.dataset.t + (e.clientX >= r.left + r.width / 2 ? 1 : 0);
+}
+tabsEl.addEventListener("dragstart", (e) => {
+  const t = e.target.closest(".tab");
+  if (!t) return;
+  dragTab = +t.dataset.t;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/x-logviewer-tab", String(dragTab));
+  hideTip();
+  t.classList.add("dragging");
+});
+tabsEl.addEventListener("dragover", (e) => {
+  if (dragTab < 0) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  tabsEl.querySelectorAll(".drop-before, .drop-after").forEach((t) => t.classList.remove("drop-before", "drop-after"));
+  const t = e.target.closest(".tab");
+  if (t) { const r = t.getBoundingClientRect(); t.classList.add(e.clientX < r.left + r.width / 2 ? "drop-before" : "drop-after"); }
+});
+tabsEl.addEventListener("drop", (e) => {
+  if (dragTab < 0) return;
+  e.preventDefault(); e.stopPropagation();
+  moveTab(dragTab, dropIndex(e));
+});
+tabsEl.addEventListener("dragend", () => { dragTab = -1; clearDropMarks(); });
+function moveTab(from, to) {
+  if (to > from) to--;
+  dragTab = -1; clearDropMarks();
+  if (from === to || from < 0 || from >= state.docs.length) return;
+  const activeDoc = cur();
+  const [d] = state.docs.splice(from, 1);
+  state.docs.splice(Math.max(0, Math.min(to, state.docs.length)), 0, d);
+  state.active = state.docs.indexOf(activeDoc);
+  renderTabs();
+}
+
+// ---- タブのツールチップ（ファイルの情報） ----
+const tip = document.createElement("div");
+tip.className = "tip hidden";
+document.body.appendChild(tip);
+let tipTimer = 0;
+function fmtSize(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+function fmtTime(ms) { return ms ? new Date(ms).toLocaleString("ja-JP") : "不明"; }
+function tabInfo(d) {
+  const row = (k, v) => `<div><span class="k">${k}</span>${v}</div>`;
+  const realLines = (doc) => doc.orig ? doc.orig.reduce((n, o) => n + (o > 0 ? 1 : 0), 0) : 0;
+  if (d.isMerged) {
+    const parts = d.fileNames.map((fn) => {
+      const src = state.docs.find((x) => !x.isMerged && x.name === fn);
+      return `<div>・${escapeHtml(fn)}${src ? `（${realLines(src).toLocaleString()} 行）` : '<span class="note">（閉じています）</span>'}</div>`;
+    }).join("");
+    return `<b>${escapeHtml(d.name)}</b>${row("元ファイル", "")}${parts}${row("比較文字数", `先頭 ${d.mergeTsLen} 文字`)}${row("行数", `${d.lines.length.toLocaleString()} 行`)}` +
+      row("再読み込み", "F5 で元ファイルから作り直し");
+  }
+  const s = d.source || {};
+  const virt = d.lines.length - realLines(d);
+  const where = s.url ? escapeHtml(new URL(s.url, location.href).href) : '<span class="note">ブラウザの制限で取得できません</span>';
+  const reload = s.handle ? "F5 で可能" : s.url ? "F5 で可能" : s.file ? "F5 で試行（ブラウザにより開き直しが必要）" : '<span class="note">不可</span>';
+  return `<b>${escapeHtml(d.name)}</b>${row("場所", where)}` +
+    (s.size !== undefined ? row("サイズ", fmtSize(s.size)) : "") +
+    (s.lastModified ? row("更新日時", fmtTime(s.lastModified)) : "") +
+    row("行数", `${realLines(d).toLocaleString()} 行${virt ? `（仮想行 +${virt.toLocaleString()}）` : ""}`) +
+    (s.loadedAt ? row("読み込み", fmtTime(s.loadedAt)) : "") + row("再読み込み", reload);
+}
+function showTip(el) {
+  const d = state.docs[+el.dataset.t];
+  if (!d || dragTab >= 0) return;
+  tip.innerHTML = tabInfo(d);
+  tip.classList.remove("hidden");
+  const r = el.getBoundingClientRect(), w = tip.offsetWidth;
+  tip.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  tip.style.top = `${r.bottom + 6}px`;
+}
+function hideTip() { clearTimeout(tipTimer); tip.classList.add("hidden"); }
+tabsEl.addEventListener("mouseover", (e) => {
+  const t = e.target.closest(".tab");
+  if (!t) return;
+  clearTimeout(tipTimer);
+  tipTimer = setTimeout(() => showTip(t), 350);
+});
+tabsEl.addEventListener("mouseout", (e) => {
+  const t = e.target.closest(".tab");
+  if (t && !t.contains(e.relatedTarget)) hideTip();
+});
+tabsEl.addEventListener("mousedown", hideTip);
 $("tabs").addEventListener("click", (e) => {
   const close = e.target.closest("[data-close]");
   if (close) { closeDoc(+close.dataset.close); return; }
@@ -995,7 +1098,96 @@ function pushDoc(doc, t0) {
   setStatus(`${doc.name}: ${doc.lines.length.toLocaleString()} 行を ${Math.round(performance.now() - t0)} ms で表示`);
   return doc;
 }
-function addDoc(name, text) { const t0 = performance.now(); return pushDoc(buildFileDoc(name, text), t0); }
+function addDoc(name, text, source = null) { const t0 = performance.now(); return pushDoc(buildFileDoc(name, text, source), t0); }
+
+// ================= 再読み込み（表示位置・選択行・基準行を保つ） =================
+function lineKey(doc, i) { return i >= 0 && i < doc.lines.length ? { src: doc.srcs[i], orig: doc.orig[i], line: doc.lines[i] } : null; }
+function findLine(doc, k) {
+  if (!k) return -1;
+  for (let i = 0; i < doc.lines.length; i++) {
+    if (k.orig > 0 ? doc.orig[i] === k.orig && doc.srcs[i] === k.src : doc.orig[i] === 0 && doc.lines[i] === k.line) return i;
+  }
+  return -1;
+}
+function replaceDoc(oldDoc, nd) {
+  const idx = state.docs.indexOf(oldDoc);
+  if (idx < 0) return null;
+  const isActive = idx === state.active;
+  let top = null, offset = 0;
+  if (isActive && oldDoc.view.length) {
+    const topPos = Math.min(Math.floor(scroller.scrollTop / rowH), oldDoc.view.length - 1);
+    top = lineKey(oldDoc, oldDoc.view[topPos]);
+    offset = topPos * rowH - scroller.scrollTop;
+  }
+  analyze(nd);
+  nd.sel = findLine(nd, lineKey(oldDoc, oldDoc.sel));
+  nd.base = findLine(nd, lineKey(oldDoc, oldDoc.base));
+  nd.scrollTop = oldDoc.scrollTop; nd.scrollLeft = oldDoc.scrollLeft;
+  state.docs[idx] = nd;
+  if (isActive) {
+    const left = scroller.scrollLeft;
+    renderTabs(); renderChips();
+    refreshView({ keep: false });
+    const ti = findLine(nd, top);
+    if (ti >= 0) scroller.scrollTop = lowerBound(nd.view, ti) * rowH - offset;
+    scroller.scrollLeft = left;
+    render();
+  }
+  return nd;
+}
+const decodeText = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { return new TextDecoder("shift_jis").decode(buf); } };
+async function readSource(src) {
+  if (!src) throw new Error("元ファイルの情報がありません");
+  if (src.url) {
+    const res = await fetch(src.url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    return { text: decodeText(buf), source: Object.assign({}, src, { size: buf.byteLength, loadedAt: Date.now() }) };
+  }
+  let file;
+  if (src.handle) {
+    if (src.handle.queryPermission && (await src.handle.queryPermission({ mode: "read" })) !== "granted" &&
+        (await src.handle.requestPermission({ mode: "read" })) !== "granted") throw new Error("ファイルの読み取りが許可されませんでした");
+    file = await src.handle.getFile();
+  } else file = src.file;
+  try {
+    const text = await readFileText(file);
+    return { text, source: Object.assign({}, src, { size: file.size, lastModified: file.lastModified, loadedAt: Date.now() }) };
+  } catch (e) {
+    if (src.handle) throw e;
+    throw new Error("このブラウザでは開き直しが必要です（Chrome / Edge で「開く…」から開くと F5 で再読み込みできます）");
+  }
+}
+async function reloadFileDoc(doc) {
+  const { text, source } = await readSource(doc.source);
+  return replaceDoc(doc, buildFileDoc(doc.name, text, source));
+}
+let reloading = false;
+async function reloadCurrent() {
+  const doc = cur();
+  if (!doc || reloading) return;
+  reloading = true;
+  const btn = $("btnReload");
+  btn.disabled = true;
+  const t0 = performance.now(), before = doc.lines.length;
+  try {
+    let nd;
+    if (doc.isMerged) {
+      const srcs = state.docs.filter((d) => !d.isMerged && doc.fileNames.includes(d.name));
+      if (srcs.length < 2) throw new Error("マージ元のファイルが閉じられています");
+      for (const s of srcs) await reloadFileDoc(s);
+      const fresh = state.docs.filter((d) => !d.isMerged && doc.fileNames.includes(d.name));
+      nd = replaceDoc(doc, buildMergedDoc(fresh, doc.mergeTsLen));
+    } else nd = await reloadFileDoc(doc);
+    const diff = nd.lines.length - before;
+    setStatus(`${nd.name} を再読み込みしました（${before.toLocaleString()} → ${nd.lines.length.toLocaleString()} 行${diff ? `、${diff > 0 ? "+" : ""}${diff.toLocaleString()}` : "、変化なし"}／${Math.round(performance.now() - t0)} ms）`);
+  } catch (e) {
+    setStatus(`再読み込みできませんでした: ${e.message}`);
+  } finally {
+    reloading = false; btn.disabled = false;
+  }
+}
+$("btnReload").onclick = reloadCurrent;
 function mergeDocs(tsLen) {
   const sources = state.docs.filter((d) => !d.isMerged);
   if (sources.length < 2) { alert("マージするには2つ以上のログファイルを開いてください。"); return null; }
@@ -1172,21 +1364,41 @@ async function exportExcel() {
 $("btnExport").onclick = exportExcel;
 
 // ================= ファイル読み込み（UTF-8 → Shift_JIS） =================
-async function readFileText(file) {
-  const buf = await file.arrayBuffer();
-  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
-  catch (e) { return new TextDecoder("shift_jis").decode(buf); }
+async function readFileText(file) { return decodeText(await file.arrayBuffer()); }
+const fileSource = (file, extra) => Object.assign({ size: file.size, lastModified: file.lastModified, loadedAt: Date.now() }, extra);
+async function openFromHandle(h) { const f = await h.getFile(); addDoc(f.name, await readFileText(f), fileSource(f, { handle: h })); }
+async function openFiles(files) { for (const f of files) addDoc(f.name, await readFileText(f), fileSource(f, { file: f })); }
+// Chrome / Edge ではファイルハンドルで開く（F5 で同じファイルを読み直せる）
+async function openPicker() {
+  if (!window.showOpenFilePicker) { $("fileInput").click(); return; }
+  let handles;
+  try { handles = await window.showOpenFilePicker({ multiple: true }); }
+  catch (e) { if (e.name !== "AbortError") $("fileInput").click(); return; }
+  for (const h of handles) await openFromHandle(h);
 }
-async function openFiles(files) { for (const f of files) addDoc(f.name, await readFileText(f)); }
-$("btnOpen").onclick = () => $("fileInput").click();
+$("btnOpen").onclick = openPicker;
 $("fileInput").onchange = (e) => { openFiles([...e.target.files]); e.target.value = ""; };
+const isFileDrag = (e) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
 let dragDepth = 0;
-window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("drag"); });
-window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drag"); } });
-window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("dragenter", (e) => { if (!isFileDrag(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add("drag"); });
+window.addEventListener("dragleave", (e) => { if (!isFileDrag(e)) return; if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drag"); } });
+window.addEventListener("dragover", (e) => { if (isFileDrag(e)) e.preventDefault(); });
 window.addEventListener("drop", (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault(); dragDepth = 0; document.body.classList.remove("drag");
-  if (e.dataTransfer.files.length) openFiles([...e.dataTransfer.files]);
+  // ハンドルの取得はイベント中に開始する必要がある
+  const items = [...e.dataTransfer.items].filter((it) => it.kind === "file");
+  const handleJobs = items.map((it) => (it.getAsFileSystemHandle ? it.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null)));
+  const files = [...e.dataTransfer.files];
+  (async () => {
+    const handles = await Promise.all(handleJobs);
+    for (let k = 0; k < files.length; k++) {
+      const h = handles[k];
+      if (h && h.kind === "directory") { setStatus(`フォルダは開けません: ${h.name}`); continue; }
+      if (h && h.kind === "file") await openFromHandle(h);
+      else await openFiles([files[k]]);
+    }
+  })();
 });
 
 // ================= 設定の適用（開いている文書を作り直す） =================
@@ -1197,7 +1409,7 @@ function applyConfig(cfg) {
   const fileDocs = new Map();
   state.docs = state.docs.map((d) => {
     if (d.isMerged) return d;
-    const nd = Object.assign(buildFileDoc(d.name, d.rawText), { sel: d.sel, base: d.base, scrollTop: d.scrollTop, scrollLeft: d.scrollLeft });
+    const nd = Object.assign(buildFileDoc(d.name, d.rawText, d.source), { sel: d.sel, base: d.base, scrollTop: d.scrollTop, scrollLeft: d.scrollLeft });
     fileDocs.set(d, nd);
     return nd;
   });
@@ -1490,7 +1702,8 @@ document.addEventListener("keydown", (e) => {
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (ctrl && key === "f") { e.preventDefault(); $("search").focus(); $("search").select(); return; }
   if (ctrl && key === "g") { e.preventDefault(); gotoLinePrompt(); return; }
-  if (ctrl && key === "o") { e.preventDefault(); $("fileInput").click(); return; }
+  if (ctrl && key === "o") { e.preventDefault(); openPicker(); return; }
+  if (e.key === "F5" && !ctrl) { e.preventDefault(); reloadCurrent(); return; }
   if (ctrl && key === "w" && doc) { e.preventDefault(); closeDoc(state.active); return; }
   if (e.key === "F2") { e.preventDefault(); setFilter(!state.filterOn); return; }
   if (e.key === "F3") { e.preventDefault(); goHit(e.shiftKey ? -1 : 1); return; }
@@ -1552,7 +1765,7 @@ layout();
     if (q.get("config")) applyConfig(await (await fetch(q.get("config"))).json());
     for (const f of q.getAll("file")) {
       const res = await fetch(f);
-      if (res.ok) addDoc(f.split("/").pop(), new TextDecoder().decode(await res.arrayBuffer()));
+      if (res.ok) { const buf = await res.arrayBuffer(); addDoc(f.split("/").pop(), decodeText(buf), { url: f, size: buf.byteLength, loadedAt: Date.now() }); }
     }
     if (q.get("merge")) mergeDocs(parseInt(q.get("merge"), 10));
   } catch (e) { setStatus(`読み込み失敗: ${e.message}`); }
@@ -1560,7 +1773,7 @@ layout();
 
 // 検証用: 表示内容を Python 版と比較できる形で取り出す
 window.__lv = {
-  state, addDoc, mergeDocs, applyConfig, setFilter, setShowVsync, setAdvanced, buildXlsx,
+  state, addDoc, mergeDocs, applyConfig, setFilter, setShowVsync, setAdvanced, buildXlsx, reloadCurrent, moveTab, tabInfo,
   dump(doc, filterOn, showVsync) {
     const keep = [state.filterOn, state.showVsync];
     state.filterOn = filterOn; state.showVsync = showVsync;
