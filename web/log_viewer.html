@@ -382,6 +382,9 @@
   .ed-table input[type=text].bad { border-color: var(--red); background: color-mix(in srgb, var(--red) 6%, var(--surface)); }
   .ed-table input[type=checkbox], .form-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
   .ed-table .ops { white-space: nowrap; padding-left: 10px; }
+  /* 行頭の操作（つまみ・チェック・削除）は、行の中で上下中央に揃える */
+  .ed-table .ops > * { vertical-align: middle; }
+  .ed-table .ops > input[type=checkbox] { margin: 0 6px 0 0; position: relative; top: 0; }
   .ed-table .ops button, .ed-table .inline button { height: 26px; min-width: 26px; border: 0; border-radius: 7px; padding: 0 8px; cursor: pointer;
                                                     background: var(--surface-3); color: var(--text); margin-left: 2px; }
   .ed-table .ops button:hover, .ed-table .inline button:hover { background: color-mix(in srgb, var(--text) 10%, var(--surface-3)); }
@@ -581,6 +584,7 @@
           <div class="ed-info" id="edInfo"></div>
           <div class="ed-err" id="edErr"></div>
           <div class="ed-actions">
+            <button class="btn secondary wide" id="edUndo" type="button" disabled title="直前の操作を取り消す (Ctrl+Z)">取り消し</button>
             <button class="btn secondary wide" id="edCancel" type="button">キャンセル</button>
             <button class="btn primary wide" id="edOk" type="button">保存</button>
           </div>
@@ -2360,6 +2364,22 @@ const EDITORS = {
   },
 };
 const editor = { key: null, rows: [], original: "", scoped: false, scope: ".*", extraScopes: [] };
+// 取り消し: 変更の直前の状態を積んでおき、戻すときに取り出す（開き直すと空になる）
+const undoStack = [];
+function snapEdit() {
+  undoStack.push(JSON.stringify({ rows: editor.rows, extra: editor.extraScopes, scope: editor.scope }));
+  if (undoStack.length > 50) undoStack.shift();
+  $("edUndo").disabled = false;
+}
+function undoEdit() {
+  const last = undoStack.pop();
+  if (last === undefined) return;
+  const st = JSON.parse(last);
+  editor.rows = st.rows; editor.extraScopes = st.extra; editor.scope = st.scope;
+  $("edUndo").disabled = undoStack.length === 0;
+  renderScopes(); renderEditorRows();
+  scNote("直前の操作を取り消しました");
+}
 function fieldError(f, v) {
   const kind = FIELDS[f].kind;
   try {
@@ -2433,6 +2453,7 @@ function deleteScope(p) {
   if (stays && !editor.rows.some((r) => patOf(r) === p)) { scNote(`削除する${EDITORS[editor.key].noun}がありません`); return; }
   const before = editorScopes(), idx = before.indexOf(p);
   const req = EDITORS[editor.key].required, k = editor.rows.filter((r) => patOf(r) === p && String(r[req]).trim() !== "").length;
+  snapEdit();
   editor.rows = editor.rows.filter((r) => patOf(r) !== p);
   editor.extraScopes = editor.extraScopes.filter((x) => x !== p);
   if (editor.scope === p && !stays) editor.scope = before[idx + 1] ?? before[idx - 1] ?? COMMON;
@@ -2454,7 +2475,7 @@ function addScopeFromInput() {
   // 正規表現に使う記号が入っていれば正規表現、なければファイル名として扱う
   const pat = /[*+?^$()[\]{}|\\]/.test(raw) ? raw : filePattern(raw);
   try { new RegExp(pyToJsRegex(pat)); } catch (e) { err.textContent = "パターンが正しくありません: " + e.message.replace(/^Invalid regular expression: /, ""); return; }
-  if (pat !== COMMON && !editor.extraScopes.includes(pat)) editor.extraScopes.push(pat);
+  if (pat !== COMMON && !editor.extraScopes.includes(pat)) { snapEdit(); editor.extraScopes.push(pat); }
   $("scNew").value = "";
   switchScope(pat);
 }
@@ -2463,6 +2484,7 @@ $("scNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preve
 
 function openEditor(key) {
   const def = EDITORS[key];
+  undoStack.length = 0; $("edUndo").disabled = true;
   editor.key = key; editor.scoped = !!def.scoped; editor.extraScopes = [];
   editor.rows = (state.config[key] || []).map((c) => {
     const r = { enabled: c.enabled !== false };
@@ -2536,8 +2558,8 @@ $("edRows").addEventListener("input", (e) => {
 $("edRows").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  if (b.dataset.vsync !== undefined) { editor.rows[+b.dataset.vsync].end = VSYNC_TAG; renderEditorRows(); return; }
-  if (b.dataset.del !== undefined) { editor.rows.splice(+b.dataset.del, 1); renderScopes(); renderEditorRows(); return; }
+  if (b.dataset.vsync !== undefined) { snapEdit(); editor.rows[+b.dataset.vsync].end = VSYNC_TAG; renderEditorRows(); return; }
+  if (b.dataset.del !== undefined) { snapEdit(); editor.rows.splice(+b.dataset.del, 1); renderScopes(); renderEditorRows(); return; }
 });
 // ---- 行をドラッグ＆ドロップで並べ替え ----
 const GRIP = '<svg viewBox="0 0 8 14" aria-hidden="true"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="6" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="6" cy="12" r="1.2"/></svg>';
@@ -2618,10 +2640,11 @@ function endRowDrag(commit) {
   document.querySelectorAll("#scList .sc-item.drop-target").forEach((x) => x.classList.remove("drop-target"));
   edDrop.style.display = "";
   if (d.hinted) { $("scErr").textContent = ""; $("scErr").classList.remove("note"); }
-  if (d.started && commit && d.dropScope) { moveRowToScope(d.from, d.dropScope); return; }
+  if (d.started && commit && d.dropScope) { snapEdit(); moveRowToScope(d.from, d.dropScope); return; }
   if (d.overList) return;   // 今の対象や一覧の余白の上で離したときは、何もしない
   if (!d.started || !commit || d.targetObj === d.from) return;
   // 入れる場所: 目的の行の前（なければ、その一覧の最後の行の後ろ）。ほかの対象ファイルの行の並びは変わらない
+  snapEdit();
   editor.rows.splice(editor.rows.indexOf(d.from), 1);
   const at = d.targetObj ? editor.rows.indexOf(d.targetObj) : d.lastObj ? editor.rows.indexOf(d.lastObj) + 1 : editor.rows.length;
   editor.rows.splice(at, 0, d.from);
@@ -2634,6 +2657,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && rowDrag && rowDrag.started) { e.preventDefault(); e.stopPropagation(); endRowDrag(false); }
 }, true);
 $("edAdd").onclick = () => {
+  snapEdit();
   const r = blankRow(EDITORS[editor.key]);
   if (editor.scoped) r.file_pattern = editor.scope;
   editor.rows.push(r);
@@ -2647,6 +2671,10 @@ function closeEditor() {
   $("editDlg").close();
 }
 $("edCancel").onclick = closeEditor;
+$("edUndo").onclick = undoEdit;
+$("editDlg").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && e.target.tagName !== "INPUT") { e.preventDefault(); undoEdit(); }
+});
 $("editDlg").addEventListener("cancel", (e) => { e.preventDefault(); closeEditor(); });
 $("edOk").onclick = () => {
   const def = EDITORS[editor.key];
