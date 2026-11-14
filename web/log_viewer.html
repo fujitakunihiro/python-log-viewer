@@ -81,6 +81,58 @@
            gap: 10px; color: var(--muted); pointer-events: none; text-align: center; padding: 16px; }
   .empty strong { color: var(--text); font-size: 15px; }
   body.drag .main { outline: 3px dashed var(--rose); outline-offset: -6px; }
+
+  /* ---- 設定メニュー ---- */
+  .menu-wrap { position: relative; }
+  .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 240px; background: #fff;
+          border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.15); padding: 4px 0; }
+  .menu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 16px; cursor: pointer; color: var(--text); }
+  .menu button:hover { background: var(--bg); }
+  .menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+  .menu .check::before { content: "　"; display: inline-block; width: 1.2em; }
+  .menu .check.on::before { content: "✓"; }
+
+  /* ---- 設定ダイアログ ---- */
+  dialog { border: 0; border-radius: 6px; padding: 0; background: var(--bg); color: var(--text);
+           box-shadow: 0 12px 40px rgba(0,0,0,.3); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
+  dialog::backdrop { background: rgba(40,40,40,.35); }
+  .dlg { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; max-height: calc(100vh - 24px); }
+  .dlg h2 { margin: 0; font-size: 15px; }
+  .dlg .sub { margin: 0; font-size: 12px; color: #6b7178; }
+  #editDlg { width: 1280px; }
+  .ed-body { display: flex; gap: 12px; min-height: 0; flex: 1; }
+  .ed-table-wrap { flex: 1; min-width: 0; overflow: auto; background: #fff; border: 1px solid var(--border); max-height: calc(100vh - 160px); }
+  .ed-table { border-collapse: collapse; font-size: 12px; }
+  .ed-table th { position: sticky; top: 0; z-index: 1; background: var(--header); color: #fff; text-align: left; padding: 6px; white-space: nowrap; font-weight: 700; }
+  .ed-table td { padding: 3px; border-bottom: 1px solid #f0ece3; vertical-align: middle; }
+  .ed-table tr.off td:not(.ops) { opacity: .45; }
+  .ed-table input[type=text] { width: 100%; border: 1px solid var(--border); border-radius: 2px; padding: 3px 5px; font: 12px var(--mono); background: #fff; }
+  .ed-table input[type=text].bad { border-color: #d9534f; background: #fff3f3; }
+  .ed-table input[type=checkbox] { width: 16px; height: 16px; }
+  .ed-table .ops { white-space: nowrap; }
+  .ed-table .ops button, .ed-table .inline button { border: 0; border-radius: 2px; padding: 3px 7px; cursor: pointer; background: var(--border); color: var(--text); }
+  .ed-table .ops button.del { background: #e8c5c5; }
+  .ed-table .inline { display: flex; gap: 3px; align-items: center; }
+  .ed-table .inline button.v { background: var(--rose); color: #fff; font-weight: 700; }
+  .ed-table input[type=color] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--border); background: none; flex: none; }
+  .ed-side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 10px; }
+  .ed-info { background: #faf9f6; border: 1px solid var(--border); padding: 10px 12px; font-size: 12px; white-space: pre-wrap; overflow: auto; flex: 1; min-height: 80px; }
+  .ed-err { color: #c0392b; font-size: 12px; white-space: pre-wrap; }
+  .ed-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .btn.wide { padding: 8px 12px; }
+  .form-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .form-row input[type=text] { border: 1px solid var(--border); border-radius: 2px; padding: 4px 6px; width: 140px; font: 13px var(--mono); }
+  .form-row input.bad { border-color: #d9534f; }
+  fieldset { border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 12px; }
+  legend { font-weight: 700; font-size: 12px; }
+  @media (max-width: 900px) {
+    .ed-body { flex-direction: column; }
+    .ed-side { width: auto; }
+    .dlg { overflow: auto; }
+    .ed-body { flex: none; }
+    .ed-info { max-height: 90px; min-height: 0; flex: none; }
+    .ed-table-wrap { flex: none; min-height: 160px; max-height: max(160px, calc(100vh - 330px)); }
+  }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -99,10 +151,61 @@
     <button class="btn hidden" id="btnVsync">仮想V周期表示: OFF</button>
     <span class="info hidden" id="vsyncInfo"></span>
     <span class="spacer"></span>
-    <button class="btn plain" id="btnConfig" title="Python 版の config.json を読み込み">設定読み込み…</button>
+    <div class="menu-wrap">
+      <button class="btn plain" id="btnSettings" aria-haspopup="true" aria-expanded="false">設定 ▾</button>
+      <div class="menu hidden" id="settingsMenu" role="menu">
+        <button data-act="load" role="menuitem">設定読み込み…</button>
+        <button data-act="save" role="menuitem">設定保存…</button>
+        <hr>
+        <button data-act="keywords" role="menuitem">フィルタ設定の編集 (行単位)…</button>
+        <button data-act="sections" role="menuitem" class="adv-only">区間設定の編集 (開始-終了)…</button>
+        <hr>
+        <button data-act="replace_patterns" role="menuitem">説明パターンの編集…</button>
+        <button data-act="vsync" role="menuitem" class="adv-only">V周期(仮想)挿入の設定…</button>
+        <hr>
+        <button data-act="advanced" role="menuitem" class="check" id="menuAdvanced">Advancedモード</button>
+      </div>
+    </div>
     <input type="file" id="configInput" accept=".json,application/json" class="hidden">
     <button class="btn dim" id="btnAdvanced" title="区間の列と仮想V周期の表示">Advanced: OFF</button>
   </div>
+
+  <dialog id="editDlg">
+    <div class="dlg">
+      <h2 id="edTitle"></h2>
+      <p class="sub" id="edSub"></p>
+      <div class="ed-body">
+        <div class="ed-table-wrap"><table class="ed-table"><thead id="edHead"></thead><tbody id="edRows"></tbody></table></div>
+        <div class="ed-side">
+          <button class="btn wide" id="edAdd" type="button">行を追加</button>
+          <div class="ed-info" id="edInfo"></div>
+          <div class="ed-err" id="edErr"></div>
+          <div class="ed-actions">
+            <button class="btn plain wide" id="edCancel" type="button">キャンセル</button>
+            <button class="btn on wide" id="edOk" type="button">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="vsyncDlg">
+    <div class="dlg" style="width: 420px">
+      <h2>V周期(仮想)挿入の設定</h2>
+      <p class="sub">V周期(仮想)挿入の起点とタイミングを設定します。OK で開いているログに反映されます。</p>
+      <fieldset>
+        <legend>開始設定</legend>
+        <label class="form-row"><input type="checkbox" id="vsEnabled"> 仮想V周期を挿入する</label>
+        <label class="form-row">指定した時刻(秒)から強制開始: <input type="text" id="vsStart"></label>
+        <label class="form-row">挿入間隔 (ms): <input type="text" id="vsMs"></label>
+      </fieldset>
+      <div class="ed-err" id="vsErr"></div>
+      <div class="ed-actions">
+        <button class="btn plain wide" id="vsCancel" type="button">キャンセル</button>
+        <button class="btn on wide" id="vsOk" type="button">OK</button>
+      </div>
+    </div>
+  </dialog>
   <div class="tabs" id="tabs"></div>
   <div class="main">
     <div class="chips hidden" id="chips"></div>
@@ -944,7 +1047,210 @@ function applyConfig(cfg) {
   for (const d of state.docs) analyze(d);
   updateVsyncInfo(); renderChips(); refreshView();
 }
-$("btnConfig").onclick = () => $("configInput").click();
+// ================= 設定メニュー =================
+const menu = $("settingsMenu");
+function setMenuOpen(open) {
+  menu.classList.toggle("hidden", !open);
+  $("btnSettings").setAttribute("aria-expanded", String(open));
+  if (open) menu.querySelectorAll(".adv-only").forEach((b) => b.classList.toggle("hidden", !state.advanced));
+}
+$("btnSettings").onclick = (e) => { e.stopPropagation(); setMenuOpen(menu.classList.contains("hidden")); };
+document.addEventListener("click", (e) => { if (!menu.contains(e.target)) setMenuOpen(false); });
+menu.addEventListener("click", (e) => {
+  const act = e.target.closest("button")?.dataset.act;
+  if (!act) return;
+  setMenuOpen(false);
+  if (act === "load") $("configInput").click();
+  else if (act === "save") downloadConfig();
+  else if (act === "vsync") openVsyncDialog();
+  else if (act === "advanced") setAdvanced(!state.advanced);
+  else openEditor(act);
+});
+function downloadConfig() {
+  const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "config.json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  setStatus("設定を config.json として保存しました（Python 版でも読み込めます）");
+}
+
+// ================= 表形式の設定エディタ（Python: _edit_dlg） =================
+const FIELDS = {
+  file_pattern: { label: "対象ファイル(正規表現)", w: 150, kind: "regex", def: ".*" },
+  pattern: { label: "正規表現", w: 210, kind: "pattern" },
+  search: { label: "検索文字列", w: 210, kind: "regex" },
+  name: { label: "区間名", w: 130, kind: "text" },
+  start: { label: "【開始】開始パターン", w: 160, kind: "regex" },
+  start_wait: { label: "【開始】+V待", w: 70, kind: "bool" },
+  end: { label: "【終了】終了パターン", w: 190, kind: "end" },
+  end_wait: { label: "【終了】+V待", w: 70, kind: "bool" },
+  duration_ms: { label: "【終了】持続(ms)", w: 90, kind: "number" },
+  color: { label: "色", w: 120, kind: "color" },
+  replace: { label: "置換/説明", w: 210, kind: "text" },
+  comment: { label: "コメント", w: 180, kind: "text" },
+};
+const EDITORS = {
+  keywords: {
+    title: "フィルタ設定の編集", sub: "正規表現にマッチした行を抽出し、指定の色とコメントを付与します。",
+    fields: ["file_pattern", "pattern", "color", "comment"], required: "pattern",
+    info: "【使い方】\n\n正規表現に一致したログを抽出し、色とコメントを付けます。\n\n字下げされた行は、直前の行とまとめて1件として判定します。\n\n「対象ファイル」はファイル名の正規表現です。\n\n上にある行ほど優先されます（1件に付く色は最初に一致した1つ）。\n\n「%」は空白の省略記法です（例: Temp%=）。",
+  },
+  sections: {
+    title: "区間設定の編集", sub: "ファイル毎に開始～終了パターンを定義して色分けします。",
+    fields: ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "duration_ms", "color"], required: "start",
+    info: "【区間設定の使い方】\n\n■開始パターン\n 区間の開始条件(正規表現)です。\n [+V待]で、合致後の次のV周期から区間を開始します。\n\n■終了パターン\n 区間の終了条件(正規表現)です。\n [V]ボタンで<VSYNC>を入力できます。\n 空欄の場合は持続(ms)の経過のみで終了します。\n\n■終了の+V待\n 条件(パターンや時間)を満たした直後のV周期で区間を終了させます。\n\n■持続(ms)\n 指定時間が経過すると区間が終了します。この時[VIRTUAL TIMER]のログが自動挿入されます。\n\n※終了パターンと持続(ms)の両方を指定した場合、持続(ms)が経過するまでは終了パターンに合致しても無視されます。",
+  },
+  replace_patterns: {
+    title: "説明パターンの編集", sub: "正規表現にマッチした文字列の直後に (説明) を付与します。",
+    fields: ["search", "replace"], required: "search",
+    info: "【説明パターンの使い方】\n\nログ内の難解な文字列を、読みやすい説明に置換(付記)します。\n\n■検索文字列\n 検索対象の正規表現を指定します。\n\n■置換/説明\n 置換後の文字列を指定します。\n マッチした文字列の直後に\n 検索文字列(置換/説明)\n の形式で表示されます。\n \\1 や \\g<名前> でグループを参照できます。",
+  },
+};
+const editor = { key: null, rows: [], original: "" };
+function fieldError(f, v) {
+  const kind = FIELDS[f].kind;
+  try {
+    if (kind === "regex" && v !== "") new RegExp(pyToJsRegex(v));
+    if (kind === "pattern" && v !== "") new RegExp(normalizePattern(v), "s");
+    if (kind === "end" && v !== "" && v !== VSYNC_TAG) new RegExp(pyToJsRegex(v));
+  } catch (e) { return e.message.replace(/^Invalid regular expression: /, ""); }
+  if (kind === "number" && v !== "" && isNaN(pyFloat(v))) return "数値を入力してください";
+  return "";
+}
+function openEditor(key) {
+  const def = EDITORS[key];
+  editor.key = key;
+  editor.rows = (state.config[key] || []).map((c) => {
+    const r = { enabled: c.enabled !== false };
+    for (const f of def.fields) r[f] = FIELDS[f].kind === "bool" ? !!c[f] : String(c[f] ?? FIELDS[f].def ?? "");
+    return r;
+  });
+  if (!editor.rows.length) editor.rows.push(blankRow(def));
+  editor.original = JSON.stringify(editor.rows);
+  $("edTitle").textContent = def.title;
+  $("edSub").textContent = def.sub;
+  $("edInfo").textContent = def.info;
+  $("edErr").textContent = "";
+  $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${def.fields.map((f) => `<th style="min-width:${FIELDS[f].w}px">${FIELDS[f].label}</th>`).join("")}</tr>`;
+  renderEditorRows();
+  $("editDlg").showModal();
+}
+function blankRow(def) {
+  const r = { enabled: true };
+  for (const f of def.fields) r[f] = FIELDS[f].kind === "bool" ? false : (FIELDS[f].def ?? "");
+  return r;
+}
+function renderEditorRows() {
+  const def = EDITORS[editor.key];
+  $("edRows").innerHTML = editor.rows.map((r, i) => {
+    const cells = def.fields.map((f) => {
+      const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" ? "" : fieldError(f, v);
+      const text = (extra = "") => `<input type="text" data-i="${i}" data-f="${f}" value="${escapeHtml(v)}" class="${err ? "bad" : ""}" title="${escapeHtml(err)}"${extra}>`;
+      if (kind === "bool") return `<td style="text-align:center"><input type="checkbox" data-i="${i}" data-f="${f}"${v ? " checked" : ""}></td>`;
+      if (kind === "color") {
+        const pick = /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
+        return `<td><div class="inline"><input type="color" data-i="${i}" data-f="${f}" value="${pick}" title="色を選ぶ">${text()}</div></td>`;
+      }
+      if (kind === "end") return `<td><div class="inline">${text()}<button type="button" class="v" data-vsync="${i}" title="&lt;VSYNC&gt; を入力">V</button></div></td>`;
+      return `<td>${text()}</td>`;
+    }).join("");
+    return `<tr class="${r.enabled ? "" : "off"}"><td class="ops"><input type="checkbox" data-i="${i}" data-f="enabled"${r.enabled ? " checked" : ""} title="有効">` +
+      ` <button type="button" data-move="${i}" data-d="-1" title="上へ">↑</button><button type="button" data-move="${i}" data-d="1" title="下へ">↓</button>` +
+      ` <button type="button" class="del" data-del="${i}">削除</button></td>${cells}</tr>`;
+  }).join("");
+}
+$("edRows").addEventListener("input", (e) => {
+  const t = e.target, i = +t.dataset.i, f = t.dataset.f;
+  if (f === undefined) return;
+  const row = editor.rows[i];
+  if (t.type === "checkbox") {
+    row[f] = t.checked;
+    if (f === "enabled") t.closest("tr").classList.toggle("off", !t.checked);
+    return;
+  }
+  row[f] = t.value;
+  if (t.type === "color") {
+    const txt = t.parentElement.querySelector('input[type="text"]');
+    txt.value = t.value;
+  } else if (f !== "enabled") {
+    const err = fieldError(f, t.value);
+    t.classList.toggle("bad", !!err); t.title = err;
+    const pick = t.parentElement.querySelector('input[type="color"]');
+    if (pick && /^#[0-9a-f]{6}$/i.test(t.value)) pick.value = t.value;
+  }
+});
+$("edRows").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.vsync !== undefined) { editor.rows[+b.dataset.vsync].end = VSYNC_TAG; renderEditorRows(); return; }
+  if (b.dataset.del !== undefined) { editor.rows.splice(+b.dataset.del, 1); renderEditorRows(); return; }
+  if (b.dataset.move !== undefined) {
+    const i = +b.dataset.move, j = i + +b.dataset.d;
+    if (j < 0 || j >= editor.rows.length) return;
+    [editor.rows[i], editor.rows[j]] = [editor.rows[j], editor.rows[i]];
+    renderEditorRows();
+  }
+});
+$("edAdd").onclick = () => {
+  editor.rows.push(blankRow(EDITORS[editor.key]));
+  renderEditorRows();
+  const wrap = document.querySelector(".ed-table-wrap");
+  wrap.scrollTop = wrap.scrollHeight;
+  wrap.querySelector("tbody tr:last-child input[type=text]")?.focus();
+};
+function closeEditor() {
+  if (JSON.stringify(editor.rows) !== editor.original && !confirm("変更を破棄して閉じますか？")) return;
+  $("editDlg").close();
+}
+$("edCancel").onclick = closeEditor;
+$("editDlg").addEventListener("cancel", (e) => { e.preventDefault(); closeEditor(); });
+$("edOk").onclick = () => {
+  const def = EDITORS[editor.key];
+  // Python 版と同じく、必須欄が空の行は保存しない
+  const rows = editor.rows.filter((r) => String(r[def.required]).trim() !== "");
+  const errs = [];
+  rows.forEach((r) => {
+    if (!r.enabled) return;
+    for (const f of def.fields) {
+      if (FIELDS[f].kind === "bool") continue;
+      const err = fieldError(f, r[f]);
+      if (err) errs.push(`${editor.rows.indexOf(r) + 1}行目「${FIELDS[f].label}」: ${err}`);
+    }
+  });
+  if (errs.length) { $("edErr").textContent = "修正が必要です（無効にすれば保存できます）:\n" + errs.join("\n"); return; }
+  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = r[f]; d.enabled = r.enabled; return d; });
+  $("editDlg").close();
+  applyConfig(Object.assign({}, state.config, { [editor.key]: out }));
+  setStatus(`${def.title}: 保存しました（ブラウザに記憶されます。ファイルにするには 設定 > 設定保存）`);
+};
+
+// ================= V周期(仮想)挿入の設定 =================
+function openVsyncDialog() {
+  const vc = state.config.vsync_auto_insert;
+  $("vsEnabled").checked = vc.enabled !== false;
+  $("vsStart").value = String(vc.start_time_val ?? "0.0");
+  $("vsMs").value = String(vc.manual_ms ?? 16.666);
+  $("vsErr").textContent = "";
+  $("vsyncDlg").showModal();
+}
+$("vsCancel").onclick = () => $("vsyncDlg").close();
+$("vsOk").onclick = () => {
+  const start = $("vsStart").value.trim(), ms = pyFloat($("vsMs").value);
+  const errs = [];
+  if (isNaN(pyFloat(start))) errs.push("開始時刻は数値で入力してください");
+  if (isNaN(ms) || ms <= 0) errs.push("挿入間隔は 0 より大きい数値で入力してください");
+  $("vsStart").classList.toggle("bad", isNaN(pyFloat(start)));
+  $("vsMs").classList.toggle("bad", isNaN(ms) || ms <= 0);
+  if (errs.length) { $("vsErr").textContent = errs.join("\n"); return; }
+  $("vsyncDlg").close();
+  applyConfig(Object.assign({}, state.config, {
+    vsync_auto_insert: Object.assign({}, state.config.vsync_auto_insert, { enabled: $("vsEnabled").checked, start_time_val: start, manual_ms: ms }),
+  }));
+  setStatus("V周期(仮想)挿入の設定を反映しました");
+};
+
 $("configInput").onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = "";
   if (!f) return;
@@ -963,6 +1269,7 @@ function setShowVsync(on) { state.showVsync = on; styleToggle($("btnVsync"), "�
 function setAdvanced(on) {
   state.advanced = on;
   styleToggle($("btnAdvanced"), "Advanced", on, "dim");
+  $("menuAdvanced").classList.toggle("on", on);
   $("btnVsync").classList.toggle("hidden", !on);
   $("vsyncInfo").classList.toggle("hidden", !on);
   refreshView();
@@ -1014,6 +1321,8 @@ function gotoLinePrompt() {
   selectIndex(target);
 }
 document.addEventListener("keydown", (e) => {
+  if (document.querySelector("dialog[open]")) return;
+  if (e.key === "Escape") setMenuOpen(false);
   const doc = cur();
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (ctrl && key === "f") { e.preventDefault(); $("search").focus(); $("search").select(); return; }
