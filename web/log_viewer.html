@@ -106,6 +106,18 @@
   .btn .lbl { }
 
   .info { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  /* 仮想V周期の起点・間隔をその場で編集する入力欄 */
+  .vs-inline { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+  .vs-inline label { display: inline-flex; align-items: center; gap: 5px; }
+  .vs-inline input { width: calc(8ch + 16px); max-width: 24ch; height: 24px; padding: 0 7px; text-align: right; font: 12px var(--mono); color: var(--text);
+                     background: rgba(255, 255, 255, .72); border: 1px solid rgba(255, 255, 255, .9); border-radius: 7px;
+                     box-shadow: 0 0 0 .5px rgba(80, 100, 160, .14), 0 1px 2px rgba(80, 100, 160, .07);
+                     transition: border-color .15s, box-shadow .15s, background-color .15s; }
+  .vs-inline input:hover:not(:disabled) { background: rgba(255, 255, 255, .92); }
+  .vs-inline input:focus { outline: 0; background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .vs-inline input.bad { border-color: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
+  .vs-inline.off { opacity: .55; }
+  .vs-inline input:disabled { cursor: not-allowed; }
 
   /* iOS 風スイッチ */
   .switch { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 2px; border: 0; background: none; cursor: pointer; font-weight: 500; color: var(--text); white-space: nowrap; }
@@ -453,7 +465,10 @@
       <button class="switch" id="btnTail" role="switch" aria-checked="false" title="ファイルへの追記を自動で読み込み、末尾を表示し続ける"><span class="track"></span><span class="label">追従</span><span class="live"></span></button>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
-      <span class="info hidden" id="vsyncInfo"></span>
+      <span class="vs-inline hidden" id="vsyncInfo">
+        <label>起点<input id="vsStartIn" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="仮想V周期の起点（秒）" title="仮想V周期の起点（秒）: この時刻の行から仮想V周期を挿入します。Enter で反映、Esc で元に戻す"><span>秒</span></label>
+        <label>間隔<input id="vsMsIn" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="仮想V周期の間隔（ミリ秒）" title="仮想V周期の間隔（ミリ秒）: Enter で反映、Esc で元に戻す"><span>ms</span></label>
+      </span>
     </div>
     <span class="spacer"></span>
     <div class="fields">
@@ -2417,9 +2432,47 @@ function setAdvanced(on) {
   $("vsyncInfo").classList.toggle("hidden", !on);
   refreshView();
 }
+const fitVsyncInput = (el) => { el.style.width = `calc(${Math.min(Math.max(el.value.length, 7) + 1, 24)}ch + 16px)`; };
 function updateVsyncInfo() {
+  const vc = state.config.vsync_auto_insert, off = vc.enabled === false;
+  for (const [id, v] of [["vsStartIn", vc.start_time_val], ["vsMsIn", vc.manual_ms]]) {
+    const el = $(id);
+    el.value = String(v ?? "");
+    el.disabled = off;
+    el.classList.remove("bad");
+    fitVsyncInput(el);
+  }
+  $("vsyncInfo").classList.toggle("off", off);
+  $("vsyncInfo").title = off ? "仮想V周期の挿入は無効です（設定 › V周期(仮想)挿入の設定 で有効にできます）" : "";
+}
+// 入力欄の確定（Enter / フォーカスが外れたとき）。不正な値は反映せず元に戻す
+function commitVsyncInline(el) {
   const vc = state.config.vsync_auto_insert;
-  $("vsyncInfo").textContent = vc.enabled === false ? "仮想V周期: 無効" : `起点: ${vc.start_time_val}秒 / 間隔: ${vc.manual_ms}ms`;
+  const raw = el.value.trim();
+  if (el.id === "vsStartIn") {
+    if (isNaN(pyFloat(raw))) { el.classList.add("bad"); setStatus("起点は数値（秒）で入力してください"); return false; }
+    if (raw === String(vc.start_time_val)) { el.classList.remove("bad"); return true; }
+    applyConfig(Object.assign({}, state.config, { vsync_auto_insert: Object.assign({}, vc, { start_time_val: raw }) }));
+    setStatus(`仮想V周期の起点を ${raw} 秒にしました`);
+    return true;
+  }
+  const ms = pyFloat(raw);
+  if (isNaN(ms) || ms <= 0) { el.classList.add("bad"); setStatus("間隔は 0 より大きい数値（ミリ秒）で入力してください"); return false; }
+  if (ms === Number(vc.manual_ms)) { el.classList.remove("bad"); el.value = String(vc.manual_ms); return true; }
+  applyConfig(Object.assign({}, state.config, { vsync_auto_insert: Object.assign({}, vc, { manual_ms: ms }) }));
+  setStatus(`仮想V周期の間隔を ${ms} ms にしました`);
+  return true;
+}
+for (const id of ["vsStartIn", "vsMsIn"]) {
+  const el = $(id);
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); if (commitVsyncInline(el)) el.blur(); }
+    else if (e.key === "Escape") { e.preventDefault(); updateVsyncInfo(); el.blur(); }
+  });
+  el.addEventListener("input", () => { el.classList.remove("bad"); fitVsyncInput(el); });
+  el.addEventListener("focus", () => el.select());
+  // 別の場所をクリックしたら確定。不正な値なら元に戻して知らせる
+  el.addEventListener("blur", () => { if (!commitVsyncInline(el)) updateVsyncInfo(); });
 }
 $("btnFilter").onclick = () => setFilter(!state.filterOn);
 $("btnVsync").onclick = () => setShowVsync(!state.showVsync);
