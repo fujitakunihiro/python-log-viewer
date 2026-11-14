@@ -26,7 +26,6 @@
     /* 英数字は SF / Segoe UI、日本語はヒラギノ / 游ゴシック UI（英数字用のフォントを先に並べる） */
     --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif;
     --mono: "SF Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, "BIZ UDGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "MS Gothic", monospace;
-    --tabbar: rgba(96, 112, 168, .10);
   }
   :root[data-theme="dark"] {
     --bg: #000000; --surface: #1c1c1e; --surface-2: #232325; --surface-3: #2c2c2e;
@@ -128,9 +127,14 @@
   .field.bad, .field.bad:focus-within { border-color: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
 
   /* ================= タブ（Chrome のようにログの表とつながる） ================= */
-  .strip { display: flex; align-items: flex-end; flex: none; padding: 8px 8px 0; background: var(--tabbar); min-width: 0; }
+  /* 外枠はなし: タブはページの背景（グラデーション）の上に直接並び、選択中のタブだけが表につながる */
+  .strip { position: relative; z-index: 2; display: flex; align-items: flex-end; flex: none; margin: 10px 16px 0; min-width: 0; }
+  .strip + .main { margin-top: 0; }
+  .strip:has(.tabs:empty) + .main { margin-top: 12px; }
+  /* 先頭のタブを選んでいるときは、表の左上の角を四角にして一続きに見せる */
+  .strip:has(.tab:first-child.active) + .main { border-top-left-radius: 0; }
   .strip:has(.tabs:empty) { display: none; }
-  .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 12px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 10px 0 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
           flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .tabs::-webkit-scrollbar { display: none; }
   .tabs:empty { display: none; }
@@ -138,11 +142,13 @@
          cursor: pointer; white-space: nowrap; flex: none; max-width: 220px; font-weight: 500; color: var(--text-2);
          transition: background-color .15s, color .15s; user-select: none; }
   .tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .tab:hover:not(.active) { color: var(--text); background: color-mix(in srgb, var(--surface) 60%, transparent); }
+  .tab:hover:not(.active) { color: var(--text); background: linear-gradient(rgba(255, 255, 255, .78), rgba(255, 255, 255, .44));
+                            box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 .5px rgba(90, 110, 170, .14); }
   /* 選択中のタブは表と同じ白で、下の左右が内側にカーブして表へつながる */
   .tab.active { z-index: 2; background: var(--surface); color: var(--text); }
   .tab.active::before, .tab.active::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
   .tab.active::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 9.5px, var(--surface) 10px); }
+  .tab:first-child.active::before { display: none; }
   .tab.active::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 9.5px, var(--surface) 10px); }
   /* 選択していないタブの間に細い区切り線 */
   .tab:not(.active):not(:hover):not(:last-child):not(:has(+ .tab.active)):not(:has(+ .tab:hover))::after {
@@ -168,8 +174,7 @@
   /* ================= ログ表示カード ================= */
   .main { flex: 1 0 auto; min-height: 260px; height: 0; margin: 12px 16px 0; background: rgba(255, 255, 255, .86); border-radius: 18px;
           backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%);
-          border: 1px solid rgba(255, 255, 255, .9);
-          box-shadow: 0 0 0 .5px rgba(80, 100, 160, .16), inset 0 1px 0 rgba(255, 255, 255, .95), 0 18px 44px rgba(70, 90, 160, .15), 0 4px 12px rgba(70, 90, 160, .08);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 18px 44px rgba(70, 90, 160, .15), 0 4px 12px rgba(70, 90, 160, .08);
           display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
   .vrow { flex: 1; min-height: 0; display: flex; }
@@ -386,6 +391,7 @@
     .field input { width: clamp(72px, 10vw, 240px); }
   }
   @media (max-width: 720px) {
+    .strip { margin: 8px 8px 0; }
     .main { margin: 8px 8px 0; border-radius: 14px; }
     :root { --ln-w: 48px; --dt-w: 88px; --cm-w: 160px; --st-w: 120px; --src-w: 90px; }
     .titlebar { padding: 6px 8px; }
@@ -543,10 +549,10 @@
     </div>
   </dialog>
 
+  <div class="strip">
+    <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
+  </div>
   <main class="main">
-    <div class="strip">
-      <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
-    </div>
     <div class="vrow">
       <div class="scroller" id="scroller" tabindex="0">
         <div class="head" id="head"></div>
