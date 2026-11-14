@@ -2424,7 +2424,8 @@ function editorScopes() {
 // 区間設定の列を「開始系」「終了系」に分け、その境に区切り線を入れる
 const GROUP_OF = { start: "start", start_wait: "start", end: "end", end_wait: "end", duration_ms: "end" };
 const groupClass = (f) => (GROUP_OF[f] ? ` grp-${GROUP_OF[f]}` : "");
-const isGroupEdge = (fields, i) => i > 0 && GROUP_OF[fields[i]] === "end" && GROUP_OF[fields[i - 1]] !== "end";
+// 系（開始・終了・それ以外）が変わる境に線を入れる。開始の左端、終了の右端も含む
+const isGroupEdge = (fields, i) => i > 0 && GROUP_OF[fields[i]] !== GROUP_OF[fields[i - 1]];
 const fieldsFor = (def) => (def.scoped ? def.fields.filter((f) => f !== "file_pattern") : def.fields);
 const SC_ICON = {
   all: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
