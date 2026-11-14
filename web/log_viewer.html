@@ -391,6 +391,14 @@
                      background-color: var(--surface); color: var(--text); font: 12px var(--mono); cursor: pointer;
                      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2386868b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
                      background-repeat: no-repeat; background-position: right 8px center; transition: border-color .15s, box-shadow .15s; }
+  .lv-chips { display: inline-flex; gap: 4px; align-items: center; }
+  .lv-chips .lv { min-width: 28px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--sep-strong); background: var(--surface);
+                  color: var(--text-3); font: 600 12px var(--ui); cursor: pointer; transition: background-color .12s, color .12s, transform .05s; }
+  .lv-chips .lv:hover { color: var(--text); }
+  .lv-chips .lv:active { transform: scale(.96); }
+  .lv-chips .lv.on.l1 { background: var(--surface-3); color: var(--text-2); border-color: transparent; }
+  .lv-chips .lv.on.l2 { background: color-mix(in srgb, var(--accent) 35%, var(--surface)); color: var(--accent-text); border-color: transparent; }
+  .lv-chips .lv.on.l3 { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 1px 2px rgba(0, 113, 227, .3); }
   .ed-table select:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .ed-table .ops { white-space: nowrap; padding-left: 10px; }
   /* 行頭の操作（つまみ・チェック・削除）は、行の中で上下中央に揃える */
@@ -2483,7 +2491,10 @@ function renderEditorRows() {
       const cls = `${groupClass(f)}${isGroupEdge(cols, ci) ? " edge" : ""}`.trim();
       const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" || kind === "level" ? "" : fieldError(f, v);
       const text = (extra = "") => `<input type="text" data-i="${i}" data-f="${f}" value="${escapeHtml(v)}" class="${err ? "bad" : ""}" title="${escapeHtml(err)}"${extra}>`;
-      if (kind === "level") return `<td class="${cls}"><select data-i="${i}" data-f="${f}" title="3が一番強い">${[3, 2, 1].map((n) => `<option value="${n}"${Number(v) === n ? " selected" : ""}>${n}</option>`).join("")}</select></td>`;
+      if (kind === "level") {
+        const cur = clampLevel(v);
+        return `<td class="${cls}"><span class="lv-chips" title="3が一番強い">${[1, 2, 3].map((n) => `<button type="button" data-lv="${n}" data-i="${i}" class="lv l${n}${n === cur ? " on" : ""}" title="優先度 ${n}${n === 3 ? "（一番強い）" : n === 1 ? "（一番弱い）" : ""}">${n}</button>`).join("")}</span></td>`;
+      }
       if (kind === "bool") return `<td class="${cls}" style="text-align:center"><input type="checkbox" data-i="${i}" data-f="${f}"${v ? " checked" : ""}></td>`;
       if (kind === "color") {
         const pick = /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
@@ -2522,6 +2533,11 @@ $("edRows").addEventListener("input", (e) => {
 $("edRows").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
+  if (b.dataset.lv !== undefined) {
+    const row = editor.rows[+b.dataset.i];
+    if (String(row.priority) === b.dataset.lv) return;
+    snapEdit(); row.priority = b.dataset.lv; renderEditorRows(); return;
+  }
   if (b.dataset.vsync !== undefined) { snapEdit(); editor.rows[+b.dataset.vsync].end = VSYNC_TAG; renderEditorRows(); return; }
   if (b.dataset.del !== undefined) { snapEdit(); editor.rows.splice(+b.dataset.del, 1); renderScopes(); renderEditorRows(); return; }
 });
