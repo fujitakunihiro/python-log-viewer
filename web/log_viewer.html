@@ -518,7 +518,7 @@
     <input type="file" id="fileInput" multiple class="hidden">
     <span class="tsep"></span>
     <div class="group">
-      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付きの行（フィルタに一致した行）だけを表示 (F2)"><span class="track"></span><span class="label">色付きの行だけ</span><kbd>F2</kbd></button>
+      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付きの行（フィルタに一致した行）だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
       <button class="switch" id="btnTail" role="switch" aria-checked="false" title="ファイルへの追記を自動で読み込み、末尾を表示し続ける"><span class="track"></span><span class="label">追従</span><span class="live"></span></button>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
@@ -2714,7 +2714,7 @@ function styleToggle(btn, label, on) {
   const lbl = btn.querySelector(".label");
   if (lbl) lbl.textContent = label; else btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
 }
-function setFilter(on) { state.filterOn = on; styleToggle($("btnFilter"), "色付きの行だけ", on); refreshView(); }
+function setFilter(on) { state.filterOn = on; styleToggle($("btnFilter"), "フィルタ", on); refreshView(); }
 function setShowVsync(on) { state.showVsync = on; styleToggle($("btnVsync"), "仮想V周期", on); refreshView(); }
 function setAdvanced(on) {
   state.advanced = on;
