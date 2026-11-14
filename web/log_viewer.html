@@ -1142,7 +1142,10 @@ function analyze(doc) {
   }
   let maxLen = 0;
   for (const l of lines) if (l.length > maxLen) maxLen = l.length;
-  Object.assign(doc, { lines, srcs, orig, ts, isVsync, status, colors, comments, prio, rule: km.rule, isStart: km.isStart, counts: km.counts, maxLen });
+  const mergedNo = new Int32Array(n);
+  let realNo = 0;
+  for (let i = 0; i < n; i++) if (orig[i] > 0) mergedNo[i] = ++realNo;
+  Object.assign(doc, { lines, srcs, orig, ts, isVsync, status, colors, comments, prio, rule: km.rule, isStart: km.isStart, counts: km.counts, maxLen, mergedNo });
 }
 
 // 表示行の決定（Python: _compute_visibility）+ 絞り込み欄
@@ -1480,7 +1483,7 @@ function render() {
     const virt = src === VIRTUAL_SRC || doc.orig[i] === 0;
     const cell = (key) => {
       switch (key) {
-        case "ln": return `<div class="cell ln"><span>${doc.orig[i] || ""}</span></div>`;
+        case "ln": return `<div class="cell ln"><span>${doc.isMerged ? (doc.mergedNo[i] || "") : (doc.orig[i] || "")}</span></div>`;
         case "src": return `<div class="cell src" title="${escapeHtml(src)}"><i class="fdot" style="--c:${fileColor(doc, src)}"></i><span>${escapeHtml(src)}</span></div>`;
         case "dt": { const t = doc.ts[i]; return `<div class="cell dt"><span>${isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6)}</span></div>`; }
         case "cm": return `<div class="cell cm" title="${escapeHtml(doc.comments[i])}"><span>${escapeHtml(doc.comments[i])}</span></div>`;
@@ -2102,7 +2105,7 @@ async function buildXlsx(doc) {
     r++;
     const t = doc.ts[i];
     const rowArgb = toArgb(doc.colors[i]);
-    const values = [doc.orig[i] || "", ...(doc.isMerged ? [doc.srcs[i]] : []), isNaN(t) || isNaN(b) ? "" : Math.round((t - b) * 1e6) / 1e6, doc.lines[i], doc.comments[i]];
+    const values = [doc.isMerged ? (doc.mergedNo[i] || "") : (doc.orig[i] || ""), ...(doc.isMerged ? [doc.srcs[i]] : []), isNaN(t) || isNaN(b) ? "" : Math.round((t - b) * 1e6) / 1e6, doc.lines[i], doc.comments[i]];
     const cellArgb = values.map(() => rowArgb);
     for (const fn of cols) {
       const s = doc.status[fn] ? doc.status[fn][i] : null;
