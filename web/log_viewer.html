@@ -420,8 +420,8 @@
   .help-toggle input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
   .ed-side.help-off .ed-info { display: none; }
   .tip-chip { position: fixed; z-index: 100; max-width: 280px; padding: 6px 10px; border-radius: 8px; background: rgba(30, 30, 32, .94); color: #fff; font: 12px/1.5 var(--ui);
-              box-shadow: 0 6px 18px rgba(0, 0, 0, .25); pointer-events: none; opacity: 0; transition: opacity .12s; }
-  .tip-chip.show { opacity: 1; }
+              box-shadow: 0 6px 18px rgba(0, 0, 0, .25); pointer-events: none; opacity: 0; }
+  .tip-chip.show { opacity: 1; transition: opacity .12s; }
   .ed-actions { display: flex; gap: 8px; justify-content: flex-end; }
   .form-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
   .form-row input[type=text] { height: 30px; border: 1px solid var(--sep-strong); border-radius: 8px; padding: 0 10px; width: 150px; font: 13px var(--mono); background: var(--surface); color: var(--text); }
@@ -2639,20 +2639,24 @@ document.addEventListener("keydown", (e) => {
 const tipChip = document.createElement("div");
 tipChip.className = "tip-chip";
 $("editDlg").appendChild(tipChip);
-let chipTimer = 0;
+let chipTimer = 0, chipTh = null;
 $("edHead").addEventListener("mouseover", (e) => {
   const th = e.target.closest("th[data-tip]");
+  if (th && th === chipTh) return;          // 同じ見出しの中の移動では出し直さない
+  chipTh = th;
   clearTimeout(chipTimer);
-  if (!th || !th.dataset.tip) { tipChip.classList.remove("show"); return; }
+  tipChip.classList.remove("show");         // 前のチップは、新しいものが出る前に消す
+  if (!th || !th.dataset.tip) return;
   chipTimer = setTimeout(() => {
     tipChip.textContent = th.dataset.tip;
+    tipChip.style.left = "0px";             // 前の位置に幅を縛られないよう、測る前に左端へ戻す
     const r = th.getBoundingClientRect(), w = tipChip.offsetWidth;
     tipChip.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left))}px`;
     tipChip.style.top = `${r.bottom + 6}px`;
     tipChip.classList.add("show");
   }, 250);
 });
-$("edHead").addEventListener("mouseleave", () => { clearTimeout(chipTimer); tipChip.classList.remove("show"); });
+$("edHead").addEventListener("mouseleave", () => { chipTh = null; clearTimeout(chipTimer); tipChip.classList.remove("show"); });
 // ---- 使い方の表示・非表示（選んだ状態は覚えておく） ----
 const HELP_KEY = "logviewer.editHelp";
 let helpOn = true;
