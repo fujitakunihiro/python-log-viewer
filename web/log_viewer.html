@@ -478,6 +478,20 @@
                            box-shadow: var(--shadow-2); opacity: .55; transition: opacity .15s; }
   body.focus .focus-exit:hover { opacity: 1; }
   .focus-exit kbd { font: 11px var(--ui); padding: 0 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-2); }
+  #helpDlg { width: min(720px, calc(100vw - 24px)); }
+  .help { padding: 22px 24px 18px; }
+  .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .help-head h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+  .help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; }
+  .help section { background: var(--surface-2); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--sep); padding: 12px 14px; }
+  .help h3 { margin: 0 0 8px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+  .help dl { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; margin: 0; align-items: center; }
+  .help dt { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; white-space: nowrap; color: var(--text); }
+  .help dd { margin: 0; font-size: 12.5px; color: var(--text-2); }
+  .help kbd { font: 11px var(--ui); min-width: 20px; text-align: center; padding: 2px 6px; border-radius: 6px; background: var(--surface); color: var(--text);
+              box-shadow: 0 1px 0 rgba(0, 0, 0, .12), 0 0 0 .5px rgba(0, 0, 0, .08); }
+  .help-foot { margin: 12px 0 0; font-size: 12px; color: var(--text-3); }
+  @media (max-width: 720px) { .help-grid { grid-template-columns: 1fr; } }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -504,7 +518,7 @@
     <input type="file" id="fileInput" multiple class="hidden">
     <span class="tsep"></span>
     <div class="group">
-      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付けした行だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
+      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付きの行（フィルタに一致した行）だけを表示 (F2)"><span class="track"></span><span class="label">色付きの行だけ</span><kbd>F2</kbd></button>
       <button class="switch" id="btnTail" role="switch" aria-checked="false" title="ファイルへの追記を自動で読み込み、末尾を表示し続ける"><span class="track"></span><span class="label">追従</span><span class="live"></span></button>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
@@ -625,7 +639,37 @@
       </div>
       <canvas class="ovmap" id="ovmap" title="全体マップ: 色の印は色付き行、オレンジは検索結果、青い枠は表示中の範囲（クリック・ドラッグで移動）"></canvas>
     </div>
-    <div class="empty" id="empty">
+    <dialog id="helpDlg" aria-labelledby="helpTitle">
+    <div class="help">
+      <div class="help-head"><h2 id="helpTitle">ショートカット</h2><button class="btn secondary" type="button" id="helpClose">閉じる</button></div>
+      <div class="help-grid">
+        <section><h3>ファイル・表示</h3>
+          <dl><dt><kbd>Ctrl</kbd><kbd>O</kbd></dt><dd>ファイルを開く</dd>
+          <dt><kbd>F5</kbd></dt><dd>表示中のタブを再読み込み</dd>
+          <dt><kbd>Ctrl</kbd><kbd>W</kbd></dt><dd>タブを閉じる</dd>
+          <dt><kbd>F2</kbd></dt><dd>色付きの行だけ表示</dd>
+          <dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></dt><dd>集中モード</dd></dl></section>
+        <section><h3>検索・移動</h3>
+          <dl><dt><kbd>Ctrl</kbd><kbd>F</kbd></dt><dd>検索欄へ</dd>
+          <dt><kbd>F3</kbd> / <kbd>Shift</kbd><kbd>F3</kbd></dt><dd>次 / 前の検索結果</dd>
+          <dt><kbd>Ctrl</kbd><kbd>G</kbd></dt><dd>行番号へ移動</dd>
+          <dt><kbd>F8</kbd> / <kbd>Shift</kbd><kbd>F8</kbd></dt><dd>次 / 前の色付き行</dd>
+          <dt><kbd>Ctrl</kbd><kbd>Home</kbd> / <kbd>End</kbd></dt><dd>ログの先頭 / 末尾へ</dd></dl></section>
+        <section><h3>選択・コピー</h3>
+          <dl><dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>行を移動</dd>
+          <dt><kbd>Shift</kbd>＋クリック</dt><dd>範囲を選ぶ（Shift＋矢印でも可）</dd>
+          <dt><kbd>Ctrl</kbd><kbd>A</kbd></dt><dd>すべての行を選ぶ</dd>
+          <dt><kbd>Ctrl</kbd><kbd>C</kbd></dt><dd>選んだ行をコピー</dd>
+          <dt><kbd>Esc</kbd></dt><dd>範囲選択を解除</dd></dl></section>
+        <section><h3>マウス</h3>
+          <dl><dt>ダブルクリック</dt><dd>その行を経過時間の基準にする</dd>
+          <dt>右クリック</dt><dd>行のメニュー（コピー・絞り込み・基準など）</dd>
+          <dt>ヘッダーの境界線</dt><dd>ドラッグで列幅を変更</dd></dl></section>
+      </div>
+      <p class="help-foot"><kbd>?</kbd> キーでこの一覧を開閉できます。</p>
+    </div>
+  </dialog>
+  <div class="empty" id="empty">
       <div class="glyph"><svg class="i" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></div>
       <strong>ログを開きましょう</strong>
       <p>ファイルをここにドロップするか、「開く」から選んでください。複数のファイルを開いてマージもできます。</p>
@@ -1199,7 +1243,7 @@ function buildMergedDoc(sources, tsLen) {
     }
     L.push(line); S.push(src); O.push(o);
   }
-  return newDoc("マージ結果", { isMerged: true, fileNames: names, procLines: L, procSrcs: S, procOrig: O, mergeTsLen: tsLen });
+  return newDoc(names.join(" + "), { isMerged: true, fileNames: names, procLines: L, procSrcs: S, procOrig: O, mergeTsLen: tsLen });
 }
 
 // ================= 描画（仮想スクロール） =================
@@ -2670,7 +2714,7 @@ function styleToggle(btn, label, on) {
   const lbl = btn.querySelector(".label");
   if (lbl) lbl.textContent = label; else btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
 }
-function setFilter(on) { state.filterOn = on; styleToggle($("btnFilter"), "フィルタ", on); refreshView(); }
+function setFilter(on) { state.filterOn = on; styleToggle($("btnFilter"), "色付きの行だけ", on); refreshView(); }
 function setShowVsync(on) { state.showVsync = on; styleToggle($("btnVsync"), "仮想V周期", on); refreshView(); }
 function setAdvanced(on) {
   state.advanced = on;
@@ -2723,6 +2767,7 @@ for (const id of ["vsStartIn", "vsMsIn"]) {
   el.addEventListener("blur", () => { if (!commitVsyncInline(el)) updateVsyncInfo(); });
 }
 $("btnFilter").onclick = () => setFilter(!state.filterOn);
+$("helpClose").onclick = () => $("helpDlg").close();
 $("btnVsync").onclick = () => setShowVsync(!state.showVsync);
 $("btnAdvanced").onclick = () => setAdvanced(!state.advanced);
 let quickTimer = 0;
@@ -2910,6 +2955,9 @@ function gotoLinePrompt() {
 }
 document.addEventListener("keydown", (e) => {
   if (document.querySelector("dialog[open]")) return;
+  if (e.key === "?" && e.target.tagName !== "INPUT" && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault(); $("helpDlg").showModal(); return;
+  }
   if (e.key === "Escape") { setMenuOpen(false); if (!rowMenu.classList.contains("hidden")) { closeRowMenu(); return; } }
   const doc = cur();
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
