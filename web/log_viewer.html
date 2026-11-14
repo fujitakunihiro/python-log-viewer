@@ -149,7 +149,14 @@
   .main { flex: 1 0 auto; min-height: 260px; height: 0; margin: 6px 8px 0; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-1);
           display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
-  .scroller { flex: 1; min-height: 0; overflow: auto; position: relative; outline: none; }
+  .vrow { flex: 1; min-height: 0; display: flex; }
+  .scroller { flex: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; outline: none; }
+  .ovmap { width: 16px; flex: none; display: block; background: var(--surface-2); border-left: 1px solid var(--sep); cursor: pointer; touch-action: none; }
+  .switch .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: none; }
+  .switch.on .live { display: inline-block; animation: livepulse 2s ease-in-out infinite; }
+  .switch .live.blink { animation: liveblink .6s ease-out, livepulse 2s ease-in-out .6s infinite; }
+  @keyframes livepulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  @keyframes liveblink { from { box-shadow: 0 0 0 0 rgba(52, 199, 89, .7); } to { box-shadow: 0 0 0 7px rgba(52, 199, 89, 0); } }
   .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
   .scroller::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text) 22%, transparent); border-radius: 8px; border: 3px solid var(--surface); }
   .scroller::-webkit-scrollbar-corner { background: var(--surface); }
@@ -345,6 +352,7 @@
     .field { flex: 1; }
     .field input { width: 100%; min-width: 0; }
     .L, .R { position: static; box-shadow: none; }
+    .ovmap { width: 10px; }
     .status { padding: 3px 10px 5px; }
   }
   @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation: none !important; transition: none !important; } }
@@ -391,6 +399,7 @@
     <span class="tsep"></span>
     <div class="group">
       <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付けした行だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
+      <button class="switch" id="btnTail" role="switch" aria-checked="false" title="ファイルへの追記を自動で読み込み、末尾を表示し続ける"><span class="track"></span><span class="label">追従</span><span class="live"></span></button>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
       <span class="info hidden" id="vsyncInfo"></span>
@@ -493,9 +502,12 @@
     <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
   </div>
   <main class="main">
-    <div class="scroller" id="scroller" tabindex="0">
-      <div class="head" id="head"></div>
-      <div class="canvas" id="canvas"></div>
+    <div class="vrow">
+      <div class="scroller" id="scroller" tabindex="0">
+        <div class="head" id="head"></div>
+        <div class="canvas" id="canvas"></div>
+      </div>
+      <canvas class="ovmap" id="ovmap" title="全体マップ: 色の印は色付き行、オレンジは検索結果、青い枠は表示中の範囲（クリック・ドラッグで移動）"></canvas>
     </div>
     <div class="empty" id="empty">
       <div class="glyph"><svg class="i" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></div>
@@ -1274,7 +1286,7 @@ document.addEventListener("pointercancel", endColMove);
 function layout() {
   const doc = cur();
   $("empty").classList.toggle("hidden", !!doc);
-  if (!doc) { $("head").innerHTML = ""; canvas.style.height = "0px"; canvas.innerHTML = ""; return; }
+  if (!doc) { $("head").innerHTML = ""; canvas.style.height = "0px"; canvas.innerHTML = ""; ovDirty = true; drawOverview(); return; }
   renderHead(doc);
   const head = $("head");
   const fixedW = head.querySelector(".L").offsetWidth + head.querySelector(".R").offsetWidth;
@@ -1320,7 +1332,164 @@ function render() {
       `<div class="L">${left.map(cell).join("")}</div>${logCell}<div class="R">${right.map(cell).join("")}</div></div>`;
   }
   canvas.innerHTML = html;
+  drawOverview();
 }
+
+// ================= 全体マップ（色付き行・検索結果・表示範囲をスクロールバーの横に表示） =================
+const ov = $("ovmap"), ovCtx = ov.getContext("2d");
+const ovBase = document.createElement("canvas"), ovBaseCtx = ovBase.getContext("2d");
+let ovDirty = true;
+// 薄いルール色を地図上で見えるように濃くする
+const shadeCache = new Map();
+function ovShade(color) {
+  let v = shadeCache.get(color);
+  if (v) return v;
+  colorCtx.fillStyle = "#000"; colorCtx.fillStyle = color;
+  const hex = colorCtx.fillStyle;
+  if (/^#[0-9a-f]{6}$/i.test(hex)) {
+    const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    const k = 0.72;  // 少し暗くして彩度を上げる
+    const mx = Math.max(r, g, b), f = (c) => Math.round(Math.max(0, Math.min(255, (c - (mx - c) * 1.6) * k)));
+    v = `rgb(${f(r)}, ${f(g)}, ${f(b)})`;
+  } else v = hex;
+  shadeCache.set(color, v);
+  return v;
+}
+function ovSize() {
+  const r = ov.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (ov.width !== w || ov.height !== h) { ov.width = ovBase.width = w; ov.height = ovBase.height = h; ovDirty = true; }
+  return { w, h, dpr };
+}
+function drawOverviewBase(doc, w, h, dpr) {
+  ovBaseCtx.clearRect(0, 0, w, h);
+  const n = doc ? doc.view.length : 0;
+  if (!n) return;
+  // 1 ピクセルの行ごとに一番重要な印だけ描く（検索結果 > 基準位置 > ルールの色）
+  const rank = new Int16Array(h), color = new Array(h);
+  for (let p = 0; p < n; p++) {
+    const i = doc.view[p], c = doc.colors[i];
+    if (c === WHITE) continue;
+    const y = Math.min(h - 1, Math.floor(p / n * h)), r = doc.prio[i] + 1;
+    if (r > rank[y]) { rank[y] = r; color[y] = ovShade(c); }
+  }
+  for (const p of search.hits) {
+    const y = Math.min(h - 1, Math.floor(p / n * h));
+    rank[y] = 999; color[y] = getComputedStyle(document.documentElement).getPropertyValue("--orange").trim() || "#ff9500";
+  }
+  const mark = Math.max(2 * dpr, Math.ceil(h / n));
+  const pad = Math.round(3 * dpr);
+  for (let y = 0; y < h; y++) {
+    if (!rank[y]) continue;
+    ovBaseCtx.fillStyle = color[y];
+    const isHit = rank[y] === 999;
+    ovBaseCtx.fillRect(isHit ? pad : pad + Math.round(dpr), y, w - pad * 2 - (isHit ? 0 : Math.round(dpr) * 2), mark);
+  }
+}
+function drawOverview() {
+  const doc = cur();
+  const { w, h, dpr } = ovSize();
+  if (ovDirty) { drawOverviewBase(doc, w, h, dpr); ovDirty = false; }
+  ovCtx.clearRect(0, 0, w, h);
+  if (!doc || !doc.view.length) return;
+  ovCtx.drawImage(ovBase, 0, 0);
+  const n = doc.view.length, total = n * rowH;
+  // 今見えている範囲
+  const top = scroller.scrollTop / total * h;
+  const vh = Math.max(8 * dpr, (scroller.clientHeight - $("head").offsetHeight) / total * h);
+  ovCtx.fillStyle = "rgba(0, 113, 227, .10)";
+  ovCtx.strokeStyle = "rgba(0, 113, 227, .45)";
+  ovCtx.lineWidth = dpr;
+  ovCtx.beginPath();
+  if (ovCtx.roundRect) ovCtx.roundRect(dpr, top, w - 2 * dpr, Math.min(vh, h - top), 3 * dpr); else ovCtx.rect(dpr, top, w - 2 * dpr, Math.min(vh, h - top));
+  ovCtx.fill(); ovCtx.stroke();
+  // 選択行
+  if (doc.sel >= 0) {
+    const sp = lowerBound(doc.view, doc.sel);
+    if (doc.view[sp] === doc.sel) {
+      ovCtx.fillStyle = "#1d1d1f";
+      ovCtx.fillRect(0, Math.min(h - 2 * dpr, sp / n * h), w, 2 * dpr);
+    }
+  }
+}
+function ovJump(e) {
+  const doc = cur();
+  if (!doc || !doc.view.length) return;
+  const r = ov.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+  scroller.scrollTop = frac * doc.view.length * rowH - (scroller.clientHeight - $("head").offsetHeight) / 2;
+}
+let ovDragging = false;
+ov.addEventListener("pointerdown", (e) => { if (e.button !== 0) return; ovDragging = true; ov.setPointerCapture(e.pointerId); ovJump(e); });
+ov.addEventListener("pointermove", (e) => { if (ovDragging) ovJump(e); });
+ov.addEventListener("pointerup", () => { ovDragging = false; });
+ov.addEventListener("pointercancel", () => { ovDragging = false; });
+new ResizeObserver(() => { ovDirty = true; drawOverview(); }).observe(ov);
+
+// ================= 追従モード（ファイルの追記を自動で読み込み、末尾を表示し続ける） =================
+const tail = { on: false, timer: 0, busy: false, interval: 2000 };
+const atEnd = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - rowH * 2;
+function scrollToEnd() { scroller.scrollTop = scroller.scrollHeight; render(); }
+function tailTargets(doc) { return doc.isMerged ? state.docs.filter((d) => !d.isMerged && doc.fileNames.includes(d.name)) : [doc]; }
+function canTail(doc) { return !!doc && tailTargets(doc).every((d) => d.source && (d.source.handle || d.source.url)); }
+// ファイルが変わったかを中身を読まずに確かめる（サイズと更新日時）
+async function sourceChanged(src) {
+  if (src.handle) { const f = await src.handle.getFile(); return f.size !== src.size || f.lastModified !== src.lastModified; }
+  const res = await fetch(src.url, { method: "HEAD", cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const len = Number(res.headers.get("content-length"));
+  const lm = res.headers.get("last-modified");
+  const changed = (Number.isFinite(len) && len !== src.size) || (lm && src.httpModified && lm !== src.httpModified);
+  if (lm) src.httpModified = lm;
+  return !!changed;
+}
+async function tailTick() {
+  const doc = cur();
+  if (!tail.on || tail.busy || reloading || !doc) return;
+  if (!canTail(doc)) { setStatus("このタブは追従できません（Chrome / Edge で「開く」から開いたファイルが対象です）"); return; }
+  tail.busy = true;
+  try {
+    const targets = tailTargets(doc);
+    const changed = [];
+    for (const t of targets) if (await sourceChanged(t.source)) changed.push(t);
+    if (!changed.length || cur() !== doc) return;
+    const follow = atEnd();
+    const before = doc.lines.length;
+    for (const t of changed) await reloadFileDoc(t);
+    let nd = state.docs[state.active];
+    if (doc.isMerged) {
+      const fresh = state.docs.filter((d) => !d.isMerged && doc.fileNames.includes(d.name));
+      nd = replaceDoc(doc, buildMergedDoc(fresh, doc.mergeTsLen));
+    }
+    if (follow) scrollToEnd();
+    const diff = nd.lines.length - before;
+    flashLive();
+    setStatus(`追従: ${new Date().toLocaleTimeString("ja-JP")} に${diff >= 0 ? ` ${diff.toLocaleString()} 行追加` : "更新"}${follow ? "（末尾を表示中）" : "（末尾へ戻ると自動で追いかけます）"}`);
+  } catch (e) {
+    setTail(false);
+    setStatus(`追従を停止しました: ${e.message}`);
+  } finally {
+    tail.busy = false;
+  }
+}
+function flashLive() {
+  const dot = $("btnTail").querySelector(".live");
+  dot.classList.remove("blink"); void dot.offsetWidth; dot.classList.add("blink");
+}
+function setTail(on) {
+  tail.on = on;
+  styleToggle($("btnTail"), "追従", on);
+  clearInterval(tail.timer);
+  if (on) {
+    const doc = cur();
+    if (doc && !canTail(doc)) setStatus("追従: このタブのファイルは自動で読み直せません（Chrome / Edge で「開く」から開いてください）");
+    else setStatus("追従: ファイルへの追記を 2 秒ごとに確認し、末尾を表示し続けます");
+    tail.timer = setInterval(tailTick, tail.interval);
+    scrollToEnd();
+    tailTick();
+  }
+}
+$("btnTail").onclick = () => setTail(!tail.on);
 scroller.addEventListener("scroll", () => requestAnimationFrame(render));
 window.addEventListener("resize", () => layout());
 // 上の段の折り返しや集中モードでログ欄の大きさが変わったら描き直す
@@ -1412,6 +1581,7 @@ function runSearch(jump) {
     if (jump && search.hits.length) goHit(0);
   }
   $("searchCount").textContent = q ? (search.hits.length ? `${search.pos + 1}/${search.hits.length}` : "0件") : "";
+  ovDirty = true;
 }
 function goHit(delta) {
   const doc = cur();
