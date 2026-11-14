@@ -52,10 +52,13 @@
   svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
   /* ================= タイトルバー ================= */
-  .titlebar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 10px 20px;
+  .titlebar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; padding: 7px 12px;
               background: var(--bar); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
               border-bottom: 1px solid var(--sep); }
-  .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -.01em; margin-right: 10px; white-space: nowrap; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; letter-spacing: -.01em; margin-right: 6px; white-space: nowrap; }
+  .tsep { width: 1px; height: 20px; background: var(--sep-strong); margin: 0 8px; flex: none; }
+  .titlebar .group { display: flex; align-items: center; gap: 12px; }
+  .titlebar .fields { display: flex; gap: 6px; }
   .brand .logo { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff;
                  background: linear-gradient(145deg, #5ac8fa, #0071e3); box-shadow: 0 1px 3px rgba(0, 113, 227, .35); }
   .brand .logo svg { width: 15px; height: 15px; stroke-width: 2; }
@@ -76,36 +79,35 @@
   .btn.wide { height: 36px; padding: 0 18px; }
   .btn .lbl { }
 
-  /* ================= コントロール行 ================= */
-  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 16px 20px 0; padding: 12px 16px;
-              background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-1); }
-  .controls .group { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .controls .fields { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
   .info { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
   /* iOS 風スイッチ */
-  .switch { display: inline-flex; align-items: center; gap: 9px; height: 32px; padding: 0 2px; border: 0; background: none; cursor: pointer; font-weight: 500; color: var(--text); white-space: nowrap; }
-  .switch .track { position: relative; width: 38px; height: 23px; border-radius: 999px; background: var(--switch-off); transition: background-color .2s; flex: none; }
-  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%; background: #fff;
+  .switch { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 2px; border: 0; background: none; cursor: pointer; font-weight: 500; color: var(--text); white-space: nowrap; }
+  .switch .track { position: relative; width: 34px; height: 20px; border-radius: 999px; background: var(--switch-off); transition: background-color .2s; flex: none; }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
                           box-shadow: 0 2px 4px rgba(0, 0, 0, .2), 0 0 1px rgba(0, 0, 0, .15); transition: transform .22s cubic-bezier(.3, .7, .4, 1.2); }
   .switch.on .track { background: var(--green); }
-  .switch.on .track::after { transform: translateX(15px); }
+  .switch.on .track::after { transform: translateX(14px); }
   .switch kbd { font: 11px var(--ui); color: var(--text-3); }
 
   /* 検索フィールド */
-  .field { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; background: var(--surface-3); border-radius: var(--r-ctl);
+  .field { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; background: var(--surface-3); border-radius: var(--r-ctl);
            border: 1px solid transparent; transition: border-color .15s, background-color .15s, box-shadow .15s; color: var(--text-3); }
   .field:focus-within { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  .field input { border: 0; outline: 0; width: 190px; background: transparent; color: var(--text); }
+  .field input { border: 0; outline: 0; width: clamp(110px, 12vw, 220px); background: transparent; color: var(--text); }
   .field input::placeholder { color: var(--text-3); }
   .field .count { font-size: 12px; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  .field .count:empty { display: none; }
   .field.bad, .field.bad:focus-within { border-color: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
 
   /* ================= タブ（ピル型） ================= */
-  .tabs { display: flex; gap: 4px; margin: 14px 20px 0; padding: 4px; overflow-x: auto; scrollbar-width: none;
-          background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 12px; align-self: flex-start; max-width: calc(100% - 40px); }
+  .strip { display: flex; align-items: center; gap: 10px; margin: 6px 8px 0; min-width: 0; }
+  .strip:has(.tabs:empty) { display: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs { display: flex; gap: 3px; padding: 3px; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; max-width: 100%;
+          background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 10px; }
   .tabs:empty { display: none; }
-  .tab { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 6px 0 14px; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  .tab { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 5px 0 12px; border-radius: 7px; cursor: pointer; white-space: nowrap;
          font-weight: 500; color: var(--text-2); transition: background-color .15s, color .15s; user-select: none; }
   .tab:hover { color: var(--text); }
   .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .1), 0 0 0 .5px rgba(0, 0, 0, .04); }
@@ -125,16 +127,8 @@
   .tip .note { color: var(--orange); }
 
   /* ================= ログ表示カード ================= */
-  .main { flex: 1 0 auto; min-height: 260px; height: 0; margin: 10px 20px 0; background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-1);
+  .main { flex: 1 0 auto; min-height: 260px; height: 0; margin: 6px 8px 0; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-1);
           display: flex; flex-direction: column; position: relative; overflow: hidden; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--sep); }
-  .chip { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px 0 9px; border-radius: 999px; border: 0; cursor: pointer;
-          font-size: 12px; font-weight: 500; color: var(--text); background: var(--surface-3); transition: background-color .15s, transform .05s; }
-  .chip:hover { background: color-mix(in srgb, var(--text) 9%, var(--surface-3)); }
-  .chip:active { transform: scale(.97); }
-  .chip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
-  .chip b { font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
-  .chip.zero { opacity: .45; cursor: default; }
 
   .scroller { flex: 1; min-height: 0; overflow: auto; position: relative; outline: none; }
   .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
@@ -181,7 +175,7 @@
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
   mark.cur { background: var(--mark-cur); }
 
-  .status { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 8px 24px 12px; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .status { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 3px 14px 4px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
   .status .err { color: var(--red); }
 
   /* 空の状態 */
@@ -263,21 +257,42 @@
     .ed-info { max-height: 90px; min-height: 0; flex: none; }
     .ed-table-wrap { flex: none; min-height: 160px; max-height: max(160px, calc(100vh - 340px)); }
   }
+  /* 中くらいの幅ではボタンをアイコンだけにして 1 段に収める */
+  @media (max-width: 1440px) {
+    .brand span, .titlebar .btn .lbl { display: none; }
+    .titlebar .btn { padding: 0 9px; }
+  }
   @media (max-width: 720px) {
     :root { --ln-w: 48px; --dt-w: 88px; --cm-w: 160px; --st-w: 120px; --src-w: 90px; }
-    .titlebar { padding: 8px 12px; }
+    .titlebar { padding: 6px 8px; }
+    .tsep { display: none; }
+    .titlebar .fields { order: 10; width: 100%; }
+    .strip { flex-wrap: wrap; }
+    .tabs { max-width: 100%; }
     .brand span, .btn .lbl { display: none; }
     .btn { padding: 0 9px; }
-    .controls, .main { margin-left: 8px; margin-right: 8px; }
-    .tabs { margin-left: 8px; margin-right: 8px; max-width: calc(100% - 16px); }
-    .controls .fields { margin-left: 0; width: 100%; }
     .field { flex: 1; }
     .field input { width: 100%; min-width: 0; }
     .L, .R { position: static; box-shadow: none; }
-    .status { padding: 6px 12px 10px; }
+    .status { padding: 3px 10px 5px; }
   }
   @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation: none !important; transition: none !important; } }
-  .titlebar, .controls, .tabs, .status { flex-shrink: 0; }
+  .titlebar, .strip, .status { flex-shrink: 0; }
+
+  /* ================= 集中モード（ログだけを全画面表示） ================= */
+  #btnFocus.on { color: var(--accent); background: var(--accent-soft); }
+  .peek-zone, .focus-exit { display: none; }
+  body.focus .titlebar { position: fixed; left: 0; right: 0; top: 0; transform: translateY(-100%); transition: transform .22s cubic-bezier(.2, .8, .2, 1); box-shadow: var(--shadow-2); }
+  body.focus.peek .titlebar { transform: none; }
+  body.focus .strip, body.focus .status { display: none; }
+  body.focus .main { margin: 0; border-radius: 0; box-shadow: none; }
+  body.focus .peek-zone { display: block; position: fixed; top: 0; left: 0; right: 0; height: 6px; z-index: 29; }
+  body.focus .focus-exit { display: inline-flex; align-items: center; gap: 6px; position: fixed; right: 18px; bottom: 16px; z-index: 31;
+                           height: 30px; padding: 0 12px; border: 0; border-radius: 999px; cursor: pointer; font-size: 12px; color: var(--text);
+                           background: color-mix(in srgb, var(--surface) 85%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+                           box-shadow: var(--shadow-2); opacity: .55; transition: opacity .15s; }
+  body.focus .focus-exit:hover { opacity: 1; }
+  .focus-exit kbd { font: 11px var(--ui); padding: 0 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-2); }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -300,7 +315,27 @@
       <svg class="i" viewBox="0 0 24 24"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12"/></svg><span class="lbl">Excel出力</span>
     </button>
     <input type="file" id="fileInput" multiple class="hidden">
+    <span class="tsep"></span>
+    <div class="group">
+      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付けした行だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
+      <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
+      <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
+      <span class="info hidden" id="vsyncInfo"></span>
+    </div>
     <span class="spacer"></span>
+    <div class="fields">
+      <label class="field" id="quickField" title="この文字列/正規表現を含む行だけ表示">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/></svg>
+        <input id="quick" placeholder="絞り込み（文字列・正規表現）" aria-label="絞り込み"><span class="count" id="quickCount"></span>
+      </label>
+      <label class="field" id="searchField" title="Ctrl+F / Enter: 次 / Shift+Enter: 前">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+        <input id="search" placeholder="検索" aria-label="検索"><span class="count" id="searchCount"></span>
+      </label>
+    </div>
+    <button class="btn" id="btnFocus" title="集中モード: ログだけを全画面表示 (Ctrl+Shift+F / Esc で戻る)">
+      <svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
     <div class="menu-wrap">
       <button class="btn" id="btnSettings" aria-haspopup="true" aria-expanded="false" title="設定">
         <svg class="i" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="lbl">設定</span>
@@ -321,24 +356,6 @@
     <input type="file" id="configInput" accept=".json,application/json" class="hidden">
   </header>
 
-  <section class="controls">
-    <div class="group">
-      <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付けした行だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
-      <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
-      <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
-      <span class="info hidden" id="vsyncInfo"></span>
-    </div>
-    <div class="fields">
-      <label class="field" id="quickField" title="この文字列/正規表現を含む行だけ表示">
-        <svg class="i" viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/></svg>
-        <input id="quick" placeholder="絞り込み（文字列・正規表現）" aria-label="絞り込み"><span class="count" id="quickCount"></span>
-      </label>
-      <label class="field" id="searchField" title="Ctrl+F / Enter: 次 / Shift+Enter: 前">
-        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
-        <input id="search" placeholder="検索" aria-label="検索"><span class="count" id="searchCount"></span>
-      </label>
-    </div>
-  </section>
 
   <dialog id="editDlg">
     <div class="dlg">
@@ -377,9 +394,10 @@
     </div>
   </dialog>
 
-  <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
+  <div class="strip">
+    <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
+  </div>
   <main class="main">
-    <div class="chips hidden" id="chips"></div>
     <div class="scroller" id="scroller" tabindex="0">
       <div class="head" id="head"></div>
       <div class="canvas" id="canvas"></div>
@@ -389,9 +407,11 @@
       <strong>ログを開きましょう</strong>
       <p>ファイルをここにドロップするか、「開く」から選んでください。複数のファイルを開いてマージもできます。</p>
       <button class="btn primary wide" id="btnOpenEmpty" type="button">ファイルを開く</button>
-      <div class="keys"><span><kbd>F2</kbd> フィルタ</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>F5</kbd> 再読み込み</span><span>ダブルクリック 経過時間の基準</span></div>
+      <div class="keys"><span><kbd>F2</kbd> フィルタ</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
     </div>
   </main>
+  <div class="peek-zone" id="peekZone"></div>
+  <button class="focus-exit" id="btnFocusExit" type="button" title="集中モードを終了">集中モードを終了 <kbd>Esc</kbd></button>
   <footer class="status" id="status"><span id="statusMain">準備完了</span><span class="err" id="statusErr"></span></footer>
 
 <script>
@@ -1075,6 +1095,39 @@ function render() {
 }
 scroller.addEventListener("scroll", () => requestAnimationFrame(render));
 window.addEventListener("resize", () => layout());
+// 上の段の折り返しや集中モードでログ欄の大きさが変わったら描き直す
+let resizeFrame = 0;
+new ResizeObserver(() => { if (!resizeFrame) resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; layout(); }); }).observe(scroller);
+
+// ================= 集中モード（ログだけを全画面表示） =================
+const titlebar = document.querySelector(".titlebar");
+const isFocus = () => document.body.classList.contains("focus");
+function setFocus(on) {
+  if (on === isFocus()) return;
+  document.body.classList.toggle("focus", on);
+  document.body.classList.remove("peek");
+  $("btnFocus").classList.toggle("on", on);
+  $("btnFocus").setAttribute("aria-pressed", String(on));
+  setMenuOpen(false);
+  if (on && document.documentElement.requestFullscreen && !document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => { /* 全画面にできない環境では画面内だけで広げる */ });
+  } else if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (on) setStatus("集中モード: 画面の上端にマウスを寄せると操作欄が出ます（Esc で戻る）");
+  scroller.focus({ preventScroll: true });
+}
+$("btnFocus").onclick = () => setFocus(!isFocus());
+$("btnFocusExit").onclick = () => setFocus(false);
+// ブラウザの全画面を Esc などで抜けたら集中モードも終える
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && isFocus()) setFocus(false); });
+// 上端に寄せる・操作欄にフォーカスがある間だけ操作欄を出す
+$("peekZone").addEventListener("mouseenter", () => { if (isFocus()) document.body.classList.add("peek"); });
+const unpeek = () => {
+  if (!isFocus() || titlebar.matches(":hover") || titlebar.contains(document.activeElement) || !menu.classList.contains("hidden")) return;
+  document.body.classList.remove("peek");
+};
+titlebar.addEventListener("mouseleave", () => setTimeout(unpeek, 250));
+titlebar.addEventListener("focusin", () => { if (isFocus()) document.body.classList.add("peek"); });
+titlebar.addEventListener("focusout", () => setTimeout(unpeek, 0));
 
 // 選択行（なければ先頭の表示行）の位置を保ったまま表示行を作り直す
 function refreshView({ keep = true } = {}) {
@@ -1155,19 +1208,6 @@ function nextColored(dir, ruleIdx = null) {
   }
   setStatus("これ以上ありません");
 }
-function renderChips() {
-  const doc = cur();
-  const el = $("chips");
-  el.classList.toggle("hidden", !doc || !state.rules.length);
-  if (!doc) return;
-  el.innerHTML = state.rules.map((r, i) =>
-    `<button class="chip${doc.counts[i] ? "" : " zero"}" data-r="${i}" style="--c:${escapeHtml(r.color)}" title="クリックで次の該当行へ（Shift+クリックで前）" type="button"><i class="dot"></i>${escapeHtml(r.label)}<b>${doc.counts[i].toLocaleString()}</b></button>`
-  ).join("");
-}
-$("chips").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if (chip && !chip.classList.contains("zero")) nextColored(e.shiftKey ? -1 : 1, +chip.dataset.r);
-});
 
 // ================= タブ =================
 function renderTabs() {
@@ -1283,7 +1323,7 @@ function saveScroll() {
 function activate(i) {
   saveScroll();
   state.active = i;
-  renderTabs(); renderChips();
+  renderTabs();
   refreshView({ keep: false });
   const doc = cur();
   if (doc) { scroller.scrollTop = doc.scrollTop; scroller.scrollLeft = doc.scrollLeft; render(); }
@@ -1300,7 +1340,7 @@ function pushDoc(doc, t0) {
   saveScroll();
   state.docs.push(doc);
   state.active = state.docs.length - 1;
-  renderTabs(); renderChips();
+  renderTabs();
   scroller.scrollTop = 0; scroller.scrollLeft = 0;
   refreshView({ keep: false });
   setStatus(`${doc.name}: ${doc.lines.length.toLocaleString()} 行を ${Math.round(performance.now() - t0)} ms で表示`);
@@ -1334,7 +1374,7 @@ function replaceDoc(oldDoc, nd) {
   state.docs[idx] = nd;
   if (isActive) {
     const left = scroller.scrollLeft;
-    renderTabs(); renderChips();
+    renderTabs();
     refreshView({ keep: false });
     const ti = findLine(nd, top);
     if (ti >= 0) scroller.scrollTop = lowerBound(nd.view, ti) * rowH - offset;
@@ -1629,7 +1669,7 @@ function applyConfig(cfg) {
     return sources.length >= 2 ? Object.assign(buildMergedDoc(sources, d.mergeTsLen), { sel: d.sel, base: d.base }) : d;
   });
   for (const d of state.docs) analyze(d);
-  updateVsyncInfo(); renderChips(); refreshView();
+  updateVsyncInfo(); refreshView();
 }
 // ================= 設定メニュー =================
 const menu = $("settingsMenu");
@@ -1910,6 +1950,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setMenuOpen(false);
   const doc = cur();
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+  if (ctrl && e.shiftKey && key === "f") { e.preventDefault(); setFocus(!isFocus()); return; }
+  if (e.key === "Escape" && isFocus() && e.target.tagName !== "INPUT" && menu.classList.contains("hidden")) { setFocus(false); return; }
   if (ctrl && key === "f") { e.preventDefault(); $("search").focus(); $("search").select(); return; }
   if (ctrl && key === "g") { e.preventDefault(); gotoLinePrompt(); return; }
   if (ctrl && key === "o") { e.preventDefault(); openPicker(); return; }
