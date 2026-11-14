@@ -115,10 +115,8 @@ def _find_keyword_matches(
             if not rule["regex"].search(entry_text):
                 continue
 
-            # Select the complete entry. +行 can extend a single-line entry
-            # farther and remains compatible with existing configurations.
-            color_end = min(max(end, start + rule["extra"] + 1), len(lines))
-            for idx in range(start, color_end):
+            # 複数行ログは全行を選択する
+            for idx in range(start, end):
                 matches.setdefault(idx, rule_idx)
             if matches.get(start) == rule_idx:
                 match_starts[start] = rule_idx
@@ -207,11 +205,11 @@ class Tooltip:
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
     "keywords":[
-        {"file_pattern": ".*", "pattern": r".*ERROR.*", "color": "#f8d7da", "comment": "重大なエラー発生", "enabled": True, "extra_lines": 0},
-        {"file_pattern": ".*", "pattern": "WARN",       "color": "#fff3cd", "comment": "警告メッセージ",   "enabled": True, "extra_lines": 2},
-        {"file_pattern": ".*", "pattern": "INFO",       "color": "#d1e7dd", "comment": "正常動作ログ",     "enabled": True, "extra_lines": 0},
-        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e2d9f3", "comment": "仮想V同期タイミング", "enabled": True, "extra_lines": 0},
-        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL TIMER\].*", "color": "#ffe0b2", "comment": "タイマー満了", "enabled": True, "extra_lines": 0}
+        {"file_pattern": ".*", "pattern": r".*ERROR.*", "color": "#f8d7da", "comment": "重大なエラー発生", "enabled": True},
+        {"file_pattern": ".*", "pattern": "WARN",       "color": "#fff3cd", "comment": "警告メッセージ",   "enabled": True},
+        {"file_pattern": ".*", "pattern": "INFO",       "color": "#d1e7dd", "comment": "正常動作ログ",     "enabled": True},
+        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL V-SYNC\] ---", "color": "#e2d9f3", "comment": "仮想V同期タイミング", "enabled": True},
+        {"file_pattern": ".*", "pattern": r"--- \[VIRTUAL TIMER\].*", "color": "#ffe0b2", "comment": "タイマー満了", "enabled": True}
     ],
     "sections":[
         {"name": "初期化(Server)", "start": "SRV_INIT_START", "start_wait": False, "end": "SRV_INIT_DONE", "end_wait": False, "duration_ms": "", "color": "#e1f5fe", "file_pattern": "server.*", "enabled": True},
@@ -760,17 +758,6 @@ class LogViewerApp:
                 return
             self.last_merge_ts_len = ts_len
         
-        kw_rules =[]
-        for itm in self.keywords_config:
-            if itm.get("enabled", True):
-                try: 
-                    kw_rules.append((
-                        re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
-                        re.compile(_normalize_user_pattern(itm["pattern"]), re.I), 
-                        int(itm.get("extra_lines", 0))
-                    ))
-                except: pass
-                
         all_blocks =[]
         unique_srcs =[]
         src_paths_map = {}  # Map source names to full paths
@@ -793,29 +780,11 @@ class LogViewerApp:
             first_ts = next((x for x in effective_ts if x), "0"*ts_len)
             effective_ts =[x if x else first_ts for x in effective_ts]
             
-            i = 0
-            while i < len(raw_lines):
-                line = raw_lines[i]
-                current_src = t.line_source_map[i] if (t.line_source_map and i < len(t.line_source_map)) else fn
-                extra = 0
-                for fpat, pat, ex in kw_rules:
-                    if fpat.search(current_src) and pat.search(line): 
-                        extra = ex
-                        break
-                
-                actual_extra = 0
-                for j in range(1, extra + 1):
-                    if i + j < len(raw_lines):
-                        next_line = raw_lines[i + j]
-                        ts_part_next = next_line[:ts_len]
-                        if ts_part_next.strip() and len(next_line) > 0 and not next_line[0].isspace():
-                            break
-                        actual_extra += 1
-                
-                bl = raw_lines[i : i + actual_extra + 1]
-                skey = effective_ts[i]
-                all_blocks.append((skey, bl, current_src))
-                i += actual_extra + 1
+            # 字下げされた継続行は直前の行と同じキーになるため、安定ソートで先頭行の直後に残る
+            src_map = t.line_source_map
+            for i, line in enumerate(raw_lines):
+                current_src = src_map[i] if (src_map and i < len(src_map)) else fn
+                all_blocks.append((effective_ts[i], [line], current_src))
                 
         all_blocks.sort(key=lambda x: x[0])
         final_lines, final_src =[],[]
@@ -1035,13 +1004,11 @@ class LogViewerApp:
             if not itm.get("enabled", True):
                 continue
             try:
-                extra_lines = int(itm.get("extra_lines", 0))
                 rule = {
                     "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
                     "regex": re.compile(_normalize_user_pattern(itm["pattern"]), re.I | re.DOTALL),
                     "comment": itm.get("comment", ""),
                     "color": itm.get("color", "#ffffff"),
-                    "extra": extra_lines,
                 }
                 rules.append(rule)
             except Exception:
@@ -1054,7 +1021,6 @@ class LogViewerApp:
                 "regex": re.compile(r"\[VIRTUAL TIMER\]", re.I),
                 "comment": "タイマー満了",
                 "color": "#ffe8d6",
-                "extra": 0,
             })
         return rules
 
@@ -1747,7 +1713,7 @@ class LogViewerApp:
         menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
 
     def edit_keywords_dialog(self): 
-        self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords",["file_pattern", "pattern","color","comment","extra_lines"])
+        self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords",["file_pattern", "pattern","color","comment"])
         
     def edit_replace_patterns_dialog(self): 
         self._edit_dlg("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。", "replace_patterns",["search","replace"])
@@ -1823,7 +1789,6 @@ class LogViewerApp:
             elif f == "color": col_defs.append((col_idx, f, "色", 105))
             elif f == "replace": col_defs.append((col_idx, f, "置換/説明", 165))
             elif f == "comment": col_defs.append((col_idx, f, "コメント", 145))
-            elif f == "extra_lines": col_defs.append((col_idx, f, "+行", 45))
             col_idx += 1
 
         config_count = len(getattr(self, f"{key}_config"))
@@ -1846,7 +1811,7 @@ class LogViewerApp:
 
         entries =[]
         render_state = {"generation": 0}
-        simple_entry_fields = {"file_pattern", "pattern", "search", "name", "start", "duration_ms", "replace", "comment", "extra_lines"}
+        simple_entry_fields = {"file_pattern", "pattern", "search", "name", "start", "duration_ms", "replace", "comment"}
         render_batch_size = 8
 
         def render_row(i, item):
@@ -1910,7 +1875,7 @@ class LogViewerApp:
                 if f in["start_wait", "end_wait"]:
                     item[f] = tk.BooleanVar(value=data.get(f, False) if data else False)
                 else:
-                    def_val = "0" if f == "extra_lines" else (".*" if f == "file_pattern" else "")
+                    def_val = ".*" if f == "file_pattern" else ""
                     val = data.get(f, def_val) if data and f in data else def_val
                     item[f] = tk.StringVar(value=str(val))
             entries.append(item)
@@ -1970,7 +1935,7 @@ class LogViewerApp:
                 "【使い方】\n\n"
                 "正規表現に一致したログを抽出し、色とコメントを付けます。\n\n"
                 "字下げされた行は、直前の行とまとめて1件として判定します。\n\n"
-                "「対象ファイル」はファイル名の正規表現、「+行」は追加で表示する行数です。"
+                "「対象ファイル」はファイル名の正規表現です。"
             )
         elif key == "replace_patterns":
             info_text = (

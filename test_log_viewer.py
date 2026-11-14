@@ -4,11 +4,10 @@ import unittest
 from log_viewer import _find_keyword_matches, _group_log_entries
 
 
-def rule(pattern, extra=0, file_pattern=".*"):
+def rule(pattern, file_pattern=".*"):
     return {
         "file_pat_re": re.compile(file_pattern, re.I),
         "regex": re.compile(pattern, re.I | re.DOTALL),
-        "extra": extra,
     }
 
 
@@ -26,7 +25,7 @@ class MultilineFilterTests(unittest.TestCase):
     def test_groups_indented_lines_as_one_entry(self):
         self.assertEqual(_group_log_entries(self.lines, self.sources), [(0, 4), (4, 5)])
 
-    def test_header_match_selects_complete_entry_without_extra_lines(self):
+    def test_header_match_selects_complete_entry(self):
         self.assertEqual(
             _find_keyword_matches(self.lines, self.sources, [rule("System On Halting")])[0],
             {0: 0, 1: 0, 2: 0, 3: 0},
@@ -52,15 +51,15 @@ class MultilineFilterTests(unittest.TestCase):
         self.assertEqual(matches, {0: 0, 1: 0, 2: 0, 3: 0})
         self.assertEqual(comment_lines, {0: 0})
 
+    def test_single_line_entry_colors_only_itself(self):
+        lines = ["[1] WARN a", "[2] DEBUG b", "[3] DEBUG c"]
+        self.assertEqual(_find_keyword_matches(lines, ["a.log"] * 3, [rule("WARN")])[0], {0: 0})
+
     def test_does_not_group_across_merged_sources(self):
         self.assertEqual(
             _group_log_entries(["[1] header", "  continuation"], ["a.log", "b.log"]),
             [(0, 1), (1, 2)],
         )
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ReadOnlyTextTests(unittest.TestCase):
@@ -137,7 +136,7 @@ class DisplayPipelineTests(unittest.TestCase):
         self.app = lv.LogViewerApp.__new__(lv.LogViewerApp)
         self.app.root = self.root
         self.app.keywords_config = [
-            {"pattern": "ERROR", "color": "#ffcccc", "comment": "err", "enabled": True, "extra_lines": 0}
+            {"pattern": "ERROR", "color": "#ffcccc", "comment": "err", "enabled": True}
         ]
         self.app.sections_config = []
         self.app.replace_patterns_config = []
@@ -179,3 +178,7 @@ class DisplayPipelineTests(unittest.TestCase):
         self.assertEqual(self.tab.text.get("1.0", "end-1c"), "[1.002] V_START\n[1.003] ERROR boom\n[1.004] V_START")
         self.assertEqual([str(x) for x in self.tab.text.tag_ranges("kw_ffcccc")], ["2.0", "2.18"])
         self.assertEqual(self.tab.comment_text.get("2.0", "2.end"), "err")
+
+
+if __name__ == "__main__":
+    unittest.main()
