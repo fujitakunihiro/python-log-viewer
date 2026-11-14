@@ -119,3 +119,63 @@ class ReadOnlyTextTests(unittest.TestCase):
         path = self.text._w
         self.text.destroy()
         self.assertEqual(self.root.tk.call("info", "commands", path), "")
+
+
+class DisplayPipelineTests(unittest.TestCase):
+    """解析キャッシュと表示行の決定。"""
+
+    def setUp(self):
+        import tkinter as tk
+        import log_viewer as lv
+
+        self.lv = lv
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as e:
+            self.skipTest(f"Tk unavailable: {e}")
+        self.root.withdraw()
+        self.app = lv.LogViewerApp.__new__(lv.LogViewerApp)
+        self.app.root = self.root
+        self.app.keywords_config = [
+            {"pattern": "ERROR", "color": "#ffcccc", "comment": "err", "enabled": True, "extra_lines": 0}
+        ]
+        self.app.sections_config = []
+        self.app.replace_patterns_config = []
+        self.app.vsync_config = dict(lv.DEFAULT_CONFIG["vsync_auto_insert"])
+        self.app.use_keyword_filter = False
+        self.app.show_vsync_lines = True
+        self.app.advance_mode = False
+        content = "\n".join([
+            "[1.000] V_START",
+            "[1.001] info",
+            "[1.002] V_START",
+            "[1.003] ERROR boom",
+            "[1.004] V_START",
+            "[1.005] V_START",
+        ])
+        self.tab = lv.LogTab(self.root, self.app, "a.log", content, source_files_list=["a.log"])
+
+    def tearDown(self):
+        if hasattr(self, "root"):
+            self.root.destroy()
+
+    def test_analysis_is_cached_until_config_or_content_changes(self):
+        first = self.app._get_analysis(self.tab)
+        self.assertIs(self.app._get_analysis(self.tab), first)
+        self.app.keywords_config[0]["color"] = "#000000"
+        second = self.app._get_analysis(self.tab)
+        self.assertIsNot(second, first)
+        self.tab.original_content = self.tab.original_content + "\n[1.006] x"
+        self.assertIsNot(self.app._get_analysis(self.tab), second)
+
+    def test_filter_shows_adjacent_vsync_lines(self):
+        self.app.use_keyword_filter = True
+        visible = self.app._compute_visibility(self.app._get_analysis(self.tab), ["a.log"])
+        self.assertEqual(visible, [False, False, True, True, True, False])
+
+    def test_render_writes_text_and_colors(self):
+        self.app.use_keyword_filter = True
+        self.app.apply_display_update(self.tab)
+        self.assertEqual(self.tab.text.get("1.0", "end-1c"), "[1.002] V_START\n[1.003] ERROR boom\n[1.004] V_START")
+        self.assertEqual([str(x) for x in self.tab.text.tag_ranges("kw_ffcccc")], ["2.0", "2.18"])
+        self.assertEqual(self.tab.comment_text.get("2.0", "2.end"), "err")

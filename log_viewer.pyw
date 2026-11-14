@@ -22,6 +22,11 @@ VSYNC_TAG = "<VSYNC>"
 VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]"
 VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---"
 VIRTUAL_SRC_NAME = "(Virtual)"
+VIRTUAL_TIMER_MARK = "[VIRTUAL TIMER]"
+VSYNC_ORIGIN_MARK = "<<< [V-SYNC 起点]"
+VSYNC_RE = re.compile(VSYNC_REGEX, re.I)
+DEFAULT_TS_PATTERN = r"^\[?\s*(\d+(?:\.\d+)?)\]?"
+DEFAULT_LINE_COLOR = "#ffffff"
 APP_ICON_FILE = "log_viewer_icon.png"
 
 class UIColors:
@@ -97,12 +102,16 @@ def _find_keyword_matches(
     """Return matched lines and the matched entry starts used for comments."""
     matches: Dict[int, int] = {}
     match_starts: Dict[int, int] = {}
+    # ファイル名パターンの判定はソースごとに一度だけ行う
+    rules_by_source: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
     for start, end in _group_log_entries(lines, sources):
-        entry_text = "\n".join(lines[start:end])
+        entry_text = lines[start] if end - start == 1 else "\n".join(lines[start:end])
         entry_source = sources[start] if start < len(sources) else ""
-        for rule_idx, rule in enumerate(rules):
-            if not rule["file_pat_re"].search(entry_source):
-                continue
+        applicable = rules_by_source.get(entry_source)
+        if applicable is None:
+            applicable = [(i, r) for i, r in enumerate(rules) if r["file_pat_re"].search(entry_source)]
+            rules_by_source[entry_source] = applicable
+        for rule_idx, rule in applicable:
             if not rule["regex"].search(entry_text):
                 continue
 
@@ -115,6 +124,34 @@ def _find_keyword_matches(
                 match_starts[start] = rule_idx
             break
     return matches, match_starts
+
+def _style_toggle(btn: tk.Button, label: str, on: bool, off_bg: str = UIColors.ACCENT) -> None:
+    if on:
+        btn.config(text=f"{label}: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+    else:
+        btn.config(text=f"{label}: OFF", bg=off_bg, activebackground=UIColors.ACCENT_HOVER)
+
+
+def _replace_text(widget: tk.Text, text: str) -> None:
+    widget.delete("1.0", tk.END)
+    if text:
+        widget.insert("1.0", text)
+
+
+def _apply_line_tags(widget: tk.Text, prefix: str, lines_by_color: Dict[str, List[int]], chunk: int = 2000) -> None:
+    """色ごとに 1 つのタグを作り、行範囲はまとめて tag_add する（行ごとの Tcl 呼び出しを避ける）。"""
+    for tag in widget.tag_names():
+        if tag.startswith(prefix):
+            widget.tag_delete(tag)
+    for color, line_nos in lines_by_color.items():
+        tag = f"{prefix}{color.replace('#', '')}"
+        widget.tag_configure(tag, background=color)
+        for k in range(0, len(line_nos), chunk):
+            ranges: List[str] = []
+            for ln in line_nos[k:k + chunk]:
+                ranges += (f"{ln}.0", f"{ln}.end")
+            widget.tag_add(tag, *ranges)
+
 
 class Tooltip:
     """Hover tooltip for displaying text on mouse over"""
@@ -184,7 +221,7 @@ DEFAULT_CONFIG = {
     "replace_patterns":[],
     "vsync_auto_insert": {
         "enabled": True,
-        "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
+        "time_pattern": DEFAULT_TS_PATTERN,
         "manual_ms": 16.666,
         "start_time_val": "0.0"
     }
@@ -648,7 +685,12 @@ class LogViewerApp:
 
     def close_tab(self):
         t = self.get_current_tab()
-        if t: self.notebook.forget(t)
+        if t: self._destroy_tab(t)
+
+    def _destroy_tab(self, tab: LogTab) -> None:
+        # forget だけではウィジェットとログ内容がメモリに残るため破棄する
+        self.notebook.forget(tab)
+        tab.destroy()
 
     def reload_file(self):
         tab = self.get_current_tab()
@@ -656,7 +698,7 @@ class LogViewerApp:
             return
 
         if getattr(tab, "file_path", "") == "Merged":
-            self.notebook.forget(tab)
+            self._destroy_tab(tab)
             tabs = [self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
             target_tabs = [t for t in tabs if getattr(t, "file_path", "") and t.file_path != "Merged"]
 
@@ -837,7 +879,7 @@ class LogViewerApp:
             
             self.vsync_config = {
                 "enabled": True, 
-                "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
+                "time_pattern": DEFAULT_TS_PATTERN,
                 "manual_ms": ms,
                 "start_time_val": e_start_time.get()
             }
@@ -1016,25 +1058,34 @@ class LogViewerApp:
             })
         return rules
 
-    def _process_vsync_insertion(self, content: str, src_map: List[str], src_file_names: List[str]) -> Tuple[str, List[str]]:
-        lines_temp = content.splitlines()
-        src_map_temp = src_map if len(src_map) == len(lines_temp) else src_map + [""] * (len(lines_temp) - len(src_map))
-        
-        ts_pat = self.vsync_config.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-        try: re_ts = re.compile(ts_pat)
-        except: re_ts = re.compile(r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-            
-        timestamps_temp =[]
+    def _compile_ts_regex(self) -> "re.Pattern[str]":
+        try:
+            return re.compile(self.vsync_config.get("time_pattern", DEFAULT_TS_PATTERN))
+        except Exception:
+            return re.compile(DEFAULT_TS_PATTERN)
+
+    def _parse_timestamps(self, lines: List[str]) -> Tuple[List[Optional[float]], bool]:
+        """各行のタイムスタンプ（秒）と、hh:mm:ss 形式が含まれるかを返す。"""
+        re_ts = self._compile_ts_regex()
+        parse = self._parse_time_seconds
+        timestamps: List[Optional[float]] = []
         is_colon_format = False
-        for line in lines_temp:
+        for line in lines:
             m = re_ts.search(line)
             if m:
                 ts_str = m.group(1)
-                if ":" in ts_str: is_colon_format = True
-                timestamps_temp.append(self._parse_time_seconds(ts_str))
+                if ":" in ts_str:
+                    is_colon_format = True
+                timestamps.append(parse(ts_str))
             else:
-                timestamps_temp.append(None)
-                
+                timestamps.append(None)
+        return timestamps, is_colon_format
+
+    def _process_vsync_insertion(self, content: str, src_map: List[str], src_file_names: List[str]) -> Tuple[str, List[str]]:
+        lines_temp = content.splitlines()
+        src_map_temp = src_map if len(src_map) == len(lines_temp) else src_map + [""] * (len(lines_temp) - len(src_map))
+        timestamps_temp, is_colon_format = self._parse_timestamps(lines_temp)
+
         def format_sec(s):
             if is_colon_format:
                 h = int(s // 3600)
@@ -1085,7 +1136,7 @@ class LogViewerApp:
                     if insertion_count >= 100: next_virtual_ts = line_ts + interval_sec
                     
                 if i == start_line_idx:
-                    lines_v.append(line + "  <<<[V-SYNC 起点]")
+                    lines_v.append(f"{line}  {VSYNC_ORIGIN_MARK}")
                 else:
                     lines_v.append(line)
                 src_map_v.append(src_map_temp[i])
@@ -1097,11 +1148,10 @@ class LogViewerApp:
 
         # === PASS 2: Virtual Timer Insertion ===
         section_rules = self._compile_section_rules()
-
-        try:
-            re_vsync = re.compile(VSYNC_REGEX, re.I)
-        except Exception:
-            re_vsync = re.compile(r"V_START", re.I)
+        if not any(r["duration_ms"] > 0 for r in section_rules):
+            # 待ち時間付きの区間がなければタイマー行は挿入されない
+            return "\n".join(lines_v), list(src_map_v)
+        rules_by_fn = {fn: [r for r in section_rules if r["file_pat_re"].search(fn)] for fn in src_file_names}
 
         lines_final =[]
         src_map_final =[]
@@ -1113,7 +1163,7 @@ class LogViewerApp:
             ts = timestamps_v[i]
             line_src = src_map_v[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-            is_vsync_line = (re_vsync.search(line) is not None) and ("[VIRTUAL TIMER]" not in line)
+            is_vsync_line = (VSYNC_RE.search(line) is not None) and (VIRTUAL_TIMER_MARK not in line)
 
             if ts is not None:
                 expired =[]
@@ -1156,8 +1206,8 @@ class LogViewerApp:
                     pending_states_sim[fn] = None
 
                 if fn == line_src:
-                    for rule in section_rules:
-                        if rule["file_pat_re"].search(fn) and rule["start"].search(line):
+                    for rule in rules_by_fn[fn]:
+                        if rule["start"].search(line):
                             if rule["start_wait"]:
                                 pending_states_sim[fn] = {"rule": rule}
                             else:
@@ -1231,11 +1281,8 @@ class LogViewerApp:
     def toggle_filter(self, force_update=False):
         if not force_update:
             self.use_keyword_filter = not self.use_keyword_filter
-        if self.use_keyword_filter:
-            self.btn_kw_filter.config(text="フィルタ: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
-        else:
-            self.btn_kw_filter.config(text="フィルタ: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
-        
+        _style_toggle(self.btn_kw_filter, "フィルタ", self.use_keyword_filter)
+
         if not force_update:
             t = self.get_current_tab()
             if t: self.apply_display_update(t)
@@ -1243,11 +1290,8 @@ class LogViewerApp:
     def toggle_vsync_display(self, force_update=False):
         if not force_update:
             self.show_vsync_lines = not self.show_vsync_lines
-        if self.show_vsync_lines:
-            self.btn_vsync_toggle.config(text="仮想V周期表示: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
-        else:
-            self.btn_vsync_toggle.config(text="仮想V周期表示: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
-        
+        _style_toggle(self.btn_vsync_toggle, "仮想V周期表示", self.show_vsync_lines)
+
         self._update_vsync_info_label()
             
         if not force_update:
@@ -1256,10 +1300,7 @@ class LogViewerApp:
     
     def toggle_advance_mode(self):
         self.advance_mode = not self.advance_mode
-        if self.advance_mode:
-            self.btn_advance.config(text="Advanced: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
-        else:
-            self.btn_advance.config(text="Advanced: OFF", bg=UIColors.BORDER, activebackground=UIColors.ACCENT_HOVER)
+        _style_toggle(self.btn_advance, "Advanced", self.advance_mode, off_bg=UIColors.BORDER)
         
         # メニュー項目を追加/削除
         try:
@@ -1319,355 +1360,315 @@ class LogViewerApp:
         manual_ms = self.vsync_config.get("manual_ms", 16.666)
         self.lbl_vsync_info.config(text=f"起点: {start_time}秒 / 間隔: {manual_ms}ms")
 
+    # --- Filter & Display: 解析（設定と内容が同じ間はキャッシュ） → 表示行の決定 → 描画 ---
     def apply_display_update(self, tab: LogTab):
+        analysis = self._get_analysis(tab)
+        visible = self._compute_visibility(analysis, tab.source_file_names)
+        self._render_tab(tab, analysis, visible)
+
+    def _analysis_key(self) -> str:
+        return json.dumps(
+            [self.keywords_config, self.sections_config, self.replace_patterns_config,
+             self.vsync_config.get("time_pattern")],
+            sort_keys=True, ensure_ascii=False, default=str,
+        )
+
+    def _get_analysis(self, tab: LogTab) -> Dict[str, Any]:
+        """フィルタ/V周期/Advanced の切り替えでは再解析しないよう、タブごとに結果を保持する。"""
+        key = self._analysis_key()
+        cached = getattr(tab, "_analysis", None)
+        if (cached is not None and cached["key"] == key
+                and cached["content"] is tab.original_content
+                and cached["src_map"] is tab.line_source_map):
+            return cached
+        analysis = self._analyze_tab(tab)
+        analysis.update(key=key, content=tab.original_content, src_map=tab.line_source_map)
+        tab._analysis = analysis
+        return analysis
+
+    def _analyze_tab(self, tab: LogTab) -> Dict[str, Any]:
         data = tab.original_content
-        if self.replace_patterns_config: data = self._apply_replacements(data)
+        if self.replace_patterns_config:
+            data = self._apply_replacements(data)
         lines = data.splitlines()
-        
-        line_attrs =[{"color": "#ffffff", "comment": "", "priority": 0} for _ in range(len(lines))]
-        
-        srcs = tab.line_source_map if tab.line_source_map else (tab.source_file_names * len(lines))
-        if len(srcs) < len(lines): srcs.extend([""] * (len(lines) - len(srcs))) 
+        n = len(lines)
 
+        srcs = tab.line_source_map if tab.line_source_map else (tab.source_file_names * n)
+        if len(srcs) < n:
+            srcs.extend([""] * (n - len(srcs)))
+
+        timestamps, _ = self._parse_timestamps(lines)
+        is_vsync = [VSYNC_RE.search(line) is not None for line in lines]
+        status = self._compute_section_status(lines, srcs, timestamps, is_vsync, tab.source_file_names)
+
+        colors = [DEFAULT_LINE_COLOR] * n
+        comments = [""] * n
+        priority = [0] * n
+
+        keyword_rules = self._compile_keyword_rules()
+        # 字下げされた継続行を先頭行とまとめて、1件のログとして判定する。
+        keyword_matches, match_starts = _find_keyword_matches(lines, srcs, keyword_rules)
+        for idx, rule_idx in keyword_matches.items():
+            if idx < n and rule_idx < len(keyword_rules) and priority[idx] < 20:
+                rule = keyword_rules[rule_idx]
+                colors[idx] = rule["color"]
+                # 複数行ログは全行を色付けするが、コメントは先頭行だけに表示する。
+                if match_starts.get(idx) == rule_idx:
+                    comments[idx] = f"{comments[idx]} {rule['comment']}".strip()
+                priority[idx] = 20
+
+        for idx, line in enumerate(lines):
+            if VSYNC_ORIGIN_MARK in line and priority[idx] < 30:
+                colors[idx] = UIColors.ROSE
+                comments[idx] = f"{comments[idx]}[基準位置]".strip()
+                priority[idx] = 30
+
+        return {
+            "lines": lines, "srcs": srcs, "timestamps": timestamps, "is_vsync": is_vsync,
+            "status": status, "colors": colors, "comments": comments, "priority": priority,
+        }
+
+    def _compute_section_status(self, lines, srcs, timestamps, is_vsync, file_names) -> Dict[str, List[Tuple[str, str]]]:
+        """各ソースファイルについて、行ごとの区間表示 (テキスト, 色) を求める。"""
+        empty = ("", DEFAULT_LINE_COLOR)
         section_rules = self._compile_section_rules()
+        if not section_rules:
+            return {fn: [empty] * len(lines) for fn in file_names}
 
-        ts_pat = self.vsync_config.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-        try:
-            re_ts = re.compile(ts_pat)
-        except:
-            re_ts = re.compile(r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-            
-        timestamps =[]
-        for line in lines:
-            m = re_ts.search(line)
-            if m:
-                timestamps.append(self._parse_time_seconds(m.group(1)))
-            else:
-                timestamps.append(None)
+        rules_by_fn = {fn: [r for r in section_rules if r["file_pat_re"].search(fn)] for fn in file_names}
+        active = {fn: None for fn in file_names}
+        pending = {fn: None for fn in file_names}
+        status = {fn: [] for fn in file_names}
 
-        active_states = {fn: None for fn in tab.source_file_names}
-        pending_states = {fn: None for fn in tab.source_file_names}
-        status_buffers = {fn:[] for fn in tab.source_file_names}
-        
-        try:
-            re_vsync = re.compile(VSYNC_REGEX, re.I)
-        except:
-            re_vsync = re.compile(r"V_START", re.I)
+        def end_active(fn, end_i):
+            ret = ""
+            s_info = active[fn]
+            if s_info and "start_idx" in s_info:
+                idx = s_info["start_idx"]
+                ts_start = s_info.get("start_ts")
+                ts_end = timestamps[end_i]
+                if ts_start is not None and ts_end is not None:
+                    t_str = f"[{(ts_end - ts_start) * 1000.0:.1f}ms]"
+                    buf = status[fn]
+                    if idx < len(buf):
+                        old_txt, col = buf[idx]
+                        buf[idx] = (f"{old_txt}{t_str}", col)
+                    else:
+                        ret = t_str
+            active[fn] = None
+            return ret
+
+        def start_state(rule, i):
+            return {"rule": rule, "start_idx": i, "start_ts": timestamps[i],
+                    "end_pending": False, "timer_expired_handled": False}
 
         for i, line in enumerate(lines):
             line_src = srcs[i]
             is_virtual_line = (line_src == VIRTUAL_SRC_NAME)
-            is_vsync_line = (re_vsync.search(line) is not None) and ("[VIRTUAL TIMER]" not in line)
+            is_vsync_line = is_vsync[i] and VIRTUAL_TIMER_MARK not in line
 
-            for fn in tab.source_file_names:
+            for fn in file_names:
                 rule_to_display = None
                 display_text = ""
                 ended_this_line = False
                 ended_rule = None
-                
-                def _end_active_state(fn_name, end_i):
-                    ret_str = ""
-                    s_info = active_states[fn_name]
-                    if s_info and "start_idx" in s_info:
-                        idx = s_info["start_idx"]
-                        ts_start = s_info.get("start_ts")
-                        ts_end = timestamps[end_i]
-                        
-                        if ts_start is not None and ts_end is not None:
-                            diff_ms = (ts_end - ts_start) * 1000.0
-                            t_str = f"[{diff_ms:.1f}ms]"
-                            
-                            if idx < len(status_buffers[fn_name]):
-                                old_txt, col = status_buffers[fn_name][idx]
-                                status_buffers[fn_name][idx] = (f"{old_txt}{t_str}", col)
-                            else:
-                                ret_str = t_str
-                    
-                    active_states[fn_name] = None
-                    return ret_str
 
-                if active_states[fn] and active_states[fn].get("end_pending") and is_vsync_line:
-                    ended_rule = active_states[fn]["rule"]
-                    t_str = _end_active_state(fn, i)
+                if active[fn] and active[fn].get("end_pending") and is_vsync_line:
+                    ended_rule = active[fn]["rule"]
+                    t_str = end_active(fn, i)
                     ended_this_line = True
                     display_text = f"{ended_rule['name']} (終了){t_str}"
 
-                if pending_states[fn] and is_vsync_line:
-                    if active_states[fn]:
-                        ended_rule = active_states[fn]["rule"]
-                        t_str = _end_active_state(fn, i)
+                if pending[fn] and is_vsync_line:
+                    if active[fn]:
+                        ended_rule = active[fn]["rule"]
+                        t_str = end_active(fn, i)
                         ended_this_line = True
                         display_text = f"{ended_rule['name']} (終了){t_str}"
-                    
-                    active_states[fn] = {
-                        "rule": pending_states[fn]["rule"],
-                        "start_idx": i,
-                        "start_ts": timestamps[i],
-                        "end_pending": False,
-                        "timer_expired_handled": False
-                    }
-                    pending_states[fn] = None
-                    rule_to_display = active_states[fn]["rule"]
+                    active[fn] = start_state(pending[fn]["rule"], i)
+                    pending[fn] = None
+                    rule_to_display = active[fn]["rule"]
                     display_text = f"{rule_to_display['name']} (開始)"
 
                 if fn == line_src:
-                    for rule in section_rules:
-                        if rule["file_pat_re"].search(fn) and rule["start"].search(line):
-                            if rule["start_wait"]:
-                                pending_states[fn] = {"rule": rule}
-                            else:
-                                if active_states[fn]:
-                                    ended_rule = active_states[fn]["rule"]
-                                    t_str = _end_active_state(fn, i)
-                                    if t_str: display_text += t_str
-                                    ended_this_line = True
-                                    
-                                active_states[fn] = {
-                                    "rule": rule,
-                                    "start_idx": i,
-                                    "start_ts": timestamps[i],
-                                    "end_pending": False,
-                                    "timer_expired_handled": False
-                                }
-                                pending_states[fn] = None
-                                rule_to_display = rule
-                                display_text = f"{rule['name']} (開始)"
-                                
-                                is_end_match = False
-                                if rule["end_str"] != "":
-                                    is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
-                                    
-                                if rule["duration_ms"] > 0:
-                                    is_end_match = False
-                                    
-                                if is_end_match:
-                                    if rule["end_wait"]:
-                                        active_states[fn]["end_pending"] = True
-                                    else:
-                                        display_text = f"{rule['name']} (開始/終了)[0.0ms]"
-                                        active_states[fn] = None
-                            break 
+                    for rule in rules_by_fn[fn]:
+                        if not rule["start"].search(line):
+                            continue
+                        if rule["start_wait"]:
+                            pending[fn] = {"rule": rule}
+                        else:
+                            if active[fn]:
+                                ended_rule = active[fn]["rule"]
+                                t_str = end_active(fn, i)
+                                if t_str:
+                                    display_text += t_str
+                                ended_this_line = True
+                            active[fn] = start_state(rule, i)
+                            pending[fn] = None
+                            rule_to_display = rule
+                            display_text = f"{rule['name']} (開始)"
 
-                if active_states[fn] and not active_states[fn].get("end_pending"):
-                    rule = active_states[fn]["rule"]
-                    state_info = active_states[fn]
-                    
+                            is_end_match = False
+                            if rule["end_str"] != "":
+                                is_end_match = rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
+                            if rule["duration_ms"] > 0:
+                                is_end_match = False
+                            if is_end_match:
+                                if rule["end_wait"]:
+                                    active[fn]["end_pending"] = True
+                                else:
+                                    display_text = f"{rule['name']} (開始/終了)[0.0ms]"
+                                    active[fn] = None
+                        break
+
+                state_info = active[fn]
+                if state_info and not state_info.get("end_pending"):
+                    rule = state_info["rule"]
                     is_time_expired = False
-                    if rule["duration_ms"] > 0 and timestamps[i] is not None and state_info.get("start_ts") is not None:
-                        if i > state_info["start_idx"]:
-                            elapsed_ms = (timestamps[i] - state_info["start_ts"]) * 1000.0
-                            if elapsed_ms >= rule["duration_ms"] - 0.001:
-                                is_time_expired = True
+                    if (rule["duration_ms"] > 0 and timestamps[i] is not None
+                            and state_info.get("start_ts") is not None and i > state_info["start_idx"]):
+                        elapsed_ms = (timestamps[i] - state_info["start_ts"]) * 1000.0
+                        is_time_expired = elapsed_ms >= rule["duration_ms"] - 0.001
 
                     condition_met = False
                     if rule["end_str"] != "":
-                        is_end_match = False
-                        if rule["end"].search(line) and (fn == line_src or is_virtual_line or rule["is_vsync_end"]):
-                            is_end_match = True
-                        
+                        is_end_match = bool(rule["end"].search(line)) and (fn == line_src or is_virtual_line or rule["is_vsync_end"])
                         if rule["duration_ms"] > 0 and not is_time_expired:
                             is_end_match = False
-                            
                         condition_met = is_end_match
-                    else:
-                        if rule["duration_ms"] > 0 and is_time_expired and not state_info.get("timer_expired_handled"):
-                            condition_met = True
-                            state_info["timer_expired_handled"] = True
+                    elif rule["duration_ms"] > 0 and is_time_expired and not state_info.get("timer_expired_handled"):
+                        condition_met = True
+                        state_info["timer_expired_handled"] = True
 
                     if condition_met:
                         if rule["end_wait"]:
-                            active_states[fn]["end_pending"] = True
+                            state_info["end_pending"] = True
                         else:
                             ended_rule = rule
-                            t_str = _end_active_state(fn, i)
+                            t_str = end_active(fn, i)
                             ended_this_line = True
-                            
-                            if rule_to_display == ended_rule:
-                                display_text = f"{ended_rule['name']} (終了){t_str}"
-                            else:
-                                rule_to_display = ended_rule
-                                display_text = f"{ended_rule['name']} (終了){t_str}"
+                            rule_to_display = ended_rule
+                            display_text = f"{ended_rule['name']} (終了){t_str}"
 
                 if rule_to_display is None:
-                    if active_states[fn]:
-                        rule_to_display = active_states[fn]["rule"]
+                    if active[fn]:
+                        rule_to_display = active[fn]["rule"]
                         display_text = rule_to_display['name']
                     elif ended_this_line:
                         rule_to_display = ended_rule
                         if not display_text:
                             display_text = f"{ended_rule['name']} (終了)"
 
-                if rule_to_display: 
-                    status_buffers[fn].append((display_text, rule_to_display["color"]))
-                else: 
-                    status_buffers[fn].append(("", "#ffffff"))
+                status[fn].append((display_text, rule_to_display["color"]) if rule_to_display else empty)
+        return status
 
-        keyword_rules = self._compile_keyword_rules()
+    def _compute_visibility(self, analysis: Dict[str, Any], file_names: List[str]) -> List[bool]:
+        lines = analysis["lines"]
+        is_vsync = analysis["is_vsync"]
+        priority = analysis["priority"]
+        status = analysis["status"]
+        n = len(lines)
+        visible = [True] * n
+        use_filter = self.use_keyword_filter
 
-        # 字下げされた継続行を先頭行とまとめて、1件のログとして判定する。
-        keyword_matches, match_starts = _find_keyword_matches(lines, srcs, keyword_rules)
-        for idx, rule_idx in keyword_matches.items():
-            if idx < len(line_attrs) and rule_idx < len(keyword_rules):
-                rule = keyword_rules[rule_idx]
-                if line_attrs[idx]["priority"] < 20:
-                    line_attrs[idx]["color"] = rule["color"]
-                    # 複数行ログは全行を色付けするが、コメントは先頭行だけに表示する。
-                    if match_starts.get(idx) == rule_idx:
-                        base_cmt = line_attrs[idx]["comment"]
-                        new_cmt = rule["comment"]
-                        line_attrs[idx]["comment"] = f"{base_cmt} {new_cmt}".strip()
-                    line_attrs[idx]["priority"] = 20
+        for i, line in enumerate(lines):
+            if not self.show_vsync_lines and VSYNC_MARKER in line:
+                visible[i] = False
+            elif use_filter:
+                if VIRTUAL_TIMER_MARK in line or VSYNC_ORIGIN_MARK in line:
+                    continue
+                if priority[i] == 0:
+                    visible[i] = False
+                elif is_vsync[i] and not any(status[fn][i][0] != "" for fn in file_names):
+                    visible[i] = False
 
-        for idx in range(len(lines)):
-            if "<<< [V-SYNC 起点]" in lines[idx]:
-                if line_attrs[idx]["priority"] < 30:
-                    line_attrs[idx]["color"] = UIColors.ROSE 
-                    line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
-                    line_attrs[idx]["priority"] = 30
+        if not use_filter:
+            return visible
 
-        visible_mapping = {}
-        is_visible =[True] * len(lines)
-        
-        for i in range(len(lines)):
-            if not self.show_vsync_lines and VSYNC_MARKER in lines[i]:
-                is_visible[i] = False
-            else:
-                attr = line_attrs[i]
-                if self.use_keyword_filter:
-                    if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
-                        is_visible[i] = True 
-                    elif attr["priority"] == 0: 
-                        is_visible[i] = False
-                    elif re_vsync.search(lines[i]):
-                        is_in_section = any(status_buffers[fn][i][0] != "" for fn in tab.source_file_names)
-                        if not is_in_section:
-                            is_visible[i] = False
-                            
-        if self.use_keyword_filter and self.show_vsync_lines:
-            vsync_to_show = set()
-            for idx, vis in enumerate(is_visible):
-                if vis and not re_vsync.search(lines[idx]):
-                    for j in range(idx - 1, -1, -1):
-                        if re_vsync.search(lines[j]):
-                            vsync_to_show.add(j)
-                            break
-                    for j in range(idx + 1, len(lines)):
-                        if re_vsync.search(lines[j]):
-                            vsync_to_show.add(j)
-                            break
-            for j in vsync_to_show:
-                is_visible[j] = True
-        
-        if self.use_keyword_filter:
-            visible_indices =[idx for idx, vis in enumerate(is_visible) if vis]
-            v_ptr = 0
-            while v_ptr < len(visible_indices):
-                idx = visible_indices[v_ptr]
-                is_curr_vsync = (VSYNC_MARKER in lines[idx]) or (re_vsync.search(lines[idx]) is not None)
-                
-                if is_curr_vsync:
-                    block_indices =[idx]
-                    next_ptr = v_ptr + 1
-                    
-                    while next_ptr < len(visible_indices):
-                        next_idx = visible_indices[next_ptr]
-                        is_next_vsync = (VSYNC_MARKER in lines[next_idx]) or (re_vsync.search(lines[next_idx]) is not None)
-                        
-                        if is_next_vsync:
-                            block_indices.append(next_idx)
-                            next_ptr += 1
-                        else:
-                            break
-                    
-                    if len(block_indices) >= 3:
-                        for hide_idx in block_indices[1:-1]:
-                            is_visible[hide_idx] = False
+        if self.show_vsync_lines:
+            # 表示行の直前・直後にある V 周期行を表示する
+            prev_v, next_v = [-1] * n, [-1] * n
+            last = -1
+            for i in range(n):
+                prev_v[i] = last
+                if is_vsync[i]:
+                    last = i
+            last = -1
+            for i in range(n - 1, -1, -1):
+                next_v[i] = last
+                if is_vsync[i]:
+                    last = i
+            to_show = set()
+            for i in range(n):
+                if visible[i] and not is_vsync[i]:
+                    if prev_v[i] >= 0:
+                        to_show.add(prev_v[i])
+                    if next_v[i] >= 0:
+                        to_show.add(next_v[i])
+            for j in to_show:
+                visible[j] = True
 
-                    v_ptr = next_ptr
-                else:
-                    v_ptr += 1
-            
-        display_line_count = 1
-        for i in range(len(lines)):
-            if is_visible[i]:
-                visible_mapping[i] = display_line_count
-                display_line_count += 1
+        # 表示行の中で V 周期行が 3 行以上続く場合は、先頭と末尾だけ残す
+        run: List[int] = []
+        for idx in [i for i in range(n) if visible[i]] + [None]:
+            if idx is not None and is_vsync[idx]:
+                run.append(idx)
+                continue
+            if len(run) >= 3:
+                for hide_idx in run[1:-1]:
+                    visible[hide_idx] = False
+            run = []
+        return visible
+
+    def _render_tab(self, tab: LogTab, analysis: Dict[str, Any], visible: List[bool]) -> None:
+        lines = analysis["lines"]
+        srcs = analysis["srcs"]
+        timestamps = analysis["timestamps"]
+        comments = analysis["comments"]
+        colors = analysis["colors"]
+        status = analysis["status"]
+        file_names = tab.source_file_names
+        show_status = self.advance_mode
 
         flines, fcmts, ftimediffs = [], [], []
-        main_tags = []
-        final_st_lines = {fn: [] for fn in tab.source_file_names}
-        final_st_tags = {fn: [] for fn in tab.source_file_names}
+        main_tags: Dict[str, List[int]] = {}
+        st_lines = {fn: [] for fn in file_names}
+        st_tags: Dict[str, Dict[str, List[int]]] = {fn: {} for fn in file_names}
 
-        line_count = 0
+        line_no = 0
         base_ts = None
-
-        for i in range(len(lines)):
-            if not is_visible[i]:
+        for i, line in enumerate(lines):
+            if not visible[i]:
                 continue
+            line_no += 1
+            ts = timestamps[i]
+            if base_ts is None and ts is not None:
+                base_ts = ts
+            flines.append(line)
+            ftimediffs.append(f"{ts - base_ts:.6f}" if ts is not None else "")
+            src = srcs[i]
+            fcmts.append(f"[{src}] {comments[i]}" if (tab.is_merged and src) else comments[i])
+            if colors[i] != DEFAULT_LINE_COLOR:
+                main_tags.setdefault(colors[i], []).append(line_no)
+            if show_status:
+                for fn in file_names:
+                    txt, col = status[fn][i]
+                    st_lines[fn].append(txt)
+                    if col != DEFAULT_LINE_COLOR:
+                        st_tags[fn].setdefault(col, []).append(line_no)
 
-            if base_ts is None and timestamps[i] is not None:
-                base_ts = timestamps[i]
-
-            line_count += 1
-            flines.append(lines[i])
-            s_name = f"[{srcs[i]}] " if (tab.is_merged and srcs[i]) else ""
-
-            if timestamps[i] is not None and base_ts is not None:
-                ftimediffs.append(f"{(timestamps[i] - base_ts):.6f}")
-            else:
-                ftimediffs.append("")
-
-            base_cmt = f"{s_name}{line_attrs[i]['comment']}"
-            fcmts.append(base_cmt)
-
-            if line_attrs[i]["color"] != "#ffffff":
-                main_tags.append((line_count, line_attrs[i]["color"]))
-
-            for fn in tab.source_file_names:
-                txt, col = status_buffers[fn][i]
-                final_st_lines[fn].append(txt)
-                if col != "#ffffff":
-                    final_st_tags[fn].append((line_count, col))
-
-        if flines:
-            tab.text.delete("1.0", tk.END)
-            tab.text.insert("1.0", "\n".join(flines))
-
-            tab.timediff_text.delete("1.0", tk.END)
-            tab.timediff_text.insert("1.0", "\n".join(ftimediffs))
-
-            tab.comment_text.delete("1.0", tk.END)
-            tab.comment_text.insert("1.0", "\n".join(fcmts))
-        else:
-            tab.text.delete("1.0", tk.END)
-            tab.timediff_text.delete("1.0", tk.END)
-            tab.comment_text.delete("1.0", tk.END)
+        _replace_text(tab.text, "\n".join(flines))
+        _replace_text(tab.timediff_text, "\n".join(ftimediffs))
+        _replace_text(tab.comment_text, "\n".join(fcmts))
 
         # Advanced モード時のみ区間情報を表示
-        if self.advance_mode:
-            for fn in tab.source_file_names:
+        if show_status:
+            for fn in file_names:
                 w = tab.status_texts[fn]
-                if final_st_lines[fn]:
-                    w.delete("1.0", tk.END)
-                    w.insert("1.0", "\n".join(final_st_lines[fn]))
-                else:
-                    w.delete("1.0", tk.END)
-                for tag in list(w.tag_names()):
-                    if tag.startswith("st_"):
-                        w.tag_delete(tag)
-                for ln, col in final_st_tags[fn]:
-                    tn = f"st_{col.replace('#','')}"
-                    w.tag_configure(tn, background=col)
-                    w.tag_add(tn, f"{ln}.0", f"{ln}.end")
+                _replace_text(w, "\n".join(st_lines[fn]))
+                _apply_line_tags(w, "st_", st_tags[fn])
 
-        for tag in list(tab.text.tag_names()):
-            if tag.startswith("kw_"):
-                tab.text.tag_delete(tag)
-        for ln, col in main_tags:
-            tn = f"kw_{col.replace('#','')}"
-            tab.text.tag_configure(tn, background=col)
-            tab.text.tag_add(tn, f"{ln}.0", f"{ln}.end")
-
+        _apply_line_tags(tab.text, "kw_", main_tags)
         tab.linenumbers.redraw()
         tab.update_cursor_line()
 
