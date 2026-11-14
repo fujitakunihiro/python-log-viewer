@@ -386,6 +386,12 @@
   .ed-table input[type=text]:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .ed-table input[type=text].bad { border-color: var(--red); background: color-mix(in srgb, var(--red) 6%, var(--surface)); }
   .ed-table input[type=checkbox], .form-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  /* 優先度の選択欄: 他の入力欄と同じ角丸・高さ・枠線 */
+  .ed-table select { appearance: none; -webkit-appearance: none; width: 64px; height: 28px; padding: 0 22px 0 9px; border: 1px solid var(--sep-strong); border-radius: 7px;
+                     background-color: var(--surface); color: var(--text); font: 12px var(--mono); cursor: pointer;
+                     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2386868b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+                     background-repeat: no-repeat; background-position: right 8px center; transition: border-color .15s, box-shadow .15s; }
+  .ed-table select:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .ed-table .ops { white-space: nowrap; padding-left: 10px; }
   /* 行頭の操作（つまみ・チェック・削除）は、行の中で上下中央に揃える */
   .ed-table .ops > * { vertical-align: middle; }
