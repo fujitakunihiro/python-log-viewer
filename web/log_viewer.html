@@ -142,6 +142,7 @@
     <input type="file" id="fileInput" multiple class="hidden">
     <button class="btn" id="btnFilter" title="F2">フィルタ: OFF</button>
     <button class="btn plain" id="btnMerge" title="開いているファイルを時刻順にマージ">ログをマージ</button>
+    <button class="btn plain" id="btnExport" title="表示中の行を色付きの Excel ファイル (.xlsx) に出力">Excel出力</button>
     <label class="field" id="quickField" title="この文字列/正規表現を含む行だけ表示">
       絞り込み <input id="quick" placeholder="文字列 or 正規表現"><span class="count" id="quickCount"></span>
     </label>
@@ -801,6 +802,8 @@ function highlight(line, re, isCur) {
 }
 function baseTs(doc) {
   if (doc.base >= 0 && !isNaN(doc.ts[doc.base])) return doc.ts[doc.base];
+  // 既定の基準は最初の「実際のログ行」（仮想V周期・タイマー行は除く）
+  for (let i = 0; i < doc.ts.length; i++) if (!isNaN(doc.ts[i]) && doc.orig[i] > 0) return doc.ts[i];
   for (let i = 0; i < doc.ts.length; i++) if (!isNaN(doc.ts[i])) return doc.ts[i];
   return NaN;
 }
@@ -1007,6 +1010,166 @@ function mergeDocs(tsLen) {
   return pushDoc(buildMergedDoc(sources, tsLen), t0);
 }
 $("btnMerge").onclick = () => mergeDocs();
+
+// ================= Excel 出力（.xlsx を外部ライブラリなしで作成） =================
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+async function deflateRaw(bytes) {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch (e) { return null; }
+}
+// files: [{ name, data: Uint8Array }] → ZIP の Blob（使えるブラウザでは deflate 圧縮）
+async function buildZip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), crc = crc32(f.data);
+    const packed = await deflateRaw(f.data);
+    const method = packed ? 8 : 0, body = packed || f.data;
+    const head = new DataView(new ArrayBuffer(30));
+    head.setUint32(0, 0x04034b50, true); head.setUint16(4, 20, true); head.setUint16(6, 0x0800, true);
+    head.setUint16(8, method, true); head.setUint16(10, 0, true); head.setUint16(12, 0x21, true);
+    head.setUint32(14, crc, true); head.setUint32(18, body.length, true); head.setUint32(22, f.data.length, true);
+    head.setUint16(26, name.length, true); head.setUint16(28, 0, true);
+    parts.push(new Uint8Array(head.buffer), name, body);
+    const cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
+    cd.setUint16(10, method, true); cd.setUint16(12, 0, true); cd.setUint16(14, 0x21, true);
+    cd.setUint32(16, crc, true); cd.setUint32(20, body.length, true); cd.setUint32(24, f.data.length, true);
+    cd.setUint16(28, name.length, true); cd.setUint32(42, offset, true);
+    central.push(new Uint8Array(cd.buffer), name);
+    offset += 30 + name.length + body.length;
+  }
+  const cdSize = central.reduce((s, p) => s + p.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+// XML に使えない制御文字を除き、エスケープする
+function xmlText(s) {
+  return String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g, "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function colName(n) { let s = ""; for (n++; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; }
+// "#ffcccc" や "red" を Excel の ARGB に変換（解釈できなければ null）
+const colorCtx = document.createElement("canvas").getContext("2d");
+function toArgb(color) {
+  if (!color || color.toLowerCase() === WHITE) return null;
+  colorCtx.fillStyle = "#010203";
+  colorCtx.fillStyle = color;
+  const v = colorCtx.fillStyle;
+  if (!/^#[0-9a-f]{6}$/i.test(v) || (v === "#010203" && color.toLowerCase() !== "#010203")) return null;
+  return "FF" + v.slice(1).toUpperCase();
+}
+const XLSX_MAX_CELL = 32767;
+async function buildXlsx(doc) {
+  const cols = statusCols(doc), b = baseTs(doc);
+  const headers = ["行", ...(doc.isMerged ? ["ファイル"] : []), "経過(秒)", "ログ", "コメント", ...cols.map((fn) => `${fn}の区間`)];
+  const kinds = ["num", ...(doc.isMerged ? ["str"] : []), "sec", "str", "str", ...cols.map(() => "str")];
+  // 書式（塗りつぶし × 数値形式）の組み合わせを必要な分だけ作る
+  const fills = ["FF708090"], xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>', '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'];
+  const xfIndex = new Map();
+  const styleOf = (argb, kind) => {
+    const key = `${argb || ""}|${kind}`;
+    let s = xfIndex.get(key);
+    if (s !== undefined) return s;
+    let fillId = 0;
+    if (argb) { let k = fills.indexOf(argb); if (k < 0) { fills.push(argb); k = fills.length - 1; } fillId = k + 2; }
+    const numFmt = kind === "sec" ? 164 : kind === "num" ? 1 : 49;
+    xfs.push(`<xf numFmtId="${numFmt}" fontId="0" fillId="${fillId}" borderId="0" xfId="0" applyNumberFormat="1"${fillId ? ' applyFill="1"' : ""}/>`);
+    s = xfs.length - 1;
+    xfIndex.set(key, s);
+    return s;
+  };
+  const widths = headers.map((h) => Math.max(6, h.length * 2));
+  const rows = [];
+  rows.push(`<row r="1">${headers.map((h, c) => `<c r="${colName(c)}1" s="1" t="inlineStr"><is><t>${xmlText(h)}</t></is></c>`).join("")}</row>`);
+  let r = 1;
+  for (const i of doc.view) {
+    r++;
+    const t = doc.ts[i];
+    const rowArgb = toArgb(doc.colors[i]);
+    const values = [doc.orig[i] || "", ...(doc.isMerged ? [doc.srcs[i]] : []), isNaN(t) || isNaN(b) ? "" : Math.round((t - b) * 1e6) / 1e6, doc.lines[i], doc.comments[i]];
+    const cellArgb = values.map(() => rowArgb);
+    for (const fn of cols) {
+      const s = doc.status[fn] ? doc.status[fn][i] : null;
+      values.push(s ? s[0] : "");
+      cellArgb.push(s && s[0] ? toArgb(s[1]) : null);
+    }
+    let cells = "";
+    for (let c = 0; c < values.length; c++) {
+      const v = values[c], ref = `${colName(c)}${r}`, s = styleOf(cellArgb[c], kinds[c]);
+      if (v === "") { if (cellArgb[c]) cells += `<c r="${ref}" s="${s}"/>`; continue; }
+      if (typeof v === "number") { cells += `<c r="${ref}" s="${s}"><v>${v}</v></c>`; continue; }
+      const text = v.length > XLSX_MAX_CELL ? v.slice(0, XLSX_MAX_CELL) : v;
+      if (text.length > widths[c]) widths[c] = Math.min(text.length, 120);
+      cells += `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xmlText(text)}</t></is></c>`;
+    }
+    rows.push(`<row r="${r}">${cells}</row>`);
+  }
+  const lastCol = colName(headers.length - 1);
+  const colsXml = widths.map((w, c) => `<col min="${c + 1}" max="${c + 1}" width="${kinds[c] === "sec" ? 13 : kinds[c] === "num" ? 8 : w + 2}" customWidth="1"/>`).join("");
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+    `<dimension ref="A1:${lastCol}${r}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
+    `<sheetFormatPr defaultRowHeight="15"/><cols>${colsXml}</cols><sheetData>${rows.join("")}</sheetData><autoFilter ref="A1:${lastCol}${r}"/></worksheet>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+    `<numFmts count="1"><numFmt numFmtId="164" formatCode="0.000000"/></numFmts>` +
+    `<fonts count="2"><font><sz val="10"/><name val="Consolas"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Yu Gothic UI"/></font></fonts>` +
+    `<fills count="${fills.length + 2}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>` +
+    fills.map((f) => `<fill><patternFill patternType="solid"><fgColor rgb="${f}"/><bgColor indexed="64"/></patternFill></fill>`).join("") + `</fills>` +
+    `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+    `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+    `<cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const sheetName = "Log";
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+    `<sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets>` +
+    `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">${sheetName}!$A$1:$${lastCol}$${r}</definedName></definedNames></workbook>`;
+  const enc = new TextEncoder();
+  const file = (name, text) => ({ name, data: enc.encode(text) });
+  return buildZip([
+    file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`),
+    file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`),
+    file("xl/workbook.xml", workbook),
+    file("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
+    file("xl/worksheets/sheet1.xml", sheet),
+    file("xl/styles.xml", styles),
+  ]);
+}
+const XLSX_MAX_ROWS = 1048575;
+async function exportExcel() {
+  const doc = cur();
+  if (!doc) { setStatus("出力するログを開いてください"); return; }
+  if (doc.view.length > XLSX_MAX_ROWS) { alert(`Excel の行数上限を超えています（${doc.view.length.toLocaleString()} 行）。フィルタや絞り込みで減らしてください。`); return; }
+  const btn = $("btnExport");
+  btn.disabled = true; btn.textContent = "出力中…";
+  try {
+    const t0 = performance.now();
+    const blob = await buildXlsx(doc);
+    const base = doc.name.replace(/\.[^.]+$/, "") || "log";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}${state.filterOn ? "_filtered" : ""}.xlsx`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    setStatus(`${doc.view.length.toLocaleString()} 行を ${a.download} に出力しました（${Math.round(performance.now() - t0)} ms）`);
+  } catch (e) {
+    setStatus(`Excel 出力に失敗しました: ${e.message}`);
+  } finally {
+    btn.disabled = false; btn.textContent = "Excel出力";
+  }
+}
+$("btnExport").onclick = exportExcel;
 
 // ================= ファイル読み込み（UTF-8 → Shift_JIS） =================
 async function readFileText(file) {
@@ -1397,7 +1560,7 @@ layout();
 
 // 検証用: 表示内容を Python 版と比較できる形で取り出す
 window.__lv = {
-  state, addDoc, mergeDocs, applyConfig, setFilter, setShowVsync, setAdvanced,
+  state, addDoc, mergeDocs, applyConfig, setFilter, setShowVsync, setAdvanced, buildXlsx,
   dump(doc, filterOn, showVsync) {
     const keep = [state.filterOn, state.showVsync];
     state.filterOn = filterOn; state.showVsync = showVsync;
