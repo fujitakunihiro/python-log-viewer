@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log Viewer (HTML 試作)</title>
+<style>
+  :root {
+    --bg: #efe6d5; --panel: #ffffff; --header: #708090; --header-fg: #ffffff;
+    --accent: #708090; --accent-hover: #5c6a78; --rose: #d4a3b3; --rose-hover: #c291a1;
+    --text: #4a4f54; --muted: #999999; --border: #d1cbbd; --mark: #ffe066;
+    --ln-w: 64px; --src-w: 110px; --dt-w: 104px; --cm-w: 260px; --st-w: 150px;
+    --mono: Consolas, "Cascadia Mono", "MS Gothic", monospace;
+    --ui: "Yu Gothic UI", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 13px var(--ui); display: flex; flex-direction: column; }
+  button, input { font: inherit; }
+
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; }
+  .btn { border: 0; border-radius: 3px; padding: 5px 12px; font-weight: 700; cursor: pointer; background: var(--accent); color: #fff; }
+  .btn:hover { background: var(--accent-hover); }
+  .btn.on { background: var(--rose); }
+  .btn.on:hover { background: var(--rose-hover); }
+  .btn.plain { background: #fff; color: var(--text); }
+  .btn.plain:hover { background: var(--border); }
+  .btn.dim { background: var(--border); color: var(--text); }
+  .field { display: flex; align-items: center; gap: 4px; background: #fff; border: 1px solid var(--border); border-radius: 3px; padding: 2px 6px; }
+  .field input { border: 0; outline: 0; width: 170px; background: transparent; }
+  .field .count { color: var(--muted); font-size: 12px; min-width: 52px; text-align: right; }
+  .field.bad { border-color: #d9534f; }
+  .info { font-size: 12px; }
+  .spacer { flex: 1; }
+
+  .tabs { display: flex; gap: 2px; padding: 0 10px; overflow-x: auto; }
+  .tab { padding: 6px 10px 6px 14px; background: var(--border); border-radius: 4px 4px 0 0; cursor: pointer;
+         font-weight: 700; font-size: 12px; white-space: nowrap; display: flex; gap: 8px; align-items: center; }
+  .tab.active { background: var(--panel); color: #000; }
+  .tab .x { color: var(--muted); border: 0; background: none; cursor: pointer; padding: 0 2px; }
+  .tab .x:hover { color: #000; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .chip { border: 1px solid var(--border); border-radius: 12px; padding: 1px 10px; cursor: pointer; font-size: 12px; background: #fff; }
+  .chip b { font-weight: 700; margin-left: 4px; }
+  .chip.zero { opacity: .45; cursor: default; }
+
+  .main { flex: 1; min-height: 0; margin: 0 10px; background: var(--panel); display: flex; flex-direction: column; position: relative; }
+  .scroller { flex: 1; min-height: 0; overflow: auto; position: relative; outline: none; }
+  .canvas { position: relative; }
+  .row, .head { display: flex; height: 20px; line-height: 20px; font: 13px var(--mono); white-space: pre; }
+  .row { position: absolute; left: 0; cursor: default; }
+  .head { position: sticky; top: 0; z-index: 3; font: 700 12px var(--ui); color: var(--header-fg); background: var(--header); }
+  .L, .R { display: flex; flex: none; position: sticky; z-index: 2; }
+  .L { left: 0; }
+  .R { right: 0; box-shadow: -4px 0 6px -4px rgba(0,0,0,.15); }
+  .cell { overflow: hidden; padding: 0 6px; flex: none; text-overflow: ellipsis; }
+  .ln { width: var(--ln-w); text-align: right; color: var(--muted); background: var(--bg); border-right: 1px solid var(--border); }
+  .src { width: var(--src-w); color: var(--muted); background: #faf9f6; border-right: 1px solid var(--border); font-family: var(--ui); font-size: 12px; }
+  .dt { width: var(--dt-w); text-align: right; color: var(--muted); background: #faf9f6; border-right: 1px solid var(--border); }
+  .cm { width: var(--cm-w); color: #5c7a99; background: #fff; border-left: 1px solid var(--border); font-family: var(--ui); }
+  .st { width: var(--st-w); background: #faf9f6; border-left: 1px solid var(--border); font-family: var(--ui); font-size: 12px; }
+  .head .cell { background: var(--header); color: var(--header-fg); text-align: left; }
+  .row.virt .log { color: #9a8fb5; }
+  .row.sel .log { box-shadow: inset 0 -1px 0 var(--rose-hover); }
+  .row.sel .ln { background: var(--rose); color: #fff; }
+  .row.base .dt { color: #c0392b; font-weight: 700; }
+  mark { background: var(--mark); color: inherit; border-radius: 2px; }
+  mark.cur { background: #ff9f43; }
+
+  @media (max-width: 720px) {
+    :root { --ln-w: 48px; --dt-w: 84px; --cm-w: 160px; --st-w: 120px; --src-w: 90px; }
+    .L, .R { position: static; box-shadow: none; }
+    .field input { width: 120px; }
+    .main { margin: 0 4px; }
+  }
+
+  .status { padding: 3px 12px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .status .err { color: #c0392b; }
+  .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+           gap: 10px; color: var(--muted); pointer-events: none; text-align: center; padding: 16px; }
+  .empty strong { color: var(--text); font-size: 15px; }
+  body.drag .main { outline: 3px dashed var(--rose); outline-offset: -6px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn plain" id="btnOpen" title="Ctrl+O">開く…</button>
+    <input type="file" id="fileInput" multiple class="hidden">
+    <button class="btn" id="btnFilter" title="F2">フィルタ: OFF</button>
+    <button class="btn plain" id="btnMerge" title="開いているファイルを時刻順にマージ">ログをマージ</button>
+    <label class="field" id="quickField" title="この文字列/正規表現を含む行だけ表示">
+      絞り込み <input id="quick" placeholder="文字列 or 正規表現"><span class="count" id="quickCount"></span>
+    </label>
+    <label class="field" id="searchField" title="Ctrl+F / Enter: 次 / Shift+Enter: 前">
+      検索 <input id="search" placeholder="Ctrl+F"><span class="count" id="searchCount"></span>
+    </label>
+    <button class="btn hidden" id="btnVsync">仮想V周期表示: OFF</button>
+    <span class="info hidden" id="vsyncInfo"></span>
+    <span class="spacer"></span>
+    <button class="btn plain" id="btnConfig" title="Python 版の config.json を読み込み">設定読み込み…</button>
+    <input type="file" id="configInput" accept=".json,application/json" class="hidden">
+    <button class="btn dim" id="btnAdvanced" title="区間の列と仮想V周期の表示">Advanced: OFF</button>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="main">
+    <div class="chips hidden" id="chips"></div>
+    <div class="scroller" id="scroller" tabindex="0">
+      <div class="head" id="head"></div>
+      <div class="canvas" id="canvas"></div>
+    </div>
+    <div class="empty" id="empty">
+      <strong>ログファイルをドロップ、または「開く…」</strong>
+      <span>F2 フィルタ / Ctrl+F 検索 / Ctrl+G 行へ移動 / F8・Shift+F8 次・前の色付き行 / ダブルクリック 経過時間の基準</span>
+    </div>
+  </div>
+  <div class="status" id="status"><span id="statusMain">準備完了</span><span class="err" id="statusErr"></span></div>
+
+<script>
+"use strict";
+// ================= 定数（Python 版と同じ） =================
+const VSYNC_TAG = "<VSYNC>";
+const VSYNC_REGEX = String.raw`V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]`;
+const VSYNC_RE = new RegExp(VSYNC_REGEX, "i");
+const VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---";
+const VIRTUAL_SRC = "(Virtual)";
+const TIMER_MARK = "[VIRTUAL TIMER]";
+const ORIGIN_MARK = "<<< [V-SYNC 起点]";
+const WHITE = "#ffffff";
+const ROSE = "#d4a3b3";
+const PY_DEFAULT_TS = String.raw`^\[?\s*(\d+(?:\.\d+)?)\]?`;
+// hh:mm:ss(.fff) と秒数の両方に対応（Python 版の既定パターンは hh:mm:ss の時が取れない）
+const DEFAULT_TS = String.raw`^\[?\s*(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?|\d+(?:\.\d+)?)\]?`;
+const DEFAULT_CONFIG = {
+  keywords: [
+    { file_pattern: ".*", pattern: ".*ERROR.*", color: "#f8d7da", comment: "重大なエラー発生", enabled: true },
+    { file_pattern: ".*", pattern: "WARN", color: "#fff3cd", comment: "警告メッセージ", enabled: true },
+    { file_pattern: ".*", pattern: "INFO", color: "#d1e7dd", comment: "正常動作ログ", enabled: true },
+    { file_pattern: ".*", pattern: String.raw`--- \[VIRTUAL V-SYNC\] ---`, color: "#e2d9f3", comment: "仮想V同期タイミング", enabled: true },
+    { file_pattern: ".*", pattern: String.raw`--- \[VIRTUAL TIMER\].*`, color: "#ffe0b2", comment: "タイマー満了", enabled: true },
+  ],
+  sections: [
+    { name: "初期化(Server)", start: "SRV_INIT_START", start_wait: false, end: "SRV_INIT_DONE", end_wait: false, duration_ms: "", color: "#e1f5fe", file_pattern: "server.*", enabled: true },
+    { name: "初期化(Client)", start: "CLI_BOOT", start_wait: false, end: "CLI_READY", end_wait: false, duration_ms: "", color: "#e0f2f1", file_pattern: "client.*", enabled: true },
+    { name: "通信処理", start: "CONNECT", start_wait: false, end: "DISCONNECT", end_wait: false, duration_ms: "", color: "#fff3e0", file_pattern: ".*", enabled: true },
+  ],
+  replace_patterns: [],
+  vsync_auto_insert: { enabled: true, time_pattern: DEFAULT_TS, manual_ms: 16.666, start_time_val: "0.0" },
+};
+const STORE_KEY = "logviewer.config.v2";
+const OVERSCAN = 20;
+
+const $ = (id) => document.getElementById(id);
+const state = {
+  docs: [], active: -1, filterOn: false, showVsync: false, advanced: false, mergeTsLen: 19,
+  config: null, rules: [], sections: [], errors: [], strictTs: false,
+};
+let rowH = 20, charW = 7.2;
+
+// ================= 設定 =================
+function normalizeConfig(cfg) {
+  const c = JSON.parse(JSON.stringify(cfg || {}));
+  c.keywords = Array.isArray(c.keywords) ? c.keywords : [];
+  c.sections = Array.isArray(c.sections) ? c.sections : [];
+  c.replace_patterns = Array.isArray(c.replace_patterns) ? c.replace_patterns : [];
+  c.vsync_auto_insert = Object.assign({ enabled: true, time_pattern: DEFAULT_TS, manual_ms: 16.666, start_time_val: "0.0" }, c.vsync_auto_insert || {});
+  return c;
+}
+function loadStoredConfig() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return normalizeConfig(JSON.parse(raw));
+  } catch (e) { /* 保存領域が使えない環境では既定値 */ }
+  return normalizeConfig(DEFAULT_CONFIG);
+}
+function storeConfig() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state.config)); } catch (e) { /* 無視 */ }
+}
+// Python の float() 相当（変換できなければ NaN）
+function pyFloat(v) {
+  if (typeof v === "number") return v;
+  if (typeof v !== "string" || v.trim() === "") return NaN;
+  return Number(v.trim());
+}
+// Python の float の文字列化（5.0 → "5.0"）
+function pyFloatStr(x) { return Number.isInteger(x) ? x.toFixed(1) : String(x); }
+// Python 版と同じパターン正規化（% は空白の省略記法）
+function normalizePattern(p) {
+  p = String(p).trim().replace(/%/g, String.raw`\s*`);
+  if (p.length > 4 && p.startsWith(".*") && p.endsWith(".*")) p = p.slice(2, -2).trim();
+  if (p.length > 6 && p.startsWith("^.*") && p.endsWith(".*$")) p = p.slice(3, -3).trim();
+  return pyToJsRegex(p);
+}
+// Python 正規表現の書き方のうち JS と異なるものを変換
+function pyToJsRegex(p) {
+  return String(p).replace(/^\(\?i\)/, "").replace(/\(\?P</g, "(?<").replace(/\(\?P=(\w+)\)/g, String.raw`\k<$1>`);
+}
+function compileRules() {
+  const cfg = state.config;
+  state.rules = []; state.sections = []; state.errors = [];
+  cfg.keywords.forEach((k, i) => {
+    if (k.enabled === false) return;
+    try {
+      state.rules.push({
+        filePat: new RegExp(pyToJsRegex(k.file_pattern || ".*"), "i"),
+        re: new RegExp(normalizePattern(k.pattern), "is"),
+        color: k.color || WHITE, comment: k.comment || "", label: k.comment || k.pattern,
+      });
+    } catch (e) { state.errors.push(`フィルタ${i + 1}「${k.pattern}」: ${e.message}`); }
+  });
+  if (!cfg.keywords.some((k) => String(k.pattern ?? "").includes("VIRTUAL TIMER"))) {
+    state.rules.push({ filePat: /.*/, re: /\[VIRTUAL TIMER\]/i, color: "#ffe8d6", comment: "タイマー満了", label: "タイマー満了" });
+  }
+  cfg.sections.forEach((s, i) => {
+    if (s.enabled === false) return;
+    try {
+      if (s.end === undefined || s.start === undefined || s.name === undefined) throw new Error("start/end/name がありません");
+      let endPat = String(s.end), isVsyncEnd = false;
+      if (endPat === VSYNC_TAG) { endPat = VSYNC_REGEX; isVsyncEnd = true; }
+      let dur = pyFloat(s.duration_ms || 0);
+      if (isNaN(dur)) dur = 0;
+      state.sections.push({
+        start: new RegExp(pyToJsRegex(s.start), "i"), startWait: !!s.start_wait,
+        end: endPat ? new RegExp(pyToJsRegex(endPat), "i") : null, endStr: endPat, endWait: !!s.end_wait,
+        dur, name: s.name, color: s.color || WHITE, filePat: new RegExp(pyToJsRegex(s.file_pattern || ".*"), "i"), isVsyncEnd,
+      });
+    } catch (e) { state.errors.push(`区間${i + 1}「${s.name ?? ""}」: ${e.message}`); }
+  });
+}
+function tsRegex() {
+  let p = state.config.vsync_auto_insert.time_pattern || DEFAULT_TS;
+  if (p === PY_DEFAULT_TS && !state.strictTs) p = DEFAULT_TS;
+  try { return new RegExp(pyToJsRegex(p)); } catch (e) { return new RegExp(DEFAULT_TS); }
+}
+
+// ================= 解析（Python 版のロジックを移植） =================
+function splitLines(text) {
+  const lines = text.split(/\r\n|\n|\r/);
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+function parseSeconds(s) {
+  if (s.includes(":")) {
+    const parts = s.split(":");
+    const h = parseInt(parts[0], 10), m = parseInt(parts[1], 10), sec = pyFloat(parts[2]);
+    return isNaN(h) || isNaN(m) ? NaN : h * 3600 + m * 60 + sec;
+  }
+  return pyFloat(s);
+}
+function parseTimestamps(lines) {
+  const re = tsRegex();
+  const ts = new Float64Array(lines.length);
+  let colon = false;
+  for (let i = 0; i < lines.length; i++) {
+    const m = re.exec(lines[i]);
+    if (m && m[1] !== undefined) {
+      if (m[1].includes(":")) colon = true;
+      ts[i] = parseSeconds(m[1]);
+    } else ts[i] = NaN;
+  }
+  return { ts, colon };
+}
+function rulesFor(list, fn) { return list.filter((r) => r.filePat.test(fn)); }
+
+// 仮想V周期とタイマー満了行の挿入（Python: _process_vsync_insertion）
+function processVsync(linesIn, srcIn, origIn, fileNames) {
+  const n = linesIn.length;
+  const src = srcIn.length === n ? srcIn : srcIn.concat(new Array(n - srcIn.length).fill(""));
+  const { ts, colon } = parseTimestamps(linesIn);
+  const fmt = (s) => {
+    if (!colon) return `[${s.toFixed(6)}]`;
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${sec.toFixed(3).padStart(6, "0")}`;
+  };
+  const vc = state.config.vsync_auto_insert;
+
+  // PASS 1: 仮想V周期の挿入
+  let startTime = pyFloat(vc.start_time_val ?? "0.0");
+  let startIdx = -1;
+  if (isNaN(startTime)) startTime = null;
+  else for (let i = 0; i < n; i++) if (!isNaN(ts[i]) && Math.abs(ts[i] - startTime) < 0.000001) { startIdx = i; break; }
+  let manual = pyFloat(vc.manual_ms ?? 16.666);
+  if (isNaN(manual)) manual = 16.666;
+  const interval = manual / 1000.0;
+
+  let L = [], S = [], T = [], O = [];
+  if (startTime !== null) {
+    let nextV = startTime + interval;
+    for (let i = 0; i < n; i++) {
+      const lt = ts[i];
+      if (!isNaN(lt) && lt > startTime) {
+        let cnt = 0;
+        while (nextV < lt && cnt < 100) {
+          L.push(`${fmt(nextV)} ${VSYNC_MARKER}`); S.push(VIRTUAL_SRC); T.push(nextV); O.push(0);
+          nextV += interval; cnt++;
+        }
+        if (cnt >= 100) nextV = lt + interval;
+      }
+      L.push(i === startIdx ? `${linesIn[i]}  ${ORIGIN_MARK}` : linesIn[i]); S.push(src[i]); T.push(lt); O.push(origIn[i]);
+    }
+  } else { L = linesIn.slice(); S = src.slice(); T = Array.from(ts); O = origIn.slice(); }
+
+  // PASS 2: 待ち時間付き区間のタイマー満了行の挿入
+  const sections = state.sections;
+  if (!sections.some((r) => r.dur > 0)) return { lines: L, srcs: S, orig: O };
+  const byFn = Object.fromEntries(fileNames.map((fn) => [fn, rulesFor(sections, fn)]));
+  const active = {}, pending = {};
+  for (const fn of fileNames) { active[fn] = null; pending[fn] = null; }
+  const FL = [], FS = [], FO = [];
+  const timerLine = (exp, dur) => `${fmt(exp)} ---[VIRTUAL TIMER] Wait Time ${pyFloatStr(dur)}ms End ---`;
+
+  for (let i = 0; i < L.length; i++) {
+    const line = L[i], t = T[i], lineSrc = S[i];
+    const isVirtual = lineSrc === VIRTUAL_SRC;
+    const isVsyncLine = VSYNC_RE.test(line) && !line.includes(TIMER_MARK);
+    if (!isNaN(t)) {
+      const expired = [];
+      for (const fn of fileNames) {
+        const s = active[fn];
+        if (s && s.rule.dur > 0 && !isNaN(s.startTs) && !s.timerExpired) {
+          const exp = s.startTs + s.rule.dur / 1000.0;
+          if (t >= exp - 0.000001) expired.push([exp, fn, s]);
+        }
+      }
+      expired.sort((a, b) => a[0] - b[0]);
+      for (const [exp, fnName, s] of expired) {
+        FL.push(timerLine(exp, s.rule.dur)); FS.push(VIRTUAL_SRC); FO.push(0);
+        s.timerExpired = true;
+        if (s.rule.endStr === "") { if (s.rule.endWait) s.endPending = true; else active[fnName] = null; }
+      }
+    }
+    FL.push(line); FS.push(lineSrc); FO.push(O[i]);
+
+    for (const fn of fileNames) {
+      if (active[fn] && active[fn].endPending && isVsyncLine) active[fn] = null;
+      if (pending[fn] && isVsyncLine) {
+        active[fn] = { rule: pending[fn].rule, startTs: t, endPending: false, timerExpired: false };
+        pending[fn] = null;
+      }
+      if (fn === lineSrc) {
+        for (const rule of byFn[fn]) {
+          if (!rule.start.test(line)) continue;
+          if (rule.startWait) pending[fn] = { rule };
+          else {
+            active[fn] = { rule, startTs: t, endPending: false, timerExpired: false };
+            pending[fn] = null;
+            let endMatch = false;
+            if (rule.endStr !== "") endMatch = rule.end.test(line) && (fn === lineSrc || isVirtual || rule.isVsyncEnd);
+            if (rule.dur > 0) endMatch = false;
+            if (endMatch) { if (rule.endWait) active[fn].endPending = true; else active[fn] = null; }
+          }
+          break;
+        }
+      }
+      const s = active[fn];
+      if (s && !s.endPending) {
+        const rule = s.rule;
+        let cond = false;
+        if (rule.endStr !== "") {
+          let em = rule.end.test(line) && (fn === lineSrc || isVirtual || rule.isVsyncEnd);
+          if (rule.dur > 0 && !s.timerExpired) em = false;
+          cond = em;
+        } else if (rule.dur > 0 && s.timerExpired && !s.timerExpiredHandled) {
+          cond = true; s.timerExpiredHandled = true;
+        }
+        if (cond) { if (rule.endWait) s.endPending = true; else active[fn] = null; }
+      }
+    }
+  }
+  const remaining = [];
+  for (const fn of fileNames) {
+    const s = active[fn];
+    if (s && s.rule.dur > 0 && !isNaN(s.startTs) && !s.timerExpired) {
+      remaining.push([s.startTs + s.rule.dur / 1000.0, s.rule]);
+      active[fn] = null;
+    }
+  }
+  remaining.sort((a, b) => a[0] - b[0]);
+  for (const [exp, rule] of remaining) { FL.push(timerLine(exp, rule.dur)); FS.push(VIRTUAL_SRC); FO.push(0); }
+  return { lines: FL, srcs: FS, orig: FO };
+}
+
+// 各ソースファイルの行ごとの区間表示 [テキスト, 色]（Python: _compute_section_status）
+function computeSectionStatus(lines, srcs, ts, isVsync, fileNames) {
+  const empty = ["", WHITE];
+  const sections = state.sections;
+  if (!sections.length) return Object.fromEntries(fileNames.map((fn) => [fn, null]));
+  const byFn = Object.fromEntries(fileNames.map((fn) => [fn, rulesFor(sections, fn)]));
+  const active = {}, pending = {}, status = {};
+  for (const fn of fileNames) { active[fn] = null; pending[fn] = null; status[fn] = []; }
+
+  const endActive = (fn, endI) => {
+    let ret = "";
+    const s = active[fn];
+    if (s && s.startIdx !== undefined) {
+      const tsStart = s.startTs, tsEnd = ts[endI];
+      if (!isNaN(tsStart) && !isNaN(tsEnd)) {
+        const tStr = `[${((tsEnd - tsStart) * 1000.0).toFixed(1)}ms]`;
+        const buf = status[fn];
+        if (s.startIdx < buf.length) { const [old, col] = buf[s.startIdx]; buf[s.startIdx] = [old + tStr, col]; }
+        else ret = tStr;
+      }
+    }
+    active[fn] = null;
+    return ret;
+  };
+  const startState = (rule, i) => ({ rule, startIdx: i, startTs: ts[i], endPending: false, timerExpiredHandled: false });
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], lineSrc = srcs[i];
+    const isVirtual = lineSrc === VIRTUAL_SRC;
+    const isVsyncLine = isVsync[i] && !line.includes(TIMER_MARK);
+    for (const fn of fileNames) {
+      let ruleToDisplay = null, text = "", endedThisLine = false, endedRule = null;
+      if (active[fn] && active[fn].endPending && isVsyncLine) {
+        endedRule = active[fn].rule;
+        const t = endActive(fn, i);
+        endedThisLine = true;
+        text = `${endedRule.name} (終了)${t}`;
+      }
+      if (pending[fn] && isVsyncLine) {
+        if (active[fn]) {
+          endedRule = active[fn].rule;
+          const t = endActive(fn, i);
+          endedThisLine = true;
+          text = `${endedRule.name} (終了)${t}`;
+        }
+        active[fn] = startState(pending[fn].rule, i);
+        pending[fn] = null;
+        ruleToDisplay = active[fn].rule;
+        text = `${ruleToDisplay.name} (開始)`;
+      }
+      if (fn === lineSrc) {
+        for (const rule of byFn[fn]) {
+          if (!rule.start.test(line)) continue;
+          if (rule.startWait) pending[fn] = { rule };
+          else {
+            if (active[fn]) {
+              endedRule = active[fn].rule;
+              const t = endActive(fn, i);
+              if (t) text += t;
+              endedThisLine = true;
+            }
+            active[fn] = startState(rule, i);
+            pending[fn] = null;
+            ruleToDisplay = rule;
+            text = `${rule.name} (開始)`;
+            let endMatch = false;
+            if (rule.endStr !== "") endMatch = rule.end.test(line) && (fn === lineSrc || isVirtual || rule.isVsyncEnd);
+            if (rule.dur > 0) endMatch = false;
+            if (endMatch) {
+              if (rule.endWait) active[fn].endPending = true;
+              else { text = `${rule.name} (開始/終了)[0.0ms]`; active[fn] = null; }
+            }
+          }
+          break;
+        }
+      }
+      const s = active[fn];
+      if (s && !s.endPending) {
+        const rule = s.rule;
+        let expiredNow = false;
+        if (rule.dur > 0 && !isNaN(ts[i]) && !isNaN(s.startTs) && i > s.startIdx) {
+          expiredNow = (ts[i] - s.startTs) * 1000.0 >= rule.dur - 0.001;
+        }
+        let cond = false;
+        if (rule.endStr !== "") {
+          let em = rule.end.test(line) && (fn === lineSrc || isVirtual || rule.isVsyncEnd);
+          if (rule.dur > 0 && !expiredNow) em = false;
+          cond = em;
+        } else if (rule.dur > 0 && expiredNow && !s.timerExpiredHandled) {
+          cond = true; s.timerExpiredHandled = true;
+        }
+        if (cond) {
+          if (rule.endWait) s.endPending = true;
+          else {
+            endedRule = rule;
+            const t = endActive(fn, i);
+            endedThisLine = true;
+            ruleToDisplay = endedRule;
+            text = `${endedRule.name} (終了)${t}`;
+          }
+        }
+      }
+      if (ruleToDisplay === null) {
+        if (active[fn]) { ruleToDisplay = active[fn].rule; text = ruleToDisplay.name; }
+        else if (endedThisLine) { ruleToDisplay = endedRule; if (!text) text = `${endedRule.name} (終了)`; }
+      }
+      status[fn].push(ruleToDisplay ? [text, ruleToDisplay.color] : empty);
+    }
+  }
+  return status;
+}
+
+// Python: m.expand(template) の主な書式（\1, \g<1>, \g<name>, \n, \t, \\）
+function expandTemplate(tpl, groups, named) {
+  return String(tpl).replace(/\\(?:g<(\w+)>|(\d{1,2})|([ntr\\]))/g, (_, g, d, e) => {
+    if (e) return { n: "\n", t: "\t", r: "\r", "\\": "\\" }[e];
+    const key = g ?? d;
+    if (/^\d+$/.test(key)) return groups[+key] ?? "";
+    return (named && named[key]) ?? "";
+  });
+}
+function applyReplacements(text) {
+  for (const itm of state.config.replace_patterns) {
+    if (itm.enabled === false) continue;
+    try {
+      const re = new RegExp(pyToJsRegex(itm.search), "gi");
+      text = text.replace(re, (...args) => {
+        const hasNamed = typeof args[args.length - 1] === "object";
+        const named = hasNamed ? args[args.length - 1] : null;
+        const groups = args.slice(0, args.length - (hasNamed ? 3 : 2));
+        return `${groups[0]}(${expandTemplate(itm.replace ?? "", groups, named)})`;
+      });
+    } catch (e) { /* Python 版同様、無効なパターンは無視 */ }
+  }
+  return text;
+}
+
+// キーワードの判定（字下げされた継続行は先頭行とまとめて 1 件）
+function findKeywordMatches(lines, srcs, rules) {
+  const n = lines.length;
+  const rule = new Int16Array(n).fill(-1), isStart = new Uint8Array(n);
+  const counts = new Array(rules.length).fill(0);
+  const bySource = new Map();
+  let start = 0;
+  for (let i = 1; i <= n; i++) {
+    if (i < n && srcs[i] === srcs[i - 1] && (lines[i] === "" || /^\s/.test(lines[i]))) continue;
+    const text = i - start === 1 ? lines[start] : lines.slice(start, i).join("\n");
+    const source = srcs[start] ?? "";
+    let applicable = bySource.get(source);
+    if (!applicable) { applicable = []; rules.forEach((r, ri) => { if (r.filePat.test(source)) applicable.push(ri); }); bySource.set(source, applicable); }
+    for (const ri of applicable) {
+      if (rules[ri].re.test(text)) {
+        for (let j = start; j < i; j++) rule[j] = ri;
+        isStart[start] = 1; counts[ri]++;
+        break;
+      }
+    }
+    start = i;
+  }
+  return { rule, isStart, counts };
+}
+
+// 文書の解析（Python: _analyze_tab）
+function analyze(doc) {
+  let text = doc.procLines.join("\n");
+  if (state.config.replace_patterns.length) text = applyReplacements(text);
+  const lines = text === "" ? [] : splitLines(text);
+  const n = lines.length;
+  const srcs = doc.procSrcs.slice(0, n);
+  while (srcs.length < n) srcs.push("");
+  const orig = doc.procOrig.slice(0, n);
+  while (orig.length < n) orig.push(0);
+  const { ts } = parseTimestamps(lines);
+  const isVsync = new Uint8Array(n);
+  for (let i = 0; i < n; i++) isVsync[i] = VSYNC_RE.test(lines[i]) ? 1 : 0;
+  const status = computeSectionStatus(lines, srcs, ts, isVsync, doc.fileNames);
+  const km = findKeywordMatches(lines, srcs, state.rules);
+  const colors = new Array(n).fill(WHITE), comments = new Array(n).fill(""), prio = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const ri = km.rule[i];
+    if (ri >= 0) {
+      colors[i] = state.rules[ri].color;
+      if (km.isStart[i]) comments[i] = state.rules[ri].comment.trim();
+      prio[i] = 20;
+    }
+    if (lines[i].includes(ORIGIN_MARK)) {
+      colors[i] = ROSE; comments[i] = (comments[i] + "[基準位置]").trim(); prio[i] = 30;
+    }
+  }
+  let maxLen = 0;
+  for (const l of lines) if (l.length > maxLen) maxLen = l.length;
+  Object.assign(doc, { lines, srcs, orig, ts, isVsync, status, colors, comments, prio, rule: km.rule, isStart: km.isStart, counts: km.counts, maxLen });
+}
+
+// 表示行の決定（Python: _compute_visibility）+ 絞り込み欄
+function computeVisible(doc) {
+  const { lines, isVsync, prio, status, fileNames } = doc;
+  const n = lines.length;
+  const vis = new Uint8Array(n).fill(1);
+  const inSection = (i) => fileNames.some((fn) => status[fn] && status[fn][i][0] !== "");
+  for (let i = 0; i < n; i++) {
+    const line = lines[i];
+    if (!state.showVsync && line.includes(VSYNC_MARKER)) vis[i] = 0;
+    else if (state.filterOn) {
+      if (line.includes(TIMER_MARK) || line.includes(ORIGIN_MARK)) continue;
+      if (prio[i] === 0) vis[i] = 0;
+      else if (isVsync[i] && !inSection(i)) vis[i] = 0;
+    }
+  }
+  if (state.filterOn) {
+    if (state.showVsync) {
+      // 表示行の直前・直後の V 周期行を表示
+      const prev = new Int32Array(n), next = new Int32Array(n);
+      let last = -1;
+      for (let i = 0; i < n; i++) { prev[i] = last; if (isVsync[i]) last = i; }
+      last = -1;
+      for (let i = n - 1; i >= 0; i--) { next[i] = last; if (isVsync[i]) last = i; }
+      const show = [];
+      for (let i = 0; i < n; i++) if (vis[i] && !isVsync[i]) { if (prev[i] >= 0) show.push(prev[i]); if (next[i] >= 0) show.push(next[i]); }
+      for (const j of show) vis[j] = 1;
+    }
+    // 表示行の中で V 周期行が 3 行以上続くときは先頭と末尾だけ残す
+    let run = [];
+    const flush = () => { if (run.length >= 3) for (const k of run.slice(1, -1)) vis[k] = 0; run = []; };
+    for (let i = 0; i < n; i++) {
+      if (!vis[i]) continue;
+      if (isVsync[i]) run.push(i); else flush();
+    }
+    flush();
+  }
+  return vis;
+}
+function quickRegex() {
+  const q = $("quick").value;
+  $("quickField").classList.remove("bad");
+  if (!q) return null;
+  try { return new RegExp(q, "i"); }
+  catch (e) { $("quickField").classList.add("bad"); return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); }
+}
+function buildView(doc) {
+  const vis = computeVisible(doc);
+  const qre = quickRegex();
+  const out = new Int32Array(doc.lines.length);
+  let k = 0;
+  for (let i = 0; i < doc.lines.length; i++) {
+    if (!vis[i]) continue;
+    if (qre && !qre.test(doc.lines[i])) continue;
+    out[k++] = i;
+  }
+  doc.view = out.subarray(0, k);
+  $("quickCount").textContent = qre ? `${k}行` : "";
+}
+function lowerBound(view, idx) {
+  let lo = 0, hi = view.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (view[mid] < idx) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+// ================= 文書の作成・マージ =================
+function newDoc(name, fields) {
+  return Object.assign({ name, isMerged: false, sel: -1, base: -1, scrollTop: 0, scrollLeft: 0, view: new Int32Array(0) }, fields);
+}
+function buildFileDoc(name, rawText) {
+  const raw = splitLines(rawText);
+  const orig = raw.map((_, i) => i + 1);
+  let proc = { lines: raw, srcs: new Array(raw.length).fill(name), orig };
+  if (state.config.vsync_auto_insert.enabled !== false) proc = processVsync(raw, proc.srcs, orig, [name]);
+  return newDoc(name, { rawText, fileNames: [name], procLines: proc.lines, procSrcs: proc.srcs, procOrig: proc.orig });
+}
+// Python: merge_logs_action（先頭 tsLen 文字の時刻文字列で安定ソート）
+function buildMergedDoc(sources, tsLen) {
+  const blocks = [], names = [];
+  for (const d of sources) {
+    if (!names.includes(d.name)) names.push(d.name);
+    const lines = d.procLines;
+    if (!lines.length) continue;
+    const eff = [];
+    let last = "";
+    for (const line of lines) {
+      const part = line.slice(0, tsLen);
+      if (part.trim() && line.length > 0 && !/^\s/.test(line)) last = part;
+      eff.push(last);
+    }
+    const first = eff.find((x) => x) || "0".repeat(tsLen);
+    for (let i = 0; i < lines.length; i++) {
+      blocks.push([eff[i] || first, lines[i], d.procSrcs[i] ?? d.name, d.procOrig[i] ?? 0]);
+    }
+  }
+  blocks.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const L = [], S = [], O = [], seen = new Set();
+  for (const [, line, src, o] of blocks) {
+    if (src === VIRTUAL_SRC && (line.includes(VSYNC_MARKER) || line.includes(TIMER_MARK))) {
+      const key = line.trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    L.push(line); S.push(src); O.push(o);
+  }
+  return newDoc("マージ結果", { isMerged: true, fileNames: names, procLines: L, procSrcs: S, procOrig: O, mergeTsLen: tsLen });
+}
+
+// ================= 描画（仮想スクロール） =================
+const scroller = $("scroller"), canvas = $("canvas");
+function cur() { return state.docs[state.active] || null; }
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function highlight(line, re, isCur) {
+  if (!re) return escapeHtml(line);
+  let out = "", last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(line)) && m[0] !== "") {
+    out += escapeHtml(line.slice(last, m.index)) + `<mark${isCur ? ' class="cur"' : ""}>${escapeHtml(m[0])}</mark>`;
+    last = m.index + m[0].length;
+  }
+  return out + escapeHtml(line.slice(last));
+}
+function baseTs(doc) {
+  if (doc.base >= 0 && !isNaN(doc.ts[doc.base])) return doc.ts[doc.base];
+  for (let i = 0; i < doc.ts.length; i++) if (!isNaN(doc.ts[i])) return doc.ts[i];
+  return NaN;
+}
+function statusCols(doc) { return state.advanced ? doc.fileNames : []; }
+function renderHead(doc) {
+  const st = statusCols(doc).map((fn) => `<div class="cell st" title="${escapeHtml(fn)}の区間">${escapeHtml(fn)}の区間</div>`).join("");
+  $("head").innerHTML = `<div class="L"><div class="cell ln">行</div>${doc.isMerged ? '<div class="cell src">ファイル</div>' : ""}<div class="cell dt">経過(秒)</div></div>` +
+    `<div class="cell log" id="headLog">${doc.isMerged ? "View" : escapeHtml(doc.name)}</div><div class="R"><div class="cell cm">コメント</div>${st}</div>`;
+}
+function layout() {
+  const doc = cur();
+  $("empty").classList.toggle("hidden", !!doc);
+  if (!doc) { $("head").innerHTML = ""; canvas.style.height = "0px"; canvas.innerHTML = ""; return; }
+  renderHead(doc);
+  const head = $("head");
+  const fixedW = head.querySelector(".L").offsetWidth + head.querySelector(".R").offsetWidth;
+  const logW = Math.max(scroller.clientWidth - fixedW, Math.ceil(doc.maxLen * charW) + 24);
+  const totalW = fixedW + logW;
+  canvas.style.height = `${doc.view.length * rowH}px`;
+  canvas.style.width = head.style.width = `${totalW}px`;
+  $("headLog").style.width = `${logW}px`;
+  layout.logW = logW; layout.totalW = totalW;
+  render();
+}
+function render() {
+  const doc = cur();
+  if (!doc) return;
+  const top = Math.max(0, Math.floor(scroller.scrollTop / rowH) - OVERSCAN);
+  const bottom = Math.min(doc.view.length, Math.ceil((scroller.scrollTop + scroller.clientHeight) / rowH) + OVERSCAN);
+  const sre = search.re, curIdx = search.hits.length ? doc.view[search.hits[search.pos]] : -1;
+  const b = baseTs(doc), cols = statusCols(doc);
+  let html = "";
+  for (let p = top; p < bottom; p++) {
+    const i = doc.view[p];
+    const t = doc.ts[i];
+    const dt = isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6);
+    const src = doc.srcs[i];
+    const virt = src === VIRTUAL_SRC || doc.orig[i] === 0;
+    const cls = "row" + (i === doc.sel ? " sel" : "") + (i === doc.base ? " base" : "") + (virt ? " virt" : "");
+    let st = "";
+    for (const fn of cols) {
+      const s = doc.status[fn] ? doc.status[fn][i] : null;
+      st += s && s[0] ? `<div class="cell st" style="background:${s[1]}" title="${escapeHtml(s[0])}">${escapeHtml(s[0])}</div>` : '<div class="cell st"></div>';
+    }
+    html += `<div class="${cls}" data-i="${i}" style="top:${p * rowH}px;width:${layout.totalW}px">` +
+      `<div class="L"><div class="cell ln">${doc.orig[i] || ""}</div>` +
+      (doc.isMerged ? `<div class="cell src" title="${escapeHtml(src)}">${escapeHtml(src)}</div>` : "") +
+      `<div class="cell dt">${dt}</div></div>` +
+      `<div class="cell log" style="width:${layout.logW}px;background:${doc.colors[i]}">${highlight(doc.lines[i], sre, i === curIdx)}</div>` +
+      `<div class="R"><div class="cell cm" title="${escapeHtml(doc.comments[i])}">${escapeHtml(doc.comments[i])}</div>${st}</div></div>`;
+  }
+  canvas.innerHTML = html;
+}
+scroller.addEventListener("scroll", () => requestAnimationFrame(render));
+window.addEventListener("resize", () => layout());
+
+// 選択行（なければ先頭の表示行）の位置を保ったまま表示行を作り直す
+function refreshView({ keep = true } = {}) {
+  const doc = cur();
+  if (!doc) { layout(); updateStatus(); return; }
+  let anchor = -1, offset = 0;
+  if (keep && doc.view.length) {
+    const topPos = Math.floor(scroller.scrollTop / rowH);
+    const selPos = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : -1;
+    const rows = scroller.clientHeight / rowH;
+    const usePos = selPos >= topPos && selPos < topPos + rows && doc.view[selPos] === doc.sel ? selPos : topPos;
+    anchor = doc.view[Math.min(usePos, doc.view.length - 1)];
+    offset = usePos * rowH - scroller.scrollTop;
+  }
+  buildView(doc);
+  runSearch(false);
+  layout();
+  if (anchor >= 0) scroller.scrollTop = lowerBound(doc.view, anchor) * rowH - offset;
+  render();
+  updateStatus();
+}
+function scrollToPos(pos) {
+  const y = pos * rowH;
+  const h = scroller.clientHeight - $("head").offsetHeight;
+  if (y < scroller.scrollTop || y + rowH > scroller.scrollTop + h) scroller.scrollTop = Math.max(0, y - h / 2);
+  render();
+}
+function selectIndex(idx) {
+  const doc = cur();
+  if (!doc || !doc.view.length) return;
+  const pos = Math.min(lowerBound(doc.view, idx), doc.view.length - 1);
+  doc.sel = doc.view[pos];
+  scrollToPos(pos);
+  updateStatus();
+}
+
+// ================= 検索 =================
+const search = { re: null, hits: [], pos: 0 };
+function runSearch(jump) {
+  const doc = cur();
+  const q = $("search").value;
+  search.re = null; search.hits = []; search.pos = 0;
+  $("searchField").classList.remove("bad");
+  if (q && doc) {
+    try { search.re = new RegExp(q, "gi"); }
+    catch (e) { search.re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"); $("searchField").classList.add("bad"); }
+    const re1 = new RegExp(search.re.source, "i");
+    for (let p = 0; p < doc.view.length; p++) if (re1.test(doc.lines[doc.view[p]])) search.hits.push(p);
+    if (search.hits.length && doc.sel >= 0) {
+      const sp = lowerBound(doc.view, doc.sel);
+      const k = search.hits.findIndex((p) => p >= sp);
+      search.pos = k < 0 ? 0 : k;
+    }
+    if (jump && search.hits.length) goHit(0);
+  }
+  $("searchCount").textContent = q ? (search.hits.length ? `${search.pos + 1}/${search.hits.length}` : "0件") : "";
+}
+function goHit(delta) {
+  const doc = cur();
+  if (!doc || !search.hits.length) return;
+  search.pos = (search.pos + delta + search.hits.length) % search.hits.length;
+  const pos = search.hits[search.pos];
+  doc.sel = doc.view[pos];
+  $("searchCount").textContent = `${search.pos + 1}/${search.hits.length}`;
+  scrollToPos(pos);
+  updateStatus();
+}
+
+// ================= 色付き行・ルール別の移動 =================
+function nextColored(dir, ruleIdx = null) {
+  const doc = cur();
+  if (!doc || !doc.view.length) return;
+  let p = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : (dir > 0 ? -1 : doc.view.length);
+  for (p += dir; p >= 0 && p < doc.view.length; p += dir) {
+    const i = doc.view[p];
+    const hit = ruleIdx === null ? (doc.isStart[i] && doc.rule[i] >= 0) || doc.prio[i] === 30 : doc.isStart[i] && doc.rule[i] === ruleIdx;
+    if (hit) { doc.sel = i; scrollToPos(p); updateStatus(); return; }
+  }
+  setStatus("これ以上ありません");
+}
+function renderChips() {
+  const doc = cur();
+  const el = $("chips");
+  el.classList.toggle("hidden", !doc || !state.rules.length);
+  if (!doc) return;
+  el.innerHTML = state.rules.map((r, i) =>
+    `<span class="chip${doc.counts[i] ? "" : " zero"}" data-r="${i}" style="background:${r.color}" title="クリックで次の該当行へ（Shift+クリックで前）">${escapeHtml(r.label)}<b>${doc.counts[i]}</b></span>`
+  ).join("");
+}
+$("chips").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (chip && !chip.classList.contains("zero")) nextColored(e.shiftKey ? -1 : 1, +chip.dataset.r);
+});
+
+// ================= タブ =================
+function renderTabs() {
+  $("tabs").innerHTML = state.docs.map((d, i) =>
+    `<div class="tab${i === state.active ? " active" : ""}" data-t="${i}" title="${escapeHtml(d.isMerged ? d.fileNames.join(" + ") : d.name)}">${escapeHtml(d.name)}<button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
+  ).join("");
+}
+$("tabs").addEventListener("click", (e) => {
+  const close = e.target.closest("[data-close]");
+  if (close) { closeDoc(+close.dataset.close); return; }
+  const tab = e.target.closest(".tab");
+  if (tab) activate(+tab.dataset.t);
+});
+function saveScroll() {
+  const doc = cur();
+  if (doc) { doc.scrollTop = scroller.scrollTop; doc.scrollLeft = scroller.scrollLeft; }
+}
+function activate(i) {
+  saveScroll();
+  state.active = i;
+  renderTabs(); renderChips();
+  refreshView({ keep: false });
+  const doc = cur();
+  if (doc) { scroller.scrollTop = doc.scrollTop; scroller.scrollLeft = doc.scrollLeft; render(); }
+}
+function closeDoc(i) {
+  state.docs.splice(i, 1);
+  let a = state.active > i || state.active >= state.docs.length ? state.active - 1 : state.active;
+  if (a < 0 && state.docs.length) a = 0;
+  state.active = -1;
+  activate(a);
+}
+function pushDoc(doc, t0) {
+  analyze(doc);
+  saveScroll();
+  state.docs.push(doc);
+  state.active = state.docs.length - 1;
+  renderTabs(); renderChips();
+  scroller.scrollTop = 0; scroller.scrollLeft = 0;
+  refreshView({ keep: false });
+  setStatus(`${doc.name}: ${doc.lines.length.toLocaleString()} 行を ${Math.round(performance.now() - t0)} ms で表示`);
+  return doc;
+}
+function addDoc(name, text) { const t0 = performance.now(); return pushDoc(buildFileDoc(name, text), t0); }
+function mergeDocs(tsLen) {
+  const sources = state.docs.filter((d) => !d.isMerged);
+  if (sources.length < 2) { alert("マージするには2つ以上のログファイルを開いてください。"); return null; }
+  if (tsLen === undefined) {
+    const v = prompt("時刻として比較する先頭の文字数", String(state.mergeTsLen));
+    if (v === null) return null;
+    tsLen = parseInt(v, 10);
+    if (!(tsLen > 0)) { alert("1 以上の数値を入力してください。"); return null; }
+  }
+  state.mergeTsLen = tsLen;
+  const t0 = performance.now();
+  return pushDoc(buildMergedDoc(sources, tsLen), t0);
+}
+$("btnMerge").onclick = () => mergeDocs();
+
+// ================= ファイル読み込み（UTF-8 → Shift_JIS） =================
+async function readFileText(file) {
+  const buf = await file.arrayBuffer();
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch (e) { return new TextDecoder("shift_jis").decode(buf); }
+}
+async function openFiles(files) { for (const f of files) addDoc(f.name, await readFileText(f)); }
+$("btnOpen").onclick = () => $("fileInput").click();
+$("fileInput").onchange = (e) => { openFiles([...e.target.files]); e.target.value = ""; };
+let dragDepth = 0;
+window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("drag"); });
+window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drag"); } });
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => {
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove("drag");
+  if (e.dataTransfer.files.length) openFiles([...e.dataTransfer.files]);
+});
+
+// ================= 設定の適用（開いている文書を作り直す） =================
+function applyConfig(cfg) {
+  state.config = normalizeConfig(cfg);
+  storeConfig();
+  compileRules();
+  const fileDocs = new Map();
+  state.docs = state.docs.map((d) => {
+    if (d.isMerged) return d;
+    const nd = Object.assign(buildFileDoc(d.name, d.rawText), { sel: d.sel, base: d.base, scrollTop: d.scrollTop, scrollLeft: d.scrollLeft });
+    fileDocs.set(d, nd);
+    return nd;
+  });
+  // マージ結果は新しい設定のファイルから作り直す
+  state.docs = state.docs.map((d) => {
+    if (!d.isMerged) return d;
+    const sources = state.docs.filter((x) => !x.isMerged && d.fileNames.includes(x.name));
+    return sources.length >= 2 ? Object.assign(buildMergedDoc(sources, d.mergeTsLen), { sel: d.sel, base: d.base }) : d;
+  });
+  for (const d of state.docs) analyze(d);
+  updateVsyncInfo(); renderChips(); refreshView();
+}
+$("btnConfig").onclick = () => $("configInput").click();
+$("configInput").onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try { applyConfig(JSON.parse(await readFileText(f))); setStatus(`設定を読み込みました: ${f.name}`); }
+  catch (err) { setStatus(`設定を読み込めませんでした: ${err.message}`); }
+};
+
+// ================= 操作 =================
+function styleToggle(btn, label, on, offClass = "") {
+  btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
+  btn.classList.toggle("on", on);
+  if (offClass) btn.classList.toggle(offClass, !on);
+}
+function setFilter(on) { state.filterOn = on; styleToggle($("btnFilter"), "フィルタ", on); refreshView(); }
+function setShowVsync(on) { state.showVsync = on; styleToggle($("btnVsync"), "仮想V周期表示", on); refreshView(); }
+function setAdvanced(on) {
+  state.advanced = on;
+  styleToggle($("btnAdvanced"), "Advanced", on, "dim");
+  $("btnVsync").classList.toggle("hidden", !on);
+  $("vsyncInfo").classList.toggle("hidden", !on);
+  refreshView();
+}
+function updateVsyncInfo() {
+  const vc = state.config.vsync_auto_insert;
+  $("vsyncInfo").textContent = vc.enabled === false ? "仮想V周期: 無効" : `起点: ${vc.start_time_val}秒 / 間隔: ${vc.manual_ms}ms`;
+}
+$("btnFilter").onclick = () => setFilter(!state.filterOn);
+$("btnVsync").onclick = () => setShowVsync(!state.showVsync);
+$("btnAdvanced").onclick = () => setAdvanced(!state.advanced);
+let quickTimer = 0;
+$("quick").addEventListener("input", () => { clearTimeout(quickTimer); quickTimer = setTimeout(() => refreshView(), 150); });
+let searchTimer = 0;
+$("search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { runSearch(true); render(); }, 150); });
+$("search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); goHit(e.shiftKey ? -1 : 1); }
+  if (e.key === "Escape") { $("search").value = ""; runSearch(false); render(); scroller.focus(); }
+});
+canvas.addEventListener("mousedown", (e) => {
+  const row = e.target.closest(".row");
+  if (row) { cur().sel = +row.dataset.i; render(); updateStatus(); scroller.focus({ preventScroll: true }); }
+});
+canvas.addEventListener("dblclick", (e) => {
+  const row = e.target.closest(".row");
+  const doc = cur();
+  if (!row || !doc) return;
+  const i = +row.dataset.i;
+  doc.base = doc.base === i ? -1 : i;
+  window.getSelection()?.removeAllRanges();
+  render();
+  setStatus(doc.base >= 0 ? "この行を経過時間の基準にしました（もう一度ダブルクリックで解除）" : "経過時間の基準を先頭に戻しました");
+});
+function gotoLinePrompt() {
+  const doc = cur();
+  if (!doc) return;
+  const selSrc = doc.sel >= 0 ? doc.srcs[doc.sel] : null;
+  const v = prompt(doc.isMerged ? `移動する元ファイルの行番号（${selSrc && selSrc !== VIRTUAL_SRC ? selSrc : doc.fileNames[0]}）` : "移動する行番号",
+                   doc.sel >= 0 && doc.orig[doc.sel] ? doc.orig[doc.sel] : "");
+  const n = parseInt(v, 10);
+  if (!n) return;
+  const wantSrc = doc.isMerged ? (selSrc && selSrc !== VIRTUAL_SRC ? selSrc : doc.fileNames[0]) : null;
+  let target = -1;
+  for (let i = 0; i < doc.lines.length; i++) {
+    if (doc.orig[i] >= n && (!wantSrc || doc.srcs[i] === wantSrc)) { target = i; break; }
+  }
+  if (target < 0) { setStatus(`${n} 行目は見つかりませんでした`); return; }
+  if (doc.view[lowerBound(doc.view, target)] !== target) setStatus(`${n} 行目は現在の表示条件で非表示のため、直後の表示行へ移動しました`);
+  selectIndex(target);
+}
+document.addEventListener("keydown", (e) => {
+  const doc = cur();
+  const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+  if (ctrl && key === "f") { e.preventDefault(); $("search").focus(); $("search").select(); return; }
+  if (ctrl && key === "g") { e.preventDefault(); gotoLinePrompt(); return; }
+  if (ctrl && key === "o") { e.preventDefault(); $("fileInput").click(); return; }
+  if (ctrl && key === "w" && doc) { e.preventDefault(); closeDoc(state.active); return; }
+  if (e.key === "F2") { e.preventDefault(); setFilter(!state.filterOn); return; }
+  if (e.key === "F3") { e.preventDefault(); goHit(e.shiftKey ? -1 : 1); return; }
+  if (e.key === "F8") { e.preventDefault(); nextColored(e.shiftKey ? -1 : 1); return; }
+  if (e.target.tagName === "INPUT" || !doc || !doc.view.length) return;
+  const pos = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : -1;
+  const page = Math.max(1, Math.floor(scroller.clientHeight / rowH) - 2);
+  const moves = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page };
+  if (e.key in moves) {
+    e.preventDefault();
+    const np = Math.max(0, Math.min(doc.view.length - 1, (pos < 0 ? 0 : pos) + moves[e.key]));
+    doc.sel = doc.view[np]; scrollToPos(np); updateStatus();
+  } else if (ctrl && (e.key === "Home" || e.key === "End")) {
+    e.preventDefault();
+    const np = e.key === "Home" ? 0 : doc.view.length - 1;
+    doc.sel = doc.view[np]; scrollToPos(np); updateStatus();
+  } else if (ctrl && key === "c" && !String(window.getSelection()) && doc.sel >= 0) {
+    navigator.clipboard?.writeText(doc.lines[doc.sel]).catch(() => {});
+    setStatus("選択行をコピーしました");
+  }
+});
+
+// ================= ステータス =================
+let statusMsg = "";
+function setStatus(msg) { statusMsg = msg; updateStatus(); }
+function updateStatus() {
+  const doc = cur();
+  const parts = [];
+  if (doc) {
+    parts.push(`表示 ${doc.view.length.toLocaleString()} / 全 ${doc.lines.length.toLocaleString()} 行`);
+    if (doc.sel >= 0) parts.push(doc.orig[doc.sel] ? `選択: ${doc.isMerged ? doc.srcs[doc.sel] + " " : ""}${doc.orig[doc.sel]} 行目` : "選択: 仮想行");
+  }
+  if (statusMsg) parts.push(statusMsg);
+  $("statusMain").textContent = parts.join("　|　") || "準備完了";
+  $("statusErr").textContent = state.errors.length ? `無効な設定: ${state.errors.join(" / ")}` : "";
+}
+
+// ================= 初期化 =================
+function measure() {
+  const probe = document.createElement("div");
+  probe.className = "row"; probe.style.visibility = "hidden";
+  probe.innerHTML = '<span class="cell log" style="padding:0">' + "M".repeat(100) + "</span>";
+  canvas.appendChild(probe);
+  charW = probe.firstChild.getBoundingClientRect().width / 100 || 7.2;
+  rowH = probe.getBoundingClientRect().height || 20;
+  probe.remove();
+}
+state.config = loadStoredConfig();
+measure();
+compileRules();
+updateVsyncInfo();
+updateStatus();
+layout();
+
+// 開発用: ?config=xxx.json&file=a.log&file=b.log&merge=19（サーバー経由で開いた時のみ）
+(async () => {
+  const q = new URLSearchParams(location.search);
+  try {
+    if (q.get("config")) applyConfig(await (await fetch(q.get("config"))).json());
+    for (const f of q.getAll("file")) {
+      const res = await fetch(f);
+      if (res.ok) addDoc(f.split("/").pop(), new TextDecoder().decode(await res.arrayBuffer()));
+    }
+    if (q.get("merge")) mergeDocs(parseInt(q.get("merge"), 10));
+  } catch (e) { setStatus(`読み込み失敗: ${e.message}`); }
+})();
+
+// 検証用: 表示内容を Python 版と比較できる形で取り出す
+window.__lv = {
+  state, addDoc, mergeDocs, applyConfig, setFilter, setShowVsync, setAdvanced,
+  dump(doc, filterOn, showVsync) {
+    const keep = [state.filterOn, state.showVsync];
+    state.filterOn = filterOn; state.showVsync = showVsync;
+    const vis = computeVisible(doc);
+    [state.filterOn, state.showVsync] = keep;
+    const rows = [];
+    for (let i = 0; i < doc.lines.length; i++) {
+      if (!vis[i]) continue;
+      rows.push([doc.lines[i], doc.comments[i], doc.colors[i] === WHITE ? null : doc.colors[i],
+        ...doc.fileNames.map((fn) => { const s = doc.status[fn] ? doc.status[fn][i] : ["", WHITE]; return [s[0], s[1] === WHITE ? null : s[1]]; })]);
+    }
+    return rows;
+  },
+};
+</script>
+</body>
+</html>
