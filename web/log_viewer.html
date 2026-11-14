@@ -2300,13 +2300,13 @@ const FIELDS = {
 const EDITORS = {
   keywords: {
     title: "フィルタ設定の編集", sub: "正規表現にマッチした行を抽出し、指定の色とコメントを付与します。",
-    fields: ["file_pattern", "pattern", "color", "comment"], required: "pattern", scoped: true,
+    fields: ["file_pattern", "pattern", "color", "comment"], required: "pattern", scoped: true, noun: "フィルタ",
     info: "【使い方】\n\n正規表現に一致したログを抽出し、色とコメントを付けます。\n\n■ファイルごとのフィルタ\n左の一覧でファイルを選ぶと、そのファイル専用のフィルタを作れます。「すべてのファイル（共通）」はどのファイルにも使います。\n\n専用のフィルタは共通のフィルタより先に判定されます。1件に付く色は、最初に一致した1つです。\n\n一覧の下の欄に、まだ開いていないファイル名や、server.* のような正規表現も追加できます。\n\n字下げされた行は、直前の行とまとめて1件として判定します。\n\n「%」は空白の省略記法です（例: Temp%=）。",
   },
   sections: {
     title: "区間設定の編集", sub: "ファイル毎に開始～終了パターンを定義して色分けします。",
-    fields: ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "duration_ms", "color"], required: "start",
-    info: "【区間設定の使い方】\n\n■開始パターン\n 区間の開始条件(正規表現)です。\n [+V待]で、合致後の次のV周期から区間を開始します。\n\n■終了パターン\n 区間の終了条件(正規表現)です。\n [V]ボタンで<VSYNC>を入力できます。\n 空欄の場合は持続(ms)の経過のみで終了します。\n\n■終了の+V待\n 条件(パターンや時間)を満たした直後のV周期で区間を終了させます。\n\n■持続(ms)\n 指定時間が経過すると区間が終了します。この時[VIRTUAL TIMER]のログが自動挿入されます。\n\n※終了パターンと持続(ms)の両方を指定した場合、持続(ms)が経過するまでは終了パターンに合致しても無視されます。",
+    fields: ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "duration_ms", "color"], required: "start", scoped: true, noun: "区間",
+    info: "【区間設定の使い方】\n\n■ファイルごとの区間\n左の一覧でファイルを選ぶと、そのファイル専用の区間を作れます。「すべてのファイル（共通）」はどのファイルにも使います。専用の区間は共通より先に判定されます。\n\n■開始パターン\n 区間の開始条件(正規表現)です。\n [+V待]で、合致後の次のV周期から区間を開始します。\n\n■終了パターン\n 区間の終了条件(正規表現)です。\n [V]ボタンで<VSYNC>を入力できます。\n 空欄の場合は持続(ms)の経過のみで終了します。\n\n■終了の+V待\n 条件(パターンや時間)を満たした直後のV周期で区間を終了させます。\n\n■持続(ms)\n 指定時間が経過すると区間が終了します。この時[VIRTUAL TIMER]のログが自動挿入されます。\n\n※終了パターンと持続(ms)の両方を指定した場合、持続(ms)が経過するまでは終了パターンに合致しても無視されます。",
   },
   replace_patterns: {
     title: "説明パターンの編集", sub: "正規表現にマッチした文字列の直後に (説明) を付与します。",
@@ -2358,12 +2358,12 @@ function renderScopes() {
   if (!editor.scoped) return;
   const open = new Set(state.docs.filter((d) => !d.isMerged).map((d) => filePattern(d.name)));
   $("scList").innerHTML = editorScopes().map((p) => {
-    const n = editor.rows.filter((r) => patOf(r) === p && String(r.pattern).trim() !== "").length;
+    const req = EDITORS[editor.key].required, n = editor.rows.filter((r) => patOf(r) === p && String(r[req]).trim() !== "").length;
     const common = p === COMMON, plain = plainName(p) !== null;
     const tip = common ? "どのファイルにも使うフィルタ" : plain ? `ファイル名: ${scopeLabel(p)}${open.has(p) ? "" : "（今は開いていません）"}` : `正規表現: ${p}`;
     // 中身があるか、開いていないファイルのときは × で削除できる（共通は削除しない）
     const delable = !common && (editor.rows.some((r) => patOf(r) === p) || !open.has(p));
-    const xTip = n ? `「${scopeLabel(p)}」のフィルタ ${n} 件を削除` : `「${scopeLabel(p)}」を一覧から削除`;
+    const noun = EDITORS[editor.key].noun, xTip = n ? `「${scopeLabel(p)}」の${noun} ${n} 件を削除` : `「${scopeLabel(p)}」を一覧から削除`;
     return `<div class="sc-item"><button type="button" class="sc${p === editor.scope ? " on" : ""}${!common && !open.has(p) ? " closed" : ""}" data-s="${escapeHtml(p)}" title="${escapeHtml(tip)}">` +
       `<span class="sc-ic">${common ? SC_ICON.all : plain ? ICON.doc : SC_ICON.re}</span><span class="sc-name">${escapeHtml(scopeLabel(p))}</span><span class="sc-n">${n || ""}</span></button>` +
       (delable ? `<button type="button" class="sc-x" data-del="${escapeHtml(p)}" title="${escapeHtml(xTip)}" aria-label="${escapeHtml(xTip)}">×</button>` : "") + `</div>`;
@@ -2386,15 +2386,15 @@ function scNote(text) { const el = $("scErr"); el.textContent = text; el.classLi
 function deleteScope(p) {
   if (p === COMMON) return;
   const stays = state.docs.some((d) => !d.isMerged && filePattern(d.name) === p);   // 開いているファイルは一覧に残る
-  if (stays && !editor.rows.some((r) => patOf(r) === p)) { scNote("このファイルには削除するフィルタがありません"); return; }
+  if (stays && !editor.rows.some((r) => patOf(r) === p)) { scNote(`このファイルには削除する${EDITORS[editor.key].noun}がありません`); return; }
   const before = editorScopes(), idx = before.indexOf(p);
-  const k = editor.rows.filter((r) => patOf(r) === p && String(r.pattern).trim() !== "").length;
+  const req = EDITORS[editor.key].required, k = editor.rows.filter((r) => patOf(r) === p && String(r[req]).trim() !== "").length;
   editor.rows = editor.rows.filter((r) => patOf(r) !== p);
   editor.extraScopes = editor.extraScopes.filter((x) => x !== p);
   if (editor.scope === p && !stays) editor.scope = before[idx + 1] ?? before[idx - 1] ?? COMMON;
   renderScopes(); renderEditorRows();
   document.querySelector(".ed-table-wrap").scrollTop = 0;
-  scNote(k ? `「${scopeLabel(p)}」のフィルタ ${k} 件を削除しました（キャンセルで元に戻せます）` : `「${scopeLabel(p)}」を一覧から削除しました`);
+  scNote(k ? `「${scopeLabel(p)}」の${EDITORS[editor.key].noun} ${k} 件を削除しました（キャンセルで元に戻せます）` : `「${scopeLabel(p)}」を一覧から削除しました`);
 }
 $("scList").addEventListener("keydown", (e) => {   // 一覧の項目を選んで Delete キーでも削除
   if (e.key !== "Delete" && e.key !== "Backspace") return;
@@ -2466,8 +2466,8 @@ function renderEditorRows() {
       ` <button type="button" data-move="${i}" data-d="-1" title="上へ">↑</button><button type="button" data-move="${i}" data-d="1" title="下へ">↓</button>` +
       ` <button type="button" class="del" data-del="${i}">削除</button></td>${cells}</tr>`;
   }).join("");
-  const none = editor.scope === COMMON ? "共通のフィルタはまだありません。" : `「${escapeHtml(scopeLabel(editor.scope))}」専用のフィルタはまだありません。`;
-  $("edRows").innerHTML = html || `<tr class="empty-row"><td colspan="${cols.length + 1}">${none}<br>右上の「＋ 行を追加」で作れます。${editor.scope === COMMON ? "" : "専用のフィルタは共通のフィルタより先に判定されます。"}</td></tr>`;
+  const none = editor.scope === COMMON ? `共通の${def.noun}はまだありません。` : `「${escapeHtml(scopeLabel(editor.scope))}」専用の${def.noun}はまだありません。`;
+  $("edRows").innerHTML = html || `<tr class="empty-row"><td colspan="${cols.length + 1}">${none}<br>右上の「＋ 行を追加」で作れます。${editor.scope === COMMON ? "" : `専用の${def.noun}は共通の${def.noun}より先に判定されます。`}</td></tr>`;
 }
 $("edRows").addEventListener("input", (e) => {
   const t = e.target, i = +t.dataset.i, f = t.dataset.f;
@@ -2487,7 +2487,7 @@ $("edRows").addEventListener("input", (e) => {
     t.classList.toggle("bad", !!err); t.title = err;
     const pick = t.parentElement.querySelector('input[type="color"]');
     if (pick && /^#[0-9a-f]{6}$/i.test(t.value)) pick.value = t.value;
-    if (editor.scoped && f === "pattern") renderScopes();   // 一覧の件数を更新
+    if (editor.scoped && f === EDITORS[editor.key].required) renderScopes();   // 一覧の件数を更新
   }
 });
 $("edRows").addEventListener("click", (e) => {
