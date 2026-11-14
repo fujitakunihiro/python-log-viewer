@@ -195,11 +195,6 @@
   .vrow { flex: 1; min-height: 0; display: flex; }
   .scroller { flex: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; outline: none; }
   .ovmap { width: 16px; flex: none; display: block; background: var(--surface-2); border-left: 1px solid var(--sep); cursor: pointer; touch-action: none; }
-  .switch .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: none; }
-  .switch.on .live { display: inline-block; animation: livepulse 2s ease-in-out infinite; }
-  .switch .live.blink { animation: liveblink .6s ease-out, livepulse 2s ease-in-out .6s infinite; }
-  @keyframes livepulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
-  @keyframes liveblink { from { box-shadow: 0 0 0 0 rgba(52, 199, 89, .7); } to { box-shadow: 0 0 0 7px rgba(52, 199, 89, 0); } }
   .scroller::-webkit-scrollbar { width: 14px; height: 14px; }
   .scroller::-webkit-scrollbar-track { background: transparent; }
   .scroller::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text) 24%, transparent); background-clip: padding-box; border: 4px solid transparent; border-radius: 10px; }
@@ -530,7 +525,6 @@
     <span class="tsep"></span>
     <div class="group">
       <button class="switch" id="btnFilter" role="switch" aria-checked="false" title="色付きの行（フィルタに一致した行）だけを表示 (F2)"><span class="track"></span><span class="label">フィルタ</span><kbd>F2</kbd></button>
-      <button class="switch" id="btnTail" role="switch" aria-checked="false" title="ファイルへの追記を自動で読み込み、末尾を表示し続ける"><span class="track"></span><span class="label">追従</span><span class="live"></span></button>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
       <span class="vs-inline hidden" id="vsyncInfo">
@@ -1599,70 +1593,6 @@ ov.addEventListener("pointerup", () => { ovDragging = false; });
 ov.addEventListener("pointercancel", () => { ovDragging = false; });
 new ResizeObserver(() => { ovDirty = true; drawOverview(); }).observe(ov);
 
-// ================= 追従モード（ファイルの追記を自動で読み込み、末尾を表示し続ける） =================
-const tail = { on: false, timer: 0, busy: false, interval: 2000 };
-const atEnd = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - rowH * 2;
-function scrollToEnd() { scroller.scrollTop = scroller.scrollHeight; render(); }
-function tailTargets(doc) { return doc.isMerged ? state.docs.filter((d) => !d.isMerged && doc.fileNames.includes(d.name)) : [doc]; }
-function canTail(doc) { return !!doc && tailTargets(doc).every((d) => d.source && (d.source.handle || d.source.url)); }
-// ファイルが変わったかを中身を読まずに確かめる（サイズと更新日時）
-async function sourceChanged(src) {
-  if (src.handle) { const f = await src.handle.getFile(); return f.size !== src.size || f.lastModified !== src.lastModified; }
-  const res = await fetch(src.url, { method: "HEAD", cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const len = Number(res.headers.get("content-length"));
-  const lm = res.headers.get("last-modified");
-  const changed = (Number.isFinite(len) && len !== src.size) || (lm && src.httpModified && lm !== src.httpModified);
-  if (lm) src.httpModified = lm;
-  return !!changed;
-}
-async function tailTick() {
-  const doc = cur();
-  if (!tail.on || tail.busy || reloading || !doc) return;
-  if (!canTail(doc)) { setStatus("このタブは追従できません（Chrome / Edge で「開く」から開いたファイルが対象です）"); return; }
-  tail.busy = true;
-  try {
-    const targets = tailTargets(doc);
-    const changed = [];
-    for (const t of targets) if (await sourceChanged(t.source)) changed.push(t);
-    if (!changed.length || cur() !== doc) return;
-    const follow = atEnd();
-    const before = doc.lines.length;
-    for (const t of changed) await reloadFileDoc(t);
-    let nd = state.docs[state.active];
-    if (doc.isMerged) {
-      const fresh = state.docs.filter((d) => !d.isMerged && doc.fileNames.includes(d.name));
-      nd = replaceDoc(doc, buildMergedDoc(fresh, doc.mergeTsLen));
-    }
-    if (follow) scrollToEnd();
-    const diff = nd.lines.length - before;
-    flashLive();
-    setStatus(`追従: ${new Date().toLocaleTimeString("ja-JP")} に${diff >= 0 ? ` ${diff.toLocaleString()} 行追加` : "更新"}${follow ? "（末尾を表示中）" : "（末尾へ戻ると自動で追いかけます）"}`);
-  } catch (e) {
-    setTail(false);
-    setStatus(`追従を停止しました: ${e.message}`);
-  } finally {
-    tail.busy = false;
-  }
-}
-function flashLive() {
-  const dot = $("btnTail").querySelector(".live");
-  dot.classList.remove("blink"); void dot.offsetWidth; dot.classList.add("blink");
-}
-function setTail(on) {
-  tail.on = on;
-  styleToggle($("btnTail"), "追従", on);
-  clearInterval(tail.timer);
-  if (on) {
-    const doc = cur();
-    if (doc && !canTail(doc)) setStatus("追従: このタブのファイルは自動で読み直せません（Chrome / Edge で「開く」から開いてください）");
-    else setStatus("追従: ファイルへの追記を 2 秒ごとに確認し、末尾を表示し続けます");
-    tail.timer = setInterval(tailTick, tail.interval);
-    scrollToEnd();
-    tailTick();
-  }
-}
-$("btnTail").onclick = () => setTail(!tail.on);
 scroller.addEventListener("scroll", () => requestAnimationFrame(render));
 window.addEventListener("resize", () => layout());
 // 上の段の折り返しや集中モードでログ欄の大きさが変わったら描き直す
