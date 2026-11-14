@@ -190,6 +190,48 @@ DEFAULT_CONFIG = {
     }
 }
 
+class ReadOnlyText(tk.Text):
+    """ユーザー操作による編集（キー入力・貼り付け・削除）を無効化した Text。
+    選択・コピー・カーソル移動は可能。プログラムからの insert/delete/replace は許可する。
+
+    ウィジェットコマンドを Tcl の proc で包み、Tk のバインディング経由の編集だけを捨てる。
+    Python 側の編集メソッドは元のコマンドを直接呼ぶ。プロキシを Tcl だけで書いているので、
+    Tcl エラーは通常どおり伝わり（mainloop を止めない）、Python へのコールバックも発生しない。"""
+
+    _PROXY_PROC = "::logviewer_readonly_text_proxy"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tk.eval(
+            "if {[info commands %s] eq {}} {\n"
+            "  proc %s {orig cmd args} {\n"
+            "    if {$cmd in {insert delete replace}} { return }\n"
+            "    return [uplevel 1 [list $orig $cmd {*}$args]]\n"
+            "  }\n"
+            "}" % (self._PROXY_PROC, self._PROXY_PROC)
+        )
+        self._orig_cmd = self._w + "_orig"
+        self.tk.call("rename", self._w, self._orig_cmd)
+        self.tk.call("interp", "alias", "", self._w, "", self._PROXY_PROC, self._orig_cmd)
+
+    def insert(self, index, chars, *args):
+        self.tk.call((self._orig_cmd, "insert", index, chars) + args)
+
+    def delete(self, index1, index2=None):
+        self.tk.call(self._orig_cmd, "delete", index1, index2)
+
+    def replace(self, index1, index2, chars, *args):
+        self.tk.call(self._orig_cmd, "replace", index1, index2, chars, *args)
+
+    def destroy(self):
+        super().destroy()
+        # Tk が削除するのはリネーム後の本体コマンドのみなので、残ったエイリアスを片付ける
+        try:
+            self.tk.call("interp", "alias", "", self._w, "")
+        except tk.TclError:
+            pass
+
+
 class LineNumberCanvas(tk.Canvas):
     def __init__(self, master, text_widget, **kwargs):
         super().__init__(master, **kwargs)
@@ -244,14 +286,14 @@ class LogTab(tk.Frame):
         self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         
-        self.text = tk.Text(left_frame, wrap=tk.NONE, xscrollcommand=self.hsb_log.set, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.text = ReadOnlyText(left_frame, wrap=tk.NONE, xscrollcommand=self.hsb_log.set, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.text.tag_config("found", background=UIColors.ACCENT_HOVER, foreground="white")
         
         self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg=UIColors.BG, highlightthickness=0)
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         
-        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.timediff_text = ReadOnlyText(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
         if not self.is_merged:
             self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
@@ -267,7 +309,7 @@ class LogTab(tk.Frame):
         
         tk.Label(cmt_frame, text="Comment", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
-        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.comment_text = ReadOnlyText(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.comment_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_cmt.config(command=self.comment_text.xview)
@@ -283,7 +325,7 @@ class LogTab(tk.Frame):
             hsb = tk.Scrollbar(st_frame, orient=tk.HORIZONTAL)
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
             
-            st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#faf9f6", fg=UIColors.TEXT, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+            st_text = ReadOnlyText(st_frame, wrap=tk.NONE, bg="#faf9f6", fg=UIColors.TEXT, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
             st_text.tag_configure("sel", background="#cce8ff", foreground="black")
             st_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             hsb.config(command=st_text.xview)
