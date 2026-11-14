@@ -16,17 +16,17 @@
     --sel: rgba(0, 113, 227, .10); --hover: rgba(0, 0, 0, .025);
     --mark: #ffe58f; --mark-cur: #ffb340;
     --tint: 72%;                 /* ルール色の濃さ（ダークでは薄めて文字を読みやすく） */
-    --bar: rgba(255, 255, 255, .72);
+    --bar: rgba(255, 255, 255, .5);
     --shadow-1: 0 0 0 .5px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04), 0 4px 16px rgba(0, 0, 0, .04);
     --shadow-2: 0 0 0 .5px rgba(0, 0, 0, .1), 0 12px 36px rgba(0, 0, 0, .14), 0 2px 6px rgba(0, 0, 0, .06);
-    --switch-off: #e9e9eb;
+    --switch-off: #dde2ee;
     --r-card: 16px; --r-ctl: 10px;
     --row-h: 24px;
     --ln-w: 64px; --src-w: 112px; --dt-w: 108px; --cm-w: 260px; --st-w: 160px;
     /* 英数字は SF / Segoe UI、日本語はヒラギノ / 游ゴシック UI（英数字用のフォントを先に並べる） */
     --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif;
     --mono: "SF Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, "BIZ UDGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "MS Gothic", monospace;
-    --tabbar: color-mix(in srgb, var(--text) 7%, var(--bg));
+    --tabbar: rgba(96, 112, 168, .10);
   }
   :root[data-theme="dark"] {
     --bg: #000000; --surface: #1c1c1e; --surface-2: #232325; --surface-3: #2c2c2e;
@@ -45,7 +45,14 @@
 
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 13px/1.4 var(--ui); display: flex; flex-direction: column;
+  html { background-color: #eef2fb;
+         background-image:
+           radial-gradient(900px 540px at 4% -10%, rgba(120, 172, 255, .36), transparent 70%),
+           radial-gradient(820px 520px at 98% 0%, rgba(198, 160, 255, .30), transparent 70%),
+           radial-gradient(900px 620px at 82% 110%, rgba(255, 178, 214, .28), transparent 70%),
+           radial-gradient(760px 520px at -2% 104%, rgba(140, 218, 255, .24), transparent 70%);
+         background-attachment: fixed; }
+  body { background: transparent; color: var(--text); font: 13px/1.4 var(--ui); display: flex; flex-direction: column;
          -webkit-font-smoothing: antialiased; letter-spacing: 0; font-feature-settings: "palt" 1; text-rendering: optimizeLegibility; }
   button, input { font: inherit; color: inherit; }
   button { -webkit-tap-highlight-color: transparent; }
@@ -55,8 +62,8 @@
 
   /* ================= タイトルバー ================= */
   .titlebar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; padding: 7px 12px;
-              background: var(--bar); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
-              border-bottom: 1px solid var(--sep); }
+              background: var(--bar); backdrop-filter: saturate(180%) blur(24px); -webkit-backdrop-filter: saturate(180%) blur(24px);
+              border-bottom: 1px solid rgba(255, 255, 255, .7); box-shadow: 0 1px 0 rgba(80, 100, 160, .08), 0 6px 20px -8px rgba(70, 90, 160, .18); }
   .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; letter-spacing: -.01em; margin-right: 6px; white-space: nowrap; }
   .tsep { width: 1px; height: 20px; background: var(--sep-strong); margin: 0 8px; flex: none; }
   .titlebar .group { display: flex; align-items: center; gap: 12px; }
@@ -66,7 +73,8 @@
   .brand .logo svg { width: 15px; height: 15px; stroke-width: 2; }
   .spacer { flex: 1; }
   #btnFocus { margin-left: auto; }
-  .tgroup { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-3); }
+  .tgroup { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 11px; background: rgba(255, 255, 255, .62);
+           box-shadow: 0 0 0 .5px rgba(80, 100, 160, .16), 0 1px 3px rgba(80, 100, 160, .08), inset 0 1px 0 rgba(255, 255, 255, .9); }
   .tgroup .btn { height: 28px; border-radius: 8px; }
   .tgroup .btn:hover { background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 .5px rgba(0, 0, 0, .04); }
   .btn.merge { height: 30px; margin-left: 6px; padding: 0 14px 0 10px; border-radius: 999px; color: #fff; font-weight: 600;
@@ -110,8 +118,8 @@
   .switch kbd { font: 11px var(--ui); color: var(--text-3); }
 
   /* 検索フィールド */
-  .field { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; background: var(--surface-3); border-radius: var(--r-ctl);
-           border: 1px solid transparent; transition: border-color .15s, background-color .15s, box-shadow .15s; color: var(--text-3); }
+  .field { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; background: rgba(255, 255, 255, .68); border-radius: var(--r-ctl);
+           border: 1px solid rgba(255, 255, 255, .9); box-shadow: 0 0 0 .5px rgba(80, 100, 160, .14), 0 1px 2px rgba(80, 100, 160, .07); transition: border-color .15s, background-color .15s, box-shadow .15s; color: var(--text-3); }
   .field:focus-within { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .field input { border: 0; outline: 0; width: clamp(84px, 13vw, 240px); background: transparent; color: var(--text); }
   .field input::placeholder { color: var(--text-3); }
@@ -158,7 +166,10 @@
   .tip .note { color: var(--orange); }
 
   /* ================= ログ表示カード ================= */
-  .main { flex: 1 0 auto; min-height: 260px; height: 0; margin: 8px 10px 0; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-1);
+  .main { flex: 1 0 auto; min-height: 260px; height: 0; margin: 12px 16px 0; background: rgba(255, 255, 255, .86); border-radius: 18px;
+          backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%);
+          border: 1px solid rgba(255, 255, 255, .9);
+          box-shadow: 0 0 0 .5px rgba(80, 100, 160, .16), inset 0 1px 0 rgba(255, 255, 255, .95), 0 18px 44px rgba(70, 90, 160, .15), 0 4px 12px rgba(70, 90, 160, .08);
           display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
   .vrow { flex: 1; min-height: 0; display: flex; }
@@ -255,7 +266,7 @@
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
   mark.cur { background: var(--mark-cur); }
 
-  .status { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 6px 20px 8px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .status { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 8px 24px 10px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
   .status .err { color: var(--red); }
 
   /* 空の状態 */
@@ -295,7 +306,7 @@
            max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
   dialog[open] { animation: sheet .22s cubic-bezier(.2, .8, .2, 1); }
   @keyframes sheet { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-  dialog::backdrop { background: rgba(0, 0, 0, .28); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+  dialog::backdrop { background: rgba(60, 74, 130, .22); backdrop-filter: blur(10px) saturate(140%); -webkit-backdrop-filter: blur(10px) saturate(140%); }
   .dlg { display: flex; flex-direction: column; gap: 14px; padding: 22px 24px; max-height: calc(100vh - 24px); }
   .dlg h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
   .dlg .sub { margin: -8px 0 0; font-size: 13px; color: var(--text-2); }
@@ -375,6 +386,7 @@
     .field input { width: clamp(72px, 10vw, 240px); }
   }
   @media (max-width: 720px) {
+    .main { margin: 8px 8px 0; border-radius: 14px; }
     :root { --ln-w: 48px; --dt-w: 88px; --cm-w: 160px; --st-w: 120px; --src-w: 90px; }
     .titlebar { padding: 6px 8px; }
     .tsep { display: none; }
@@ -397,7 +409,7 @@
   body.focus.peek .titlebar { transform: none; }
   body.focus .titlebar { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
   body.focus .strip, body.focus .status { display: none; }
-  body.focus .main { margin: 0; border-radius: 0; box-shadow: none; }
+  body.focus .main { margin: 0; border-radius: 0; box-shadow: none; border: 0; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
   body.focus .peek-zone { display: block; position: fixed; top: 0; left: 0; right: 0; height: 6px; z-index: 29; }
   body.focus .focus-exit { display: inline-flex; align-items: center; gap: 6px; position: fixed; right: 18px; bottom: 16px; z-index: 31;
                            height: 30px; padding: 0 12px; border: 0; border-radius: 999px; cursor: pointer; font-size: 12px; color: var(--text);
