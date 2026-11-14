@@ -333,6 +333,16 @@
   .sc-title { font: 600 11.5px var(--ui); color: var(--text-2); padding: 2px 4px 0; }
   .sc-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; padding: 6px; max-height: calc(100vh - 290px);
              background: var(--surface-2); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--sep); }
+  .sc-item { position: relative; display: flex; flex: none; }
+  .sc-item .sc { flex: 1; min-width: 0; }
+  .sc-x { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%;
+          display: grid; place-items: center; background: none; color: var(--text-3); font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s, background-color .12s; }
+  .sc-item:hover .sc-x, .sc-item:focus-within .sc-x, .sc.on + .sc-x { opacity: 1; }
+  .sc-item:has(.sc-x):hover .sc-n, .sc-item:has(.sc-x):focus-within .sc-n, .sc-item:has(.sc.on):has(.sc-x) .sc-n { visibility: hidden; }
+  .sc-x:hover { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+  .sc.on + .sc-x { color: rgba(255, 255, 255, .88); }
+  .sc.on + .sc-x:hover { background: rgba(255, 255, 255, .24); color: #fff; }
+  .ed-err.note { color: var(--text-2); }
   .sc { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; color: var(--text); flex: none; }
   .sc:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
   .sc.on { background: var(--accent); color: #fff; }
@@ -349,6 +359,15 @@
   .sc-add button { flex: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; cursor: pointer; }
   .sc-add button:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
   .empty-row td { padding: 36px 18px; text-align: center; color: var(--text-2); line-height: 1.7; border-bottom: 0; }
+  .ed-table-wrap { position: relative; }
+  .grip-h { display: inline-grid; place-items: center; width: 18px; height: 26px; margin-right: 2px; vertical-align: middle; border-radius: 6px;
+            color: var(--text-3); cursor: grab; touch-action: none; user-select: none; }
+  .grip-h:hover { color: var(--text-2); background: color-mix(in srgb, var(--text) 7%, transparent); }
+  .grip-h svg { width: 8px; height: 14px; fill: currentColor; }
+  .ed-table tr.drag-src { position: relative; z-index: 4; background: var(--surface); box-shadow: 0 12px 30px rgba(60, 80, 140, .24), 0 0 0 1px var(--sep-strong); }
+  .ed-table tr.drag-src td { background: var(--surface); border-bottom-color: transparent; }
+  .ed-drop { position: absolute; left: 6px; right: 6px; height: 3px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); pointer-events: none; z-index: 6; }
+  body.row-dragging, body.row-dragging * { cursor: grabbing !important; user-select: none !important; }
   .ed-table-wrap { flex: 1; min-width: 0; overflow: auto; background: var(--surface-2); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--sep); max-height: calc(100vh - 190px); }
   .ed-table { border-collapse: separate; border-spacing: 0; font-size: 12px; width: 100%; }
   .ed-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--text-2); text-align: left; padding: 10px 6px 8px; white-space: nowrap;
@@ -2344,20 +2363,51 @@ function renderScopes() {
     const n = editor.rows.filter((r) => patOf(r) === p && String(r.pattern).trim() !== "").length;
     const common = p === COMMON, plain = plainName(p) !== null;
     const tip = common ? "どのファイルにも使うフィルタ" : plain ? `ファイル名: ${scopeLabel(p)}${open.has(p) ? "" : "（今は開いていません）"}` : `正規表現: ${p}`;
-    return `<button type="button" class="sc${p === editor.scope ? " on" : ""}${!common && !open.has(p) ? " closed" : ""}" data-s="${escapeHtml(p)}" title="${escapeHtml(tip)}">` +
-      `<span class="sc-ic">${common ? SC_ICON.all : plain ? ICON.doc : SC_ICON.re}</span><span class="sc-name">${escapeHtml(scopeLabel(p))}</span><span class="sc-n">${n || ""}</span></button>`;
+    // 中身があるか、開いていないファイルのときは × で削除できる（共通は削除しない）
+    const delable = !common && (editor.rows.some((r) => patOf(r) === p) || !open.has(p));
+    const xTip = n ? `「${scopeLabel(p)}」のフィルタ ${n} 件を削除` : `「${scopeLabel(p)}」を一覧から削除`;
+    return `<div class="sc-item"><button type="button" class="sc${p === editor.scope ? " on" : ""}${!common && !open.has(p) ? " closed" : ""}" data-s="${escapeHtml(p)}" title="${escapeHtml(tip)}">` +
+      `<span class="sc-ic">${common ? SC_ICON.all : plain ? ICON.doc : SC_ICON.re}</span><span class="sc-name">${escapeHtml(scopeLabel(p))}</span><span class="sc-n">${n || ""}</span></button>` +
+      (delable ? `<button type="button" class="sc-x" data-del="${escapeHtml(p)}" title="${escapeHtml(xTip)}" aria-label="${escapeHtml(xTip)}">×</button>` : "") + `</div>`;
   }).join("");
 }
 function switchScope(p) {
   editor.scope = p;
-  $("scErr").textContent = "";
+  $("scErr").textContent = ""; $("scErr").classList.remove("note");
   renderScopes(); renderEditorRows();
   document.querySelector(".ed-table-wrap").scrollTop = 0;
 }
-$("scList").addEventListener("click", (e) => { const b = e.target.closest(".sc"); if (b) switchScope(b.dataset.s); });
+$("scList").addEventListener("click", (e) => {
+  const x = e.target.closest(".sc-x");
+  if (x) { deleteScope(x.dataset.del); return; }
+  const b = e.target.closest(".sc");
+  if (b) switchScope(b.dataset.s);
+});
+// 対象ファイルの項目を削除する: そのファイルのフィルタをすべて消し、開いていないファイルなら一覧からも外す
+function scNote(text) { const el = $("scErr"); el.textContent = text; el.classList.add("note"); }
+function deleteScope(p) {
+  if (p === COMMON) return;
+  const stays = state.docs.some((d) => !d.isMerged && filePattern(d.name) === p);   // 開いているファイルは一覧に残る
+  if (stays && !editor.rows.some((r) => patOf(r) === p)) { scNote("このファイルには削除するフィルタがありません"); return; }
+  const before = editorScopes(), idx = before.indexOf(p);
+  const k = editor.rows.filter((r) => patOf(r) === p && String(r.pattern).trim() !== "").length;
+  editor.rows = editor.rows.filter((r) => patOf(r) !== p);
+  editor.extraScopes = editor.extraScopes.filter((x) => x !== p);
+  if (editor.scope === p && !stays) editor.scope = before[idx + 1] ?? before[idx - 1] ?? COMMON;
+  renderScopes(); renderEditorRows();
+  document.querySelector(".ed-table-wrap").scrollTop = 0;
+  scNote(k ? `「${scopeLabel(p)}」のフィルタ ${k} 件を削除しました（キャンセルで元に戻せます）` : `「${scopeLabel(p)}」を一覧から削除しました`);
+}
+$("scList").addEventListener("keydown", (e) => {   // 一覧の項目を選んで Delete キーでも削除
+  if (e.key !== "Delete" && e.key !== "Backspace") return;
+  const b = e.target.closest(".sc");
+  if (!b || b.dataset.s === COMMON) return;
+  e.preventDefault();
+  deleteScope(b.dataset.s);
+});
 function addScopeFromInput() {
   const raw = $("scNew").value.trim(), err = $("scErr");
-  err.textContent = "";
+  err.textContent = ""; err.classList.remove("note");
   if (!raw) return;
   // 正規表現に使う記号が入っていれば正規表現、なければファイル名として扱う
   const pat = /[*+?^$()[\]{}|\\]/.test(raw) ? raw : filePattern(raw);
@@ -2387,7 +2437,7 @@ function openEditor(key) {
   }
   $("edTitle").textContent = def.title;
   $("edSub").textContent = def.sub;
-  $("edInfo").textContent = def.info;
+  $("edInfo").textContent = def.info + "\n\n■並べ替え\n行の左のつまみ（⋮⋮）をドラッグして並べ替えられます。Esc で取り消せます。";
   $("edErr").textContent = ""; $("scErr").textContent = ""; $("scNew").value = "";
   $("edHead").innerHTML = `<tr><th>有効 / 並べ替え</th>${fieldsFor(def).map((f) => `<th style="min-width:${FIELDS[f].w}px">${FIELDS[f].label}</th>`).join("")}</tr>`;
   renderScopes();
@@ -2414,7 +2464,7 @@ function renderEditorRows() {
       if (kind === "end") return `<td><div class="inline">${text()}<button type="button" class="v" data-vsync="${i}" title="&lt;VSYNC&gt; を入力">V</button></div></td>`;
       return `<td>${text()}</td>`;
     }).join("");
-    return `<tr class="${r.enabled ? "" : "off"}"><td class="ops"><input type="checkbox" data-i="${i}" data-f="enabled"${r.enabled ? " checked" : ""} title="有効">` +
+    return `<tr class="${r.enabled ? "" : "off"}" data-row="${i}"><td class="ops"><span class="grip-h" title="ドラッグで並べ替え">${GRIP}</span><input type="checkbox" data-i="${i}" data-f="enabled"${r.enabled ? " checked" : ""} title="有効">` +
       ` <button type="button" data-move="${i}" data-d="-1" title="上へ">↑</button><button type="button" data-move="${i}" data-d="1" title="下へ">↓</button>` +
       ` <button type="button" class="del" data-del="${i}">削除</button></td>${cells}</tr>`;
   }).join("");
@@ -2457,6 +2507,74 @@ $("edRows").addEventListener("click", (e) => {
     renderEditorRows();
   }
 });
+// ---- 行をドラッグ＆ドロップで並べ替え ----
+const GRIP = '<svg viewBox="0 0 8 14" aria-hidden="true"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="6" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="6" cy="12" r="1.2"/></svg>';
+let rowDrag = null;
+const edWrap = () => document.querySelector(".ed-table-wrap");
+const edDrop = document.createElement("div");
+edDrop.className = "ed-drop";
+$("edRows").addEventListener("pointerdown", (e) => {
+  const g = e.target.closest(".grip-h");
+  if (!g || e.button !== 0) return;
+  e.preventDefault();
+  const tr = g.closest("tr");
+  rowDrag = { tr, from: editor.rows[+tr.dataset.row], y0: e.clientY, lastY: e.clientY, scroll0: edWrap().scrollTop, started: false, targetObj: null, lastObj: null, timer: 0 };
+});
+function rowDragUpdate() {
+  const d = rowDrag, wrap = edWrap();
+  // つまみを持った行は、ポインタについていく（自動スクロールした分も含める）
+  d.tr.style.transform = `translateY(${d.lastY - d.y0 + (wrap.scrollTop - d.scroll0)}px)`;
+  const rows = [...$("edRows").querySelectorAll("tr[data-row]")].filter((r) => r !== d.tr);
+  let target = null;
+  for (const r of rows) { const b = r.getBoundingClientRect(); if (d.lastY < b.top + b.height / 2) { target = r; break; } }
+  d.targetObj = target ? editor.rows[+target.dataset.row] : null;      // この行の前に入れる（null なら最後）
+  d.lastObj = rows.length ? editor.rows[+rows[rows.length - 1].dataset.row] : null;
+  const wr = wrap.getBoundingClientRect();
+  const y = target ? target.getBoundingClientRect().top : rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : d.tr.getBoundingClientRect().top;
+  edDrop.style.top = `${y - wr.top + wrap.scrollTop - 1}px`;
+}
+function rowDragTick() {   // 上端・下端に近づけたら、一覧を自動でスクロール
+  const d = rowDrag;
+  if (!d || !d.started) return;
+  const wrap = edWrap(), wr = wrap.getBoundingClientRect(), top = wr.top + $("edHead").offsetHeight + 36, bottom = wr.bottom - 36;
+  const v = d.lastY < top ? -(top - d.lastY) / 4 : d.lastY > bottom ? (d.lastY - bottom) / 4 : 0;
+  if (v) { wrap.scrollTop += Math.max(-24, Math.min(24, v)); rowDragUpdate(); }
+}
+document.addEventListener("pointermove", (e) => {
+  const d = rowDrag;
+  if (!d) return;
+  d.lastY = e.clientY;
+  if (!d.started) {
+    if (Math.abs(e.clientY - d.y0) < 4) return;
+    d.started = true;
+    d.tr.classList.add("drag-src");
+    document.body.classList.add("row-dragging");
+    edWrap().appendChild(edDrop);
+    d.timer = setInterval(rowDragTick, 16);
+  }
+  rowDragUpdate();
+});
+function endRowDrag(commit) {
+  const d = rowDrag;
+  if (!d) return;
+  rowDrag = null;
+  clearInterval(d.timer);
+  d.tr.classList.remove("drag-src"); d.tr.style.transform = "";
+  document.body.classList.remove("row-dragging");
+  edDrop.remove();
+  if (!d.started || !commit || d.targetObj === d.from) return;
+  // 入れる場所: 目的の行の前（なければ、その一覧の最後の行の後ろ）。ほかの対象ファイルの行の並びは変わらない
+  editor.rows.splice(editor.rows.indexOf(d.from), 1);
+  const at = d.targetObj ? editor.rows.indexOf(d.targetObj) : d.lastObj ? editor.rows.indexOf(d.lastObj) + 1 : editor.rows.length;
+  editor.rows.splice(at, 0, d.from);
+  renderScopes(); renderEditorRows();
+}
+document.addEventListener("pointerup", () => endRowDrag(true));
+document.addEventListener("pointercancel", () => endRowDrag(false));
+// ドラッグ中の Esc は、ダイアログを閉じずにドラッグだけを取り消す
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && rowDrag && rowDrag.started) { e.preventDefault(); e.stopPropagation(); endRowDrag(false); }
+}, true);
 $("edAdd").onclick = () => {
   const r = blankRow(EDITORS[editor.key]);
   if (editor.scoped) r.file_pattern = editor.scope;
