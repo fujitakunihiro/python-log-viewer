@@ -63,6 +63,22 @@
                  background: linear-gradient(145deg, #5ac8fa, #0071e3); box-shadow: 0 1px 3px rgba(0, 113, 227, .35); }
   .brand .logo svg { width: 15px; height: 15px; stroke-width: 2; }
   .spacer { flex: 1; }
+  .tgroup { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-3); }
+  .tgroup .btn { height: 28px; border-radius: 8px; }
+  .tgroup .btn:hover { background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 .5px rgba(0, 0, 0, .04); }
+  .btn.merge { height: 30px; margin-left: 6px; padding: 0 14px 0 10px; border-radius: 999px; color: #fff; font-weight: 600;
+               background: linear-gradient(145deg, #bf5af2, #5e5ce6); box-shadow: 0 1px 3px rgba(94, 92, 230, .35); }
+  .btn.merge:hover { background: linear-gradient(145deg, #c86df5, #6e6cf0); }
+  .btn.merge:disabled { filter: grayscale(1); opacity: .35; }
+  /* ホバーで出る小さな説明 */
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 50;
+                            white-space: pre; font: 500 11.5px var(--ui); letter-spacing: 0; color: #fff; background: rgba(29, 29, 31, .9);
+                            padding: 5px 9px; border-radius: 7px; pointer-events: none; animation: tipin .15s .45s both; }
+  @keyframes tipin { from { opacity: 0; transform: translate(-50%, -2px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  .menu-wrap [data-tip]:hover::after { left: auto; right: 0; transform: none; animation-name: tipin-r; }
+  @keyframes tipin-r { from { opacity: 0; } to { opacity: 1; } }
+  .menu-wrap[aria-busy] [data-tip]:hover::after, #btnSettings[aria-expanded="true"]::after { display: none; }
 
   /* ボタン: ツール (透明) / 主要 (青) / 補助 (グレー) */
   .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-ctl);
@@ -114,6 +130,9 @@
   .tab .x { width: 18px; height: 18px; border: 0; border-radius: 50%; background: none; color: var(--text-3); cursor: pointer; display: grid; place-items: center; padding: 0; font-size: 13px; line-height: 1; }
   .tab .x:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
   .tab.dragging { opacity: .4; }
+  .tab-ic { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; color: #fff; background: linear-gradient(145deg, #bf5af2, #5e5ce6); margin-left: -4px; }
+  .tab-ic svg { width: 11px; height: 11px; stroke-width: 2.2; }
+  .stepper.bad { border-color: var(--red); }
   .tab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
   .tab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
 
@@ -137,16 +156,19 @@
   .canvas { position: relative; }
   .row, .head { display: flex; height: var(--row-h); line-height: var(--row-h); font: 12.5px var(--mono); white-space: pre; }
   .row { position: absolute; left: 0; cursor: default; }
+  /* 行のセルは上下中央揃え（等幅フォントと UI フォントの高さの違いを吸収） */
+  .row .cell { display: flex; align-items: center; line-height: 1.3; }
+  .row .cell > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+  .row .cell.ln, .row .cell.dt { justify-content: flex-end; }
   .head { position: sticky; top: 0; z-index: 3; font: 600 11px var(--ui); letter-spacing: .04em; color: var(--text-2);
-          background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-          border-bottom: 1px solid var(--sep); height: 30px; line-height: 30px; }
+          background: linear-gradient(var(--surface), var(--surface-2)); border-bottom: 1px solid var(--sep); height: 36px; line-height: 36px; }
   .L, .R { display: flex; flex: none; position: sticky; z-index: 2; }
   .L { left: 0; }
   .R { right: 0; }
   .cell { overflow: hidden; padding: 0 10px; flex: none; text-overflow: ellipsis; }
   .ln { width: var(--ln-w); text-align: right; color: var(--text-3); background: var(--surface); font-variant-numeric: tabular-nums; }
   .src { width: var(--src-w); color: var(--text-2); background: var(--surface); font-family: var(--ui); font-size: 12px; }
-  .dt { width: var(--dt-w); text-align: right; color: var(--text-3); background: var(--surface); border-right: 1px solid var(--sep); font-variant-numeric: tabular-nums; }
+  .dt { width: var(--dt-w); text-align: right; color: var(--text-3); background: var(--surface); font-variant-numeric: tabular-nums; }
   .log { padding-left: 14px; }
   /* 列の境界線（見出しでドラッグして幅を変更） */
   .head .cell { position: relative; }
@@ -160,17 +182,46 @@
   .rz:hover::after { background: var(--accent) !important; top: 4px; bottom: 4px; }
   body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
   .log.c, .st.c { background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); }
-  .cm { width: var(--cm-w); color: var(--accent-text); background: var(--surface); border-left: 1px solid var(--sep); font-family: var(--ui); font-size: 12px; }
+  .cm { width: var(--cm-w); color: var(--accent-text); background: var(--surface); font-family: var(--ui); font-size: 12px; }
   .R { box-shadow: -12px 0 12px -12px rgba(0, 0, 0, .12); }
-  .st { width: var(--st-w); background: var(--surface); border-left: 1px solid var(--sep); font-family: var(--ui); font-size: 12px; color: var(--text); }
-  .head .cell { background: transparent; color: var(--text-2); text-align: left; }
-  .head .L, .head .R { background: color-mix(in srgb, var(--surface) 92%, transparent); }
+  .st { width: var(--st-w); background: var(--surface); font-family: var(--ui); font-size: 12px; color: var(--text); }
+  .L .cell:last-child { border-right: 1px solid var(--sep); }
+  .R .cell { border-left: 1px solid var(--sep); }
+  .R:empty { box-shadow: none; }
+
+  /* 見出しのセル（ドラッグで列を移動） */
+  .head .cell { display: flex; align-items: center; gap: 6px; background: transparent; color: var(--text-2); cursor: grab; transition: background-color .15s, color .15s; }
+  .head .cell.ln, .head .cell.dt { justify-content: flex-end; }
+  .head .cell:hover { color: var(--text); background: color-mix(in srgb, var(--text) 4%, transparent); }
+  .head .L, .head .R { background: linear-gradient(var(--surface), var(--surface-2)); }
   .head .R { box-shadow: none; }
+  .head .lbl { overflow: hidden; text-overflow: ellipsis; }
+  .grip { width: 6px; height: 11px; flex: none; fill: currentColor; opacity: 0; transition: opacity .15s; }
+  .head .cell:hover .grip { opacity: .45; }
+  .head .cell.ln .grip, .head .cell.dt .grip { order: -1; margin-right: auto; }
+  .head .cell.moving { opacity: .35; }
+  .doc-title { display: flex; align-items: center; gap: 8px; min-width: 0; font: 600 12.5px var(--ui); letter-spacing: 0; color: var(--text); }
+  .doc-name { white-space: nowrap; }
+  .doc-ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none; color: var(--accent); background: var(--accent-soft); }
+  .doc-ic svg { width: 14px; height: 14px; }
+  .doc-ic.merged { color: #fff; background: linear-gradient(145deg, #bf5af2, #5e5ce6); }
+  .badge { font: 500 11px var(--ui); color: var(--text-2); background: var(--surface-3); border-radius: 999px; padding: 0 8px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fpill { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--ui); color: var(--text); background: var(--surface-3); border-radius: 999px; padding: 0 9px 0 7px; line-height: 22px; white-space: nowrap; }
+  .fpill i, .fdot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; display: inline-block; }
+  .src .fdot { margin-right: 6px; }
+  /* マージ結果: 行の左端にファイルの色の帯 */
+  .row.m .L .cell:first-child, .row.m .L:empty + .log { box-shadow: inset 3px 0 0 var(--fc); }
+  .row.sel.m .L .cell:first-child { box-shadow: inset 3px 0 0 var(--fc); }
+  /* 列の移動中 */
+  body.col-moving, body.col-moving * { cursor: grabbing !important; user-select: none !important; }
+  .col-drop { position: fixed; z-index: 45; width: 3px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); pointer-events: none; }
+  .col-ghost { position: fixed; left: 0; top: 0; z-index: 46; pointer-events: none; padding: 4px 12px; border-radius: 8px; font: 600 12px var(--ui);
+               color: #fff; background: var(--accent); box-shadow: var(--shadow-2); }
   .row:hover .log:not(.c) { background: var(--hover); }
   .row.virt .log { color: var(--text-3); font-style: italic; }
   .row.sel .ln { color: #fff; background: var(--accent); }
   .row.sel .log { box-shadow: inset 0 0 0 9999px var(--sel); }
-  .row.sel .dt, .row.sel .src, .row.sel .cm { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  .row.sel .dt, .row.sel .src, .row.sel .cm, .row.sel .st:not(.c) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
   .row.base .dt { color: var(--red); font-weight: 600; }
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
   mark.cur { background: var(--mark-cur); }
@@ -246,8 +297,28 @@
   .form-row input[type=text] { height: 30px; border: 1px solid var(--sep-strong); border-radius: 8px; padding: 0 10px; width: 150px; font: 13px var(--mono); background: var(--surface); color: var(--text); }
   .form-row input[type=text]:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .form-row input.bad { border-color: var(--red); }
-  fieldset { border: 0; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--sep); display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; margin: 0; }
+  fieldset { min-width: 0; border: 0; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--sep); display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; margin: 0; }
   legend { font-weight: 600; font-size: 11px; letter-spacing: .04em; color: var(--text-2); padding: 0; margin-bottom: -4px; float: left; }
+
+  /* マージのダイアログ */
+  .mg-list { display: flex; flex-direction: column; gap: 2px; }
+  .mg-item { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+  .mg-item:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+  .mg-item input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .mg-item .fdot { width: 10px; height: 10px; }
+  .mg-item .nm { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mg-item .ct { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--sep-strong); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .stepper button { width: 30px; height: 30px; border: 0; background: var(--surface-3); cursor: pointer; font-size: 15px; }
+  .stepper button:hover { background: color-mix(in srgb, var(--text) 10%, var(--surface-3)); }
+  .stepper input { width: 52px; height: 30px; border: 0; text-align: center; font: 600 13px var(--mono); background: var(--surface); color: var(--text); }
+  .stepper input:focus { outline: 0; box-shadow: inset 0 0 0 2px var(--accent-soft); }
+  .form-row .stepper + span { margin-right: auto; }
+  .mg-preview { display: flex; flex-direction: column; gap: 4px; font: 12px var(--mono); }
+  .mg-preview div { min-width: 0; display: flex; align-items: center; gap: 8px; white-space: pre; overflow: hidden; text-overflow: ellipsis; padding: 5px 8px; border-radius: 7px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--sep); }
+  .mg-preview mark { background: color-mix(in srgb, var(--c) 22%, var(--surface)); box-shadow: inset 0 -2px 0 var(--c); border-radius: 3px; padding: 1px 0; }
+  .mg-preview .rest { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+  .mg-note { font-size: 12px; color: var(--text-2); }
 
   /* ================= 狭い画面 ================= */
   @media (max-width: 900px) {
@@ -259,7 +330,7 @@
   }
   /* 中くらいの幅ではボタンをアイコンだけにして 1 段に収める */
   @media (max-width: 1440px) {
-    .brand span, .titlebar .btn .lbl { display: none; }
+    .brand span, .titlebar .btn:not(.merge) .lbl { display: none; }
     .titlebar .btn { padding: 0 9px; }
   }
   @media (max-width: 720px) {
@@ -302,17 +373,19 @@
       <div class="logo"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 10h10M5 14h14M5 18h8"/></svg></div>
       <span>Log Viewer</span>
     </div>
-    <button class="btn" id="btnOpen" title="ファイルを開く (Ctrl+O)">
-      <svg class="i" viewBox="0 0 24 24"><path d="M3 7.5V18a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18V9a1.5 1.5 0 0 0-1.5-1.5H12L9.8 5H4.5A1.5 1.5 0 0 0 3 6.5"/></svg><span class="lbl">開く</span>
-    </button>
-    <button class="btn" id="btnReload" title="F5: 表示中のタブをファイルから読み直す（マージ結果は元ファイルから作り直す）">
-      <svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span class="lbl">再読み込み</span>
-    </button>
-    <button class="btn" id="btnMerge" title="開いているファイルを時刻順にマージ">
-      <svg class="i" viewBox="0 0 24 24"><path d="M6 4v4a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4M18 4v4a4 4 0 0 1-4 4M6 20v-2"/></svg><span class="lbl">マージ</span>
-    </button>
-    <button class="btn" id="btnExport" title="表示中の行を色付きの Excel ファイル (.xlsx) に出力">
-      <svg class="i" viewBox="0 0 24 24"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12"/></svg><span class="lbl">Excel出力</span>
+    <div class="tgroup">
+      <button class="btn" id="btnOpen" data-tip="開く  Ctrl+O" aria-label="開く">
+        <svg class="i" viewBox="0 0 24 24"><path d="M3 7.5V18a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18V9a1.5 1.5 0 0 0-1.5-1.5H12L9.8 5H4.5A1.5 1.5 0 0 0 3 6.5"/></svg><span class="lbl">開く</span>
+      </button>
+      <button class="btn" id="btnReload" data-tip="再読み込み  F5" aria-label="再読み込み">
+        <svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span class="lbl">再読み込み</span>
+      </button>
+      <button class="btn" id="btnExport" data-tip="Excel に出力（表示中の行）" aria-label="Excel出力">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12"/></svg><span class="lbl">Excel出力</span>
+      </button>
+    </div>
+    <button class="btn merge" id="btnMerge" data-tip="開いているログを時刻順に 1 つにまとめる" aria-label="マージ">
+      <svg class="i" viewBox="0 0 24 24"><path d="M6 3v4a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3M12 13v8M8.5 17.5 12 21l3.5-3.5"/></svg><span class="lbl">マージ</span>
     </button>
     <input type="file" id="fileInput" multiple class="hidden">
     <span class="tsep"></span>
@@ -333,11 +406,11 @@
         <input id="search" placeholder="検索" aria-label="検索"><span class="count" id="searchCount"></span>
       </label>
     </div>
-    <button class="btn" id="btnFocus" title="集中モード: ログだけを全画面表示 (Ctrl+Shift+F / Esc で戻る)">
+    <button class="btn" id="btnFocus" data-tip="集中モード  Ctrl+Shift+F" aria-label="集中モード">
       <svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
     </button>
     <div class="menu-wrap">
-      <button class="btn" id="btnSettings" aria-haspopup="true" aria-expanded="false" title="設定">
+      <button class="btn" id="btnSettings" aria-haspopup="true" aria-expanded="false" data-tip="設定" aria-label="設定">
         <svg class="i" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="lbl">設定</span>
       </button>
       <div class="menu hidden" id="settingsMenu" role="menu">
@@ -351,6 +424,7 @@
         <button data-act="vsync" role="menuitem" class="adv-only">V周期(仮想)挿入の設定…</button>
         <hr>
         <button data-act="advanced" role="menuitem" class="check" id="menuAdvanced">Advancedモード</button>
+        <button data-act="resetcols" role="menuitem">列の並びと幅を元に戻す</button>
       </div>
     </div>
     <input type="file" id="configInput" accept=".json,application/json" class="hidden">
@@ -372,6 +446,27 @@
             <button class="btn primary wide" id="edOk" type="button">保存</button>
           </div>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="mergeDlg">
+    <div class="dlg" style="width: min(600px, calc(100vw - 24px))">
+      <h2><span class="doc-ic merged" style="display:inline-grid;vertical-align:-4px;margin-right:8px"><svg class="i" viewBox="0 0 24 24"><path d="M6 3v4a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3M12 13v8M8.5 17.5 12 21l3.5-3.5"/></svg></span>ログをマージ</h2>
+      <p class="sub">選んだファイルの行を、行頭の時刻の文字列で並べ替えて 1 つのタブにまとめます。行の左端の色でどのファイルの行か分かります。</p>
+      <fieldset>
+        <legend>マージするファイル</legend>
+        <div class="mg-list" id="mgList"></div>
+      </fieldset>
+      <fieldset>
+        <legend>並べ替えに使う時刻の範囲</legend>
+        <div class="form-row"><span>行の先頭から</span><span class="stepper"><button type="button" id="mgMinus" aria-label="1 文字減らす">−</button><input type="text" id="mgLen" inputmode="numeric" aria-label="文字数"><button type="button" id="mgPlus" aria-label="1 文字増やす">＋</button></span><span>文字</span></div>
+        <div class="mg-preview" id="mgPreview"></div>
+      </fieldset>
+      <div class="ed-err" id="mgErr"></div>
+      <div class="ed-actions">
+        <button class="btn secondary wide" id="mgCancel" type="button">キャンセル</button>
+        <button class="btn primary wide" id="mgOk" type="button">マージ</button>
       </div>
     </div>
   </dialog>
@@ -1001,12 +1096,61 @@ function baseTs(doc) {
   return NaN;
 }
 function statusCols(doc) { return state.advanced ? doc.fileNames : []; }
+
+// ================= 列（並び替え・幅変更） =================
+// ログ列より左の列は左端に、右の列は右端に固定表示する
+const COL_LABEL = { ln: "行", src: "ファイル", dt: "経過(秒)", log: "ログ", cm: "コメント", st: "区間" };
+const DEFAULT_ORDER = ["ln", "src", "dt", "log", "cm", "st"];
+const ORDER_KEY = "logviewer.colOrder.v1";
+let colOrder = DEFAULT_ORDER.slice();
+try {
+  const saved = JSON.parse(localStorage.getItem(ORDER_KEY) || "null");
+  if (Array.isArray(saved) && saved.length === DEFAULT_ORDER.length && DEFAULT_ORDER.every((k) => saved.includes(k))) colOrder = saved;
+} catch (e) { /* 既定の並び */ }
+function saveColOrder() { try { localStorage.setItem(ORDER_KEY, JSON.stringify(colOrder)); } catch (e) { /* 無視 */ } }
+function activeCols(doc) { return colOrder.filter((k) => (k !== "src" || doc.isMerged) && (k !== "st" || statusCols(doc).length)); }
+function splitCols(doc) {
+  const cols = activeCols(doc), at = cols.indexOf("log");
+  return { left: cols.slice(0, at), right: cols.slice(at + 1) };
+}
+
+// マージ元ファイルごとの色（行の左端の帯・ファイル列・見出しで共通）
+const FILE_COLORS = ["#0a84ff", "#ff9f0a", "#30d158", "#bf5af2", "#ff375f", "#5ac8fa", "#ffd60a", "#a2845e"];
+const fileColorMap = new Map();
+function fileColor(doc, name) {
+  if (!doc.fileNames.includes(name)) return "#c7c7cc";   // 仮想行など
+  if (!fileColorMap.has(name)) fileColorMap.set(name, FILE_COLORS[fileColorMap.size % FILE_COLORS.length]);
+  return fileColorMap.get(name);
+}
+const ICON = {
+  grip: '<svg class="grip" viewBox="0 0 8 14"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="6" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="6" cy="12" r="1.2"/></svg>',
+  doc: '<svg class="i" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+  merge: '<svg class="i" viewBox="0 0 24 24"><path d="M6 3v4a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3M12 13v8M8.5 17.5 12 21l3.5-3.5"/></svg>',
+};
+
 // 見出しの境界線（ドラッグで列幅を変更、ダブルクリックで元に戻す）
 const rz = (col, side) => `<span class="rz rz-${side}" data-col="${col}" title="ドラッグで幅を変更（ダブルクリックで元に戻す）"></span>`;
+function headCell(doc, key, side) {
+  const grip = ICON.grip;
+  if (key === "log") {
+    const real = doc.orig.reduce((n, o) => n + (o > 0 ? 1 : 0), 0);
+    const title = doc.isMerged
+      ? `<span class="doc-ic merged">${ICON.merge}</span><span class="doc-name">マージ結果</span>` +
+        doc.fileNames.map((fn) => `<span class="fpill" style="--c:${fileColor(doc, fn)}"><i></i>${escapeHtml(fn)}</span>`).join("")
+      : `<span class="doc-ic">${ICON.doc}</span><span class="doc-name">${escapeHtml(doc.name)}</span>`;
+    return `<div class="cell log" id="headLog" data-col="log" title="ドラッグで列を移動">${grip}<span class="doc-title">${title}<span class="badge">${real.toLocaleString()} 行</span></span></div>`;
+  }
+  if (key === "st") {
+    return statusCols(doc).map((fn) =>
+      `<div class="cell st" data-col="st" title="${escapeHtml(fn)}の区間（ドラッグで列を移動）">${side === "R" ? rz("st", "l") : ""}${grip}` +
+      `${doc.isMerged ? `<i class="fdot" style="--c:${fileColor(doc, fn)}"></i>` : ""}<span class="lbl">${escapeHtml(fn)}の区間</span>${side === "L" ? rz("st", "r") : ""}</div>`).join("");
+  }
+  return `<div class="cell ${key}" data-col="${key}" title="ドラッグで列を移動">${side === "R" ? rz(key, "l") : ""}${grip}<span class="lbl">${COL_LABEL[key]}</span>${side === "L" ? rz(key, "r") : ""}</div>`;
+}
 function renderHead(doc) {
-  const st = statusCols(doc).map((fn) => `<div class="cell st" title="${escapeHtml(fn)}の区間">${rz("st", "l")}${escapeHtml(fn)}の区間</div>`).join("");
-  $("head").innerHTML = `<div class="L"><div class="cell ln">行${rz("ln", "r")}</div>${doc.isMerged ? `<div class="cell src">ファイル${rz("src", "r")}</div>` : ""}<div class="cell dt">経過(秒)${rz("dt", "r")}</div></div>` +
-    `<div class="cell log" id="headLog">${doc.isMerged ? "View" : escapeHtml(doc.name)}</div><div class="R"><div class="cell cm">${rz("cm", "l")}コメント</div>${st}</div>`;
+  const { left, right } = splitCols(doc);
+  $("head").innerHTML = `<div class="L">${left.map((k) => headCell(doc, k, "L")).join("")}</div>${headCell(doc, "log", "")}` +
+    `<div class="R">${right.map((k) => headCell(doc, k, "R")).join("")}</div>`;
 }
 const COL_VARS = { ln: "--ln-w", src: "--src-w", dt: "--dt-w", cm: "--cm-w", st: "--st-w" };
 const COL_MIN = { ln: 36, src: 56, dt: 56, cm: 70, st: 70 };
@@ -1020,6 +1164,11 @@ function applyColWidths() {
   }
 }
 function saveColWidths() { try { localStorage.setItem(COL_KEY, JSON.stringify(colWidths)); } catch (e) { /* 無視 */ } }
+function resetColumns() {
+  colOrder = DEFAULT_ORDER.slice(); colWidths = {};
+  saveColOrder(); saveColWidths(); applyColWidths(); layout();
+  setStatus("列の並び順と幅を元に戻しました");
+}
 applyColWidths();
 let colDrag = null;
 $("head").addEventListener("pointerdown", (e) => {
@@ -1047,6 +1196,81 @@ $("head").addEventListener("dblclick", (e) => {
   delete colWidths[h.dataset.col];
   applyColWidths(); saveColWidths(); layout();
 });
+
+// ---- 列のドラッグ＆ドロップで並び替え ----
+let colMove = null;
+const dropLine = document.createElement("div");
+dropLine.className = "col-drop hidden";
+document.body.appendChild(dropLine);
+const colGhost = document.createElement("div");
+colGhost.className = "col-ghost hidden";
+document.body.appendChild(colGhost);
+function colUnits(doc) {
+  // 表示中の列ごとの見出しの範囲（区間はファイル数ぶんの見出しをまとめて 1 列として扱う）
+  return activeCols(doc).map((key) => {
+    const cells = [...$("head").querySelectorAll(`[data-col="${key}"]`)].filter((c) => c.classList.contains("cell"));
+    const rs = cells.map((c) => c.getBoundingClientRect());
+    const left = Math.min(...rs.map((r) => r.left)), right = Math.max(...rs.map((r) => r.right));
+    const sc = scroller.getBoundingClientRect();
+    return { key, left: Math.max(left, sc.left), right: Math.min(right, sc.right) };
+  }).filter((u) => u.right > u.left);
+}
+$("head").addEventListener("pointerdown", (e) => {
+  const cell = e.target.closest(".cell[data-col]");
+  if (!cell || e.button !== 0 || e.target.closest(".rz")) return;
+  e.preventDefault();
+  colMove = { key: cell.dataset.col, x: e.clientX, y: e.clientY, started: false, target: null };
+});
+document.addEventListener("pointermove", (e) => {
+  if (!colMove) return;
+  const doc = cur();
+  if (!doc) return;
+  if (!colMove.started) {
+    if (Math.abs(e.clientX - colMove.x) < 5 && Math.abs(e.clientY - colMove.y) < 5) return;
+    colMove.started = true;
+    document.body.classList.add("col-moving");
+    colGhost.textContent = colMove.key === "log" ? "ログ" : colMove.key === "st" ? "区間" : COL_LABEL[colMove.key];
+    colGhost.classList.remove("hidden");
+    $("head").querySelectorAll(`[data-col="${colMove.key}"]`).forEach((c) => c.classList.add("moving"));
+  }
+  colGhost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 10}px)`;
+  const units = colUnits(doc);
+  let at = units.findIndex((u) => e.clientX < (u.left + u.right) / 2);
+  if (at < 0) at = units.length;
+  colMove.target = at < units.length ? units[at].key : null;
+  const x = at < units.length ? units[at].left : units[units.length - 1].right;
+  const sc = scroller.getBoundingClientRect();
+  dropLine.style.left = `${Math.round(Math.min(Math.max(x, sc.left), sc.right) - 1)}px`;
+  dropLine.style.top = `${Math.round(sc.top)}px`;
+  dropLine.style.height = `${Math.round(sc.height)}px`;
+  dropLine.classList.remove("hidden");
+});
+function endColMove() {
+  if (!colMove) return;
+  const m = colMove;
+  colMove = null;
+  document.body.classList.remove("col-moving");
+  dropLine.classList.add("hidden");
+  colGhost.classList.add("hidden");
+  if (!m.started || m.target === m.key) { layout(); return; }
+  const order = colOrder.filter((k) => k !== m.key);
+  if (m.target) order.splice(order.indexOf(m.target), 0, m.key);
+  else {
+    const doc = cur();
+    const act = doc ? activeCols(doc).filter((k) => k !== m.key) : [];
+    const last = act.length ? order.indexOf(act[act.length - 1]) + 1 : order.length;
+    order.splice(last, 0, m.key);
+  }
+  if (order.join() !== colOrder.join()) {
+    colOrder = order;
+    saveColOrder();
+    setStatus(`列「${m.key === "st" ? "区間" : COL_LABEL[m.key]}」を移動しました（設定メニューから元に戻せます）`);
+  }
+  layout();
+}
+document.addEventListener("pointerup", endColMove);
+document.addEventListener("pointercancel", endColMove);
+
 function layout() {
   const doc = cur();
   $("empty").classList.toggle("hidden", !!doc);
@@ -1054,7 +1278,7 @@ function layout() {
   renderHead(doc);
   const head = $("head");
   const fixedW = head.querySelector(".L").offsetWidth + head.querySelector(".R").offsetWidth;
-  const logW = Math.max(scroller.clientWidth - fixedW, Math.ceil(doc.maxLen * charW) + 24);
+  const logW = Math.max(scroller.clientWidth - fixedW, Math.ceil(doc.maxLen * charW) + 24, 240);
   const totalW = fixedW + logW;
   canvas.style.height = `${doc.view.length * rowH}px`;
   canvas.style.width = head.style.width = `${totalW}px`;
@@ -1068,28 +1292,32 @@ function render() {
   const top = Math.max(0, Math.floor(scroller.scrollTop / rowH) - OVERSCAN);
   const bottom = Math.min(doc.view.length, Math.ceil((scroller.scrollTop + scroller.clientHeight) / rowH) + OVERSCAN);
   const sre = search.re, curIdx = search.hits.length ? doc.view[search.hits[search.pos]] : -1;
-  const b = baseTs(doc), cols = statusCols(doc);
+  const b = baseTs(doc), stCols = statusCols(doc);
+  const { left, right } = splitCols(doc);
   let html = "";
   for (let p = top; p < bottom; p++) {
     const i = doc.view[p];
-    const t = doc.ts[i];
-    const dt = isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6);
     const src = doc.srcs[i];
     const virt = src === VIRTUAL_SRC || doc.orig[i] === 0;
-    const cls = "row" + (i === doc.sel ? " sel" : "") + (i === doc.base ? " base" : "") + (virt ? " virt" : "");
-    let st = "";
-    for (const fn of cols) {
-      const s = doc.status[fn] ? doc.status[fn][i] : null;
-      st += s && s[0] ? `<div class="cell st${s[1] && s[1] !== WHITE ? " c" : ""}" style="--c:${escapeHtml(s[1] || WHITE)}" title="${escapeHtml(s[0])}">${escapeHtml(s[0])}</div>` : '<div class="cell st"></div>';
-    }
-    html += `<div class="${cls}" data-i="${i}" style="top:${p * rowH}px;width:${layout.totalW}px">` +
-      `<div class="L"><div class="cell ln">${doc.orig[i] || ""}</div>` +
-      (doc.isMerged ? `<div class="cell src" title="${escapeHtml(src)}">${escapeHtml(src)}</div>` : "") +
-      `<div class="cell dt">${dt}</div></div>` +
-      (doc.colors[i] !== WHITE
-        ? `<div class="cell log c" style="width:${layout.logW}px;--c:${escapeHtml(doc.colors[i])}">`
-        : `<div class="cell log" style="width:${layout.logW}px">`) + `${highlight(doc.lines[i], sre, i === curIdx)}</div>` +
-      `<div class="R"><div class="cell cm" title="${escapeHtml(doc.comments[i])}">${escapeHtml(doc.comments[i])}</div>${st}</div></div>`;
+    const cell = (key) => {
+      switch (key) {
+        case "ln": return `<div class="cell ln"><span>${doc.orig[i] || ""}</span></div>`;
+        case "src": return `<div class="cell src" title="${escapeHtml(src)}"><i class="fdot" style="--c:${fileColor(doc, src)}"></i><span>${escapeHtml(src)}</span></div>`;
+        case "dt": { const t = doc.ts[i]; return `<div class="cell dt"><span>${isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6)}</span></div>`; }
+        case "cm": return `<div class="cell cm" title="${escapeHtml(doc.comments[i])}"><span>${escapeHtml(doc.comments[i])}</span></div>`;
+        case "st": return stCols.map((fn) => {
+          const s = doc.status[fn] ? doc.status[fn][i] : null;
+          return s && s[0] ? `<div class="cell st${s[1] && s[1] !== WHITE ? " c" : ""}" style="--c:${escapeHtml(s[1] || WHITE)}" title="${escapeHtml(s[0])}"><span>${escapeHtml(s[0])}</span></div>` : '<div class="cell st"></div>';
+        }).join("");
+        default: return "";
+      }
+    };
+    const cls = "row" + (i === doc.sel ? " sel" : "") + (i === doc.base ? " base" : "") + (virt ? " virt" : "") + (doc.isMerged ? " m" : "");
+    const logCell = (doc.colors[i] !== WHITE
+      ? `<div class="cell log c" style="width:${layout.logW}px;--c:${escapeHtml(doc.colors[i])}">`
+      : `<div class="cell log" style="width:${layout.logW}px">`) + `<span>${highlight(doc.lines[i], sre, i === curIdx)}</span></div>`;
+    html += `<div class="${cls}" data-i="${i}" style="top:${p * rowH}px;width:${layout.totalW}px${doc.isMerged ? `;--fc:${fileColor(doc, src)}` : ""}">` +
+      `<div class="L">${left.map(cell).join("")}</div>${logCell}<div class="R">${right.map(cell).join("")}</div></div>`;
   }
   canvas.innerHTML = html;
 }
@@ -1212,9 +1440,14 @@ function nextColored(dir, ruleIdx = null) {
 // ================= タブ =================
 function renderTabs() {
   $("tabs").innerHTML = state.docs.map((d, i) =>
-    `<div class="tab${i === state.active ? " active" : ""}" data-t="${i}" draggable="true">${escapeHtml(d.name)}<button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
+    `<div class="tab${i === state.active ? " active" : ""}${d.isMerged ? " merged" : ""}" data-t="${i}" draggable="true">` +
+    `${d.isMerged ? `<span class="tab-ic">${ICON.merge}</span>` : ""}${escapeHtml(d.name)}<button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
   ).join("");
   $("tabs").querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // マージは 2 つ以上のファイルを開いているときだけ使える
+  const files = state.docs.filter((d) => !d.isMerged).length;
+  $("btnMerge").disabled = files < 2;
+  $("btnMerge").dataset.tip = files < 2 ? "2 つ以上のログを開くとマージできます" : `開いている ${files} 個のログを時刻順に 1 つにまとめる`;
 }
 
 // ---- タブのドラッグで並べ替え ----
@@ -1436,20 +1669,76 @@ async function reloadCurrent() {
   }
 }
 $("btnReload").onclick = reloadCurrent;
-function mergeDocs(tsLen) {
-  const sources = state.docs.filter((d) => !d.isMerged);
-  if (sources.length < 2) { alert("マージするには2つ以上のログファイルを開いてください。"); return null; }
-  if (tsLen === undefined) {
-    const v = prompt("時刻として比較する先頭の文字数", String(state.mergeTsLen));
-    if (v === null) return null;
-    tsLen = parseInt(v, 10);
-    if (!(tsLen > 0)) { alert("1 以上の数値を入力してください。"); return null; }
-  }
+// tsLen を渡したときはダイアログを出さずに開いているファイルすべてをマージする
+function mergeDocs(tsLen, sources) {
+  sources = sources || state.docs.filter((d) => !d.isMerged);
+  if (tsLen === undefined) { openMergeDialog(); return null; }
+  if (sources.length < 2) { setStatus("マージするには 2 つ以上のログを開いてください"); return null; }
   state.mergeTsLen = tsLen;
   const t0 = performance.now();
   return pushDoc(buildMergedDoc(sources, tsLen), t0);
 }
 $("btnMerge").onclick = () => mergeDocs();
+
+// ---- マージのダイアログ（ファイルの選択と、並べ替えに使う時刻の範囲のプレビュー） ----
+const merge = { picked: new Set() };
+function mergeCandidates() { return state.docs.filter((d) => !d.isMerged); }
+function openMergeDialog() {
+  const files = mergeCandidates();
+  if (files.length < 2) { setStatus("マージするには 2 つ以上のログを開いてください"); return; }
+  merge.picked = new Set(files.map((d) => d.name));
+  // 色はマージ後のファイル順と同じにする
+  const colorDoc = { fileNames: files.map((d) => d.name) };
+  $("mgList").innerHTML = files.map((d) => {
+    const real = d.orig.reduce((n, o) => n + (o > 0 ? 1 : 0), 0);
+    return `<label class="mg-item"><input type="checkbox" data-name="${escapeHtml(d.name)}" checked><i class="fdot" style="--c:${fileColor(colorDoc, d.name)}"></i>` +
+      `<span class="nm">${escapeHtml(d.name)}</span><span class="ct">${real.toLocaleString()} 行</span></label>`;
+  }).join("");
+  $("mgLen").value = String(state.mergeTsLen);
+  updateMergePreview();
+  $("mergeDlg").showModal();
+  $("mgOk").focus();
+}
+function mergeLen() { const n = parseInt($("mgLen").value, 10); return n > 0 && n <= 500 ? n : NaN; }
+function updateMergePreview() {
+  const files = mergeCandidates().filter((d) => merge.picked.has(d.name));
+  const n = mergeLen();
+  const colorDoc = { fileNames: mergeCandidates().map((d) => d.name) };
+  $("mgPreview").innerHTML = isNaN(n) ? "" : files.map((d) => {
+    const i = d.orig.findIndex((o) => o > 0);
+    const line = i >= 0 ? d.lines[i] : "";
+    return `<div style="--c:${fileColor(colorDoc, d.name)}"><i class="fdot"></i><mark>${escapeHtml(line.slice(0, n)) || " "}</mark><span class="rest">${escapeHtml(line.slice(n, n + 80))}</span></div>`;
+  }).join("") + '<span class="mg-note">印の部分を文字列として比べて並べます。時刻だけが入るように文字数を合わせてください。</span>';
+  const errs = [];
+  if (files.length < 2) errs.push("2 つ以上のファイルを選んでください");
+  if (isNaN(n)) errs.push("文字数は 1〜500 の数値で入力してください");
+  $("mgErr").textContent = errs.join(" / ");
+  $("mgLen").closest(".stepper").classList.toggle("bad", isNaN(n));
+  $("mgOk").disabled = errs.length > 0;
+}
+$("mgList").addEventListener("change", (e) => {
+  const cb = e.target.closest("input[type=checkbox]");
+  if (!cb) return;
+  if (cb.checked) merge.picked.add(cb.dataset.name); else merge.picked.delete(cb.dataset.name);
+  updateMergePreview();
+});
+$("mgLen").addEventListener("input", updateMergePreview);
+const stepLen = (d) => { $("mgLen").value = String(Math.min(500, Math.max(1, (mergeLen() || state.mergeTsLen) + d))); updateMergePreview(); };
+$("mgMinus").onclick = () => stepLen(-1);
+$("mgPlus").onclick = () => stepLen(1);
+$("mgLen").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowUp") { e.preventDefault(); stepLen(1); }
+  if (e.key === "ArrowDown") { e.preventDefault(); stepLen(-1); }
+  if (e.key === "Enter") { e.preventDefault(); $("mgOk").click(); }
+});
+$("mgCancel").onclick = () => $("mergeDlg").close();
+$("mgOk").onclick = () => {
+  const sources = mergeCandidates().filter((d) => merge.picked.has(d.name));
+  const n = mergeLen();
+  if (sources.length < 2 || isNaN(n)) return;
+  $("mergeDlg").close();
+  mergeDocs(n, sources);
+};
 
 // ================= Excel 出力（.xlsx を外部ライブラリなしで作成） =================
 const CRC_TABLE = (() => {
@@ -1688,6 +1977,7 @@ menu.addEventListener("click", (e) => {
   else if (act === "save") downloadConfig();
   else if (act === "vsync") openVsyncDialog();
   else if (act === "advanced") setAdvanced(!state.advanced);
+  else if (act === "resetcols") resetColumns();
   else openEditor(act);
 });
 function downloadConfig() {
