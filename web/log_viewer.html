@@ -66,7 +66,10 @@
   .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; letter-spacing: -.01em; margin-right: 6px; white-space: nowrap; }
   .tsep { width: 1px; height: 20px; background: var(--sep-strong); margin: 0 8px; flex: none; }
   .titlebar .group { display: flex; align-items: center; gap: 12px; }
-  .titlebar .fields { display: flex; gap: 6px; }
+  .titlebar .fields { display: flex; gap: 6px; flex: 0 1 auto; min-width: 0; }
+  /* 検索欄は幅が足りなければ縮めて、Advanced を入れても 1 段に収める */
+  .titlebar .field { flex: 0 1 88px; min-width: 80px; }
+  .titlebar .field input { flex: 1 1 0; min-width: 0; width: auto; }
   .brand .logo { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff;
                  background: linear-gradient(145deg, #5ac8fa, #0071e3); box-shadow: 0 1px 3px rgba(0, 113, 227, .35); }
   .brand .logo svg { width: 15px; height: 15px; stroke-width: 2; }
