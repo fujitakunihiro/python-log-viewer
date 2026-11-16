@@ -1823,8 +1823,8 @@ function tabInfo(d) {
   }
   const s = d.source || {};
   const virt = d.lines.length - realLines(d);
-  const where = s.url ? escapeHtml(new URL(s.url, location.href).href) : '<span class="note">ブラウザの制限で取得できません</span>';
-  const reload = s.handle ? "F5 で可能" : s.url ? "F5 で可能" : s.file ? "F5 で試行（ブラウザにより開き直しが必要）" : '<span class="note">不可</span>';
+  const where = '<span class="note">ブラウザの制限で取得できません</span>';
+  const reload = s.handle ? "F5 で可能" : s.file ? "F5 で試行（ブラウザにより開き直しが必要）" : '<span class="note">不可</span>';
   return `<b>${escapeHtml(d.name)}</b>${row("場所", where)}` +
     (s.size !== undefined ? row("サイズ", fmtSize(s.size)) : "") +
     (s.lastModified ? row("更新日時", fmtTime(s.lastModified)) : "") +
@@ -1928,12 +1928,6 @@ function replaceDoc(oldDoc, nd) {
 const decodeText = (buf) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { return new TextDecoder("shift_jis").decode(buf); } };
 async function readSource(src) {
   if (!src) throw new Error("元ファイルの情報がありません");
-  if (src.url) {
-    const res = await fetch(src.url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = await res.arrayBuffer();
-    return { text: decodeText(buf), source: Object.assign({}, src, { size: buf.byteLength, loadedAt: Date.now() }) };
-  }
   let file;
   if (src.handle) {
     if (src.handle.queryPermission && (await src.handle.queryPermission({ mode: "read" })) !== "granted" &&
@@ -3078,19 +3072,6 @@ compileRules();
 updateVsyncInfo();
 updateStatus();
 layout();
-
-// 開発用: ?config=xxx.json&file=a.log&file=b.log&merge=19（サーバー経由で開いた時のみ）
-(async () => {
-  const q = new URLSearchParams(location.search);
-  try {
-    if (q.get("config")) applyConfig(await (await fetch(q.get("config"))).json());
-    for (const f of q.getAll("file")) {
-      const res = await fetch(f);
-      if (res.ok) { const buf = await res.arrayBuffer(); addDoc(f.split("/").pop(), decodeText(buf), { url: f, size: buf.byteLength, loadedAt: Date.now() }); }
-    }
-    if (q.get("merge")) mergeDocs(parseInt(q.get("merge"), 10));
-  } catch (e) { setStatus(`読み込み失敗: ${e.message}`); }
-})();
 
 // 検証用: 表示内容を Python 版と比較できる形で取り出す
 window.__lv = {
