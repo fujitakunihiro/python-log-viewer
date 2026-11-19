@@ -254,6 +254,22 @@
   .gp-x { margin-left: auto; align-self: center; width: 26px; height: 26px; border: 0; border-radius: 50%; background: none; color: var(--text-2); font-size: 17px; line-height: 1; cursor: pointer; }
   .gp-x:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
   .gp-list { list-style: none; margin: 0; padding: 6px; overflow: auto; flex: 1; min-height: 0; }
+  .ep-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--sep); }
+  .ep-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--surface-2); }
+  .ep-seg button { height: 26px; padding: 0 12px; border: 0; border-radius: 6px; background: none; color: var(--text-2); font: 600 12px var(--ui); cursor: pointer; }
+  .ep-seg button b { font-variant-numeric: tabular-nums; }
+  .ep-seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+  .ep-seg button[data-t="error"].on b { color: color-mix(in srgb, var(--err-c) 82%, #000); }
+  .ep-seg button[data-t="warn"].on b { color: color-mix(in srgb, var(--warn-c) 70%, #000); }
+  .ep-bar select { margin-left: auto; height: 26px; padding: 0 8px; border: 1px solid var(--sep-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: 12px var(--ui); }
+  .gp-list.ep-list li { grid-template-columns: 58px minmax(0, 1fr); column-gap: 10px; height: auto; min-height: 44px; padding: 5px 8px; row-gap: 2px; align-items: start; }
+  .ep-n { grid-column: 1; grid-row: 1 / span 2; align-self: center; justify-self: end; min-width: 40px; padding: 2px 8px; border-radius: 999px; text-align: center;
+          font: 700 12px var(--ui); font-variant-numeric: tabular-nums; color: #fff; background: var(--err-c); }
+  .ep-list.warn .ep-n { background: var(--warn-c); }
+  .ep-msg { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font: 12px var(--mono); }
+  .ep-msg i { font-style: normal; color: var(--text-3); }
+  .ep-when { grid-column: 2; min-width: 0; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gp-list li.on .ep-msg i, .gp-list li.on .ep-when { color: rgba(255, 255, 255, .8); }
   .gp-list li { display: grid; grid-template-columns: 26px 96px 64px 1fr; align-items: center; gap: 8px; padding: 0 8px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 12px; }
   .gp-list li:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
   .gp-list li.on { background: var(--accent); color: #fff; }
@@ -745,6 +761,22 @@
     </div>
   </dialog>
 
+  <div class="gap-panel err-panel hidden" id="errPanel" role="dialog" aria-labelledby="errPanelTitle">
+    <div class="gp-head">
+      <h3 id="errPanelTitle">エラー一覧</h3><span class="gp-sub" id="errPanelSub"></span>
+      <button type="button" class="gp-x" id="errPanelClose" aria-label="閉じる" title="閉じる (Esc)">×</button>
+    </div>
+    <div class="ep-bar">
+      <div class="ep-seg" role="tablist" id="epSeg">
+        <button type="button" role="tab" data-t="error" class="on">エラー <b id="epNErr">0</b></button>
+        <button type="button" role="tab" data-t="warn">警告 <b id="epNWarn">0</b></button>
+      </div>
+      <select id="epSort" aria-label="並び順" title="並び順"><option value="count">件数の多い順</option><option value="time">出た順</option></select>
+    </div>
+    <ol class="gp-list ep-list" id="errList"></ol>
+    <p class="gp-foot">数字・16進数を除いて同じ文のものを 1 つにまとめています。クリックで最初の行へ、続けてクリックで次の発生へ。<kbd>F9</kbd> で順に移動</p>
+  </div>
+
   <div class="gap-panel hidden" id="gapPanel" role="dialog" aria-labelledby="gapPanelTitle">
     <div class="gp-head">
       <h3 id="gapPanelTitle">間隔ランキング</h3><span class="gp-sub" id="gapPanelSub"></span>
@@ -756,7 +788,7 @@
 
   <div class="strip">
     <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
-    <button type="button" class="err-pill hidden" id="btnErr" title="クリック / F9: 次のエラー　Shift+クリック / Shift+F9: 前のエラー"></button>
+    <button type="button" class="err-pill hidden" id="btnErr" aria-expanded="false" title="クリック: エラー一覧　F9 / Shift+F9: 次 / 前のエラー"></button>
   </div>
   <main class="main">
     <div class="vrow">
@@ -784,6 +816,7 @@
           <dt><kbd>F9</kbd> / <kbd>Shift</kbd><kbd>F9</kbd></dt><dd>次 / 前のエラー（エラーがなければ警告）</dd>
           <dt><kbd>Alt</kbd><kbd>↓</kbd> / <kbd>Alt</kbd><kbd>↑</kbd></dt><dd>次 / 前の、間隔がしきい値以上の行</dd>
           <dt>上部の ⏱ ボタン</dt><dd>間隔ランキング（大きい順）</dd>
+          <dt>タブの右の「エラー N」</dt><dd>エラー一覧（同じ内容をまとめて表示）</dd>
           <dt><kbd>Ctrl</kbd><kbd>Home</kbd> / <kbd>End</kbd></dt><dd>ログの先頭 / 末尾へ</dd></dl></section>
         <section><h3>選択・コピー</h3>
           <dl><dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>行を移動</dd>
@@ -1863,7 +1896,7 @@ titlebar.addEventListener("focusout", () => setTimeout(unpeek, 0));
 // 選択行（なければ先頭の表示行）の位置を保ったまま表示行を作り直す
 function refreshView({ keep = true } = {}) {
   const doc = cur();
-  if (!doc) { layout(); updateStatus(); updateErrPill(); if (isGapPanelOpen()) renderGapPanel(); return; }
+  if (!doc) { layout(); updateStatus(); updateErrPill(); if (isGapPanelOpen()) renderGapPanel(); if (isErrPanelOpen()) renderErrPanel(); return; }
   let anchor = -1, offset = 0;
   if (keep && doc.view.length) {
     const topPos = Math.floor(scroller.scrollTop / rowH);
@@ -1881,6 +1914,7 @@ function refreshView({ keep = true } = {}) {
   updateStatus();
   updateErrPill();
   if (isGapPanelOpen()) renderGapPanel();
+  if (isErrPanelOpen()) renderErrPanel();
 }
 function scrollToPos(pos) {
   const y = pos * rowH;
@@ -1957,6 +1991,7 @@ function nextError(dir) {
       let k = 0, vis = 0;
       for (let q = 0; q < doc.view.length; q++) if (doc.err[doc.view[q]] === want) { vis++; if (q <= p) k++; }
       const total = want === ERR_ERR ? doc.nErr : doc.nWarn;
+      markErrPanel();
       setStatus(`${kind} ${k.toLocaleString()} / ${vis.toLocaleString()} 件目${vis < total ? `（${(total - vis).toLocaleString()} 件はフィルタ・絞り込みで非表示）` : ""}`);
       return;
     }
@@ -1971,7 +2006,94 @@ function updateErrPill() {
   if (!doc) return;
   b.innerHTML = `<span class="e${doc.nErr ? " on" : ""}">エラー ${doc.nErr.toLocaleString()}</span><span class="w${doc.nWarn ? " on" : ""}">警告 ${doc.nWarn.toLocaleString()}</span>`;
 }
-$("btnErr").onclick = (e) => { nextError(e.shiftKey ? -1 : 1); scroller.focus({ preventScroll: true }); };
+$("btnErr").onclick = () => setErrPanel(!isErrPanelOpen());
+
+// ================= エラー一覧（同じ内容のものをまとめる） =================
+// まとめるときの文: 行頭の時刻を除き、16進数・数字を # に置き換える
+function errMessageKey(line) {
+  const m = tsRegex().exec(line);
+  let t = m && m.index === 0 ? line.slice(m[0].length) : line;
+  return t.replace(/0x[0-9a-f]+/gi, "#").replace(/\b[0-9a-f]{8,}\b/gi, "#").replace(/\d+(?:\.\d+)?/g, "#").replace(/\s+/g, " ").trim().slice(0, 300);
+}
+const errPanel = { type: "error", groups: [], cursor: new Map() };
+const isErrPanelOpen = () => !$("errPanel").classList.contains("hidden");
+function timeOf(doc, i) { const m = tsRegex().exec(doc.lines[i]); return m && m[1] !== undefined ? m[1] : ""; }
+function buildErrGroups(doc, want) {
+  const map = new Map();
+  for (let p = 0; p < doc.view.length; p++) {
+    const i = doc.view[p];
+    if (doc.err[i] !== want) continue;
+    const key = errMessageKey(doc.lines[i]);
+    let g = map.get(key);
+    if (!g) { g = { key, rows: [] }; map.set(key, g); }
+    g.rows.push(i);
+  }
+  const list = [...map.values()];
+  if ($("epSort").value === "count") list.sort((a, b) => b.rows.length - a.rows.length || a.rows[0] - b.rows[0]);
+  else list.sort((a, b) => a.rows[0] - b.rows[0]);
+  return list;
+}
+function renderErrPanel() {
+  const doc = cur();
+  const want = errPanel.type === "warn" ? ERR_WARN : ERR_ERR;
+  $("epSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.t === errPanel.type));
+  $("errList").classList.toggle("warn", want === ERR_WARN);
+  if (!doc) { $("errPanelSub").textContent = ""; $("epNErr").textContent = $("epNWarn").textContent = "0"; $("errList").innerHTML = '<li class="gp-empty">ログを開いてください</li>'; return; }
+  let vErr = 0, vWarn = 0;
+  for (let p = 0; p < doc.view.length; p++) { const e = doc.err[doc.view[p]]; if (e === ERR_ERR) vErr++; else if (e === ERR_WARN) vWarn++; }
+  $("epNErr").textContent = vErr.toLocaleString(); $("epNWarn").textContent = vWarn.toLocaleString();
+  const groups = errPanel.groups = buildErrGroups(doc, want);
+  const total = want === ERR_ERR ? doc.nErr : doc.nWarn, vis = want === ERR_ERR ? vErr : vWarn, kind = want === ERR_ERR ? "エラー" : "警告";
+  $("errPanelSub").textContent = `${doc.name}　·　${groups.length.toLocaleString()} 種類 / ${vis.toLocaleString()} 件${vis < total ? `（${(total - vis).toLocaleString()} 件は非表示）` : ""}`;
+  errPanel.cursor = new Map();
+  $("errList").innerHTML = !groups.length
+    ? `<li class="gp-empty">${total ? `${kind}はすべてフィルタ・絞り込みで非表示です` : `${kind}は見つかっていません`}</li>`
+    : groups.map((g, k) => {
+      const first = g.rows[0], last = g.rows[g.rows.length - 1];
+      const t0 = timeOf(doc, first), t1 = timeOf(doc, last);
+      const no = (i) => (doc.isMerged ? doc.mergedNo[i] : doc.orig[i]) || "";
+      const when = g.rows.length === 1 ? `${t0 || `${no(first)} 行目`}` : t0 && t1 ? `${t0} 〜 ${t1}` : `${no(first)} 〜 ${no(last)} 行目`;
+      const msg = escapeHtml(g.key || doc.lines[first]).replace(/#/g, "<i>#</i>");
+      return `<li data-k="${k}" title="${escapeHtml(doc.lines[first])}"><span class="ep-n">${g.rows.length > 9999 ? "9999+" : g.rows.length.toLocaleString()}</span>` +
+        `<span class="ep-msg">${msg}</span><span class="ep-when">${when}${g.rows.length > 1 ? `　·　最初 ${no(first)} 行目` : `　·　${no(first)} 行目`}</span></li>`;
+    }).join("");
+  markErrPanel();
+}
+function markErrPanel() {
+  if (!isErrPanelOpen()) return;
+  const doc = cur();
+  $("errList").querySelectorAll("li[data-k]").forEach((li) => li.classList.toggle("on", !!doc && errPanel.groups[+li.dataset.k]?.rows.includes(doc.sel)));
+}
+function setErrPanel(open) {
+  if (open) setGapPanel(false);   // 同じ場所に出るので、間隔ランキングは閉じる
+  $("errPanel").classList.toggle("hidden", !open);
+  $("btnErr").setAttribute("aria-expanded", String(open));
+  if (open) {
+    const doc = cur();
+    if (doc && !doc.nErr && doc.nWarn) errPanel.type = "warn";   // エラーが無ければ警告から見せる
+    renderErrPanel();
+  }
+}
+$("errPanelClose").onclick = () => { setErrPanel(false); scroller.focus({ preventScroll: true }); };
+$("epSeg").addEventListener("click", (e) => { const b = e.target.closest("button[data-t]"); if (!b) return; errPanel.type = b.dataset.t; renderErrPanel(); });
+$("epSort").addEventListener("change", renderErrPanel);
+$("errList").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-k]");
+  const doc = cur();
+  if (!li || !doc) return;
+  const k = +li.dataset.k, g = errPanel.groups[k];
+  // 1 回目は最初の発生、続けて同じ項目を押すと次の発生へ（最後まで行ったら最初に戻る）
+  const n = errPanel.cursor.has(k) ? (errPanel.cursor.get(k) + 1) % g.rows.length : 0;
+  errPanel.cursor.set(k, n);
+  const i = g.rows[n], p = lowerBound(doc.view, i);
+  if (doc.view[p] !== i) return;
+  setSel(doc, i);
+  const h = scroller.clientHeight - $("head").offsetHeight;
+  scroller.scrollTop = Math.max(0, p * rowH - h / 3);
+  render(); updateStatus();
+  setStatus(`このまとまりの ${(n + 1).toLocaleString()} / ${g.rows.length.toLocaleString()} 件目`);
+  markErrPanel();
+});
 
 // ================= 間隔（時間差）の大きい所へ移動 =================
 function nextGap(dir) {
@@ -2026,6 +2148,7 @@ function markGapPanel() {
   $("gapList").querySelectorAll("li[data-k]").forEach((li) => li.classList.toggle("on", !!doc && gapPanelRows[+li.dataset.k] === doc.sel));
 }
 function setGapPanel(open) {
+  if (open && typeof setErrPanel === "function") setErrPanel(false);
   $("gapPanel").classList.toggle("hidden", !open);
   $("btnGapRank").setAttribute("aria-expanded", String(open));
   if (open) renderGapPanel();
@@ -3130,6 +3253,7 @@ function openRowMenu(x, y, doc, i) {
     { label: "次のエラーへ", kbd: "F9", act: () => nextError(1) },
     { label: "次の間隔の大きい所へ", kbd: "Alt+↓", act: () => nextGap(1) },
     { label: "間隔ランキングを表示", act: () => setGapPanel(true) },
+    { label: "エラー一覧を表示", act: () => setErrPanel(true) },
     { label: "行番号へ移動…", kbd: "Ctrl+G", act: gotoLinePrompt },
     { label: "すべての行を選択", kbd: "Ctrl+A", act: () => selectAll(doc) },
   ].filter(Boolean);
@@ -3191,6 +3315,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") { setMenuOpen(false); if (!rowMenu.classList.contains("hidden")) { closeRowMenu(); return; } }
   if (e.key === "Escape" && isGapPanelOpen() && e.target.tagName !== "INPUT") { setGapPanel(false); scroller.focus({ preventScroll: true }); return; }
+  if (e.key === "Escape" && isErrPanelOpen() && e.target.tagName !== "INPUT" && e.target.tagName !== "SELECT") { setErrPanel(false); scroller.focus({ preventScroll: true }); return; }
   const doc = cur();
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (ctrl && e.shiftKey && key === "f") { e.preventDefault(); setFocus(!isFocus()); return; }
