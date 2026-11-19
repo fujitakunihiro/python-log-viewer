@@ -115,6 +115,16 @@ def gap_level(g, threshold) -> int:
     return 3 if g >= threshold else 2 if g >= threshold / 3 else 1
 
 
+def _tint(color: str, k: float) -> str:
+    """#rrggbb を白に混ぜて薄くする（k: 元の色の割合）"""
+    m = re.fullmatch(r"#([0-9a-fA-F]{6})", color or "")
+    if not m:
+        return color
+    v = int(m.group(1), 16)
+    rgb = [(v >> 16) & 255, (v >> 8) & 255, v & 255]
+    return "#" + "".join(f"{int(c * k + 255 * (1 - k)):02x}" for c in rgb)
+
+
 def darker(color: str, k: float = 0.75) -> str:
     """#rrggbb を少し暗くする（行番号の文字色など）"""
     m = re.fullmatch(r"#([0-9a-fA-F]{6})", color or "")
@@ -892,6 +902,7 @@ class LogViewerApp:
             return
 
         if getattr(tab, "file_path", "") == "Merged":
+            merged_from = list(tab.source_file_names)
             self.notebook.forget(tab)
             tabs = [self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
             target_tabs = [t for t in tabs if getattr(t, "file_path", "") and t.file_path != "Merged"]
@@ -903,7 +914,7 @@ class LogViewerApp:
                     self.apply_display_update(t)
 
             if len(target_tabs) >= 2:
-                self.merge_logs_action(auto_ts_len=self.last_merge_ts_len)
+                self.merge_logs_action(auto_ts_len=self.last_merge_ts_len, only=merged_from)
             return
 
         if not tab.file_path or not os.path.exists(tab.file_path):
@@ -940,19 +951,24 @@ class LogViewerApp:
         self.notebook.select(tab)
         self.apply_display_update(tab)
 
-    def merge_logs_action(self, auto_ts_len=None):
+    def merge_logs_action(self, auto_ts_len=None, only=None):
         tabs =[self.notebook.nametowidget(i) for i in self.notebook.tabs() if isinstance(self.notebook.nametowidget(i), LogTab)]
         target_tabs =[t for t in tabs if getattr(t, "file_path", "") and t.file_path != "Merged"]
         if len(target_tabs) < 2:
             messagebox.showinfo("マージ", "マージするには2つ以上のログファイルを開いてください。")
             return
-            
+
         if auto_ts_len is not None:
             ts_len = auto_ts_len
+            if only:
+                picked = [t for t in target_tabs if os.path.basename(t.file_path) in only]
+                if len(picked) >= 2:
+                    target_tabs = picked
         else:
-            ts_len = self._ask_merge_ts_len(initial=self.last_merge_ts_len)
-            if ts_len is None:
+            res = self._ask_merge_options(target_tabs, initial=self.last_merge_ts_len)
+            if res is None:
                 return
+            ts_len, target_tabs = res
             self.last_merge_ts_len = ts_len
         
         all_blocks =[]
@@ -1069,63 +1085,164 @@ class LogViewerApp:
         btn_box.pack(pady=10, fill=tk.X)
         tk.Button(btn_box, text="OK", command=save_conf, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2", width=15).pack(side=tk.RIGHT, padx=10)
 
-    def _ask_merge_ts_len(self, initial=19) -> Optional[int]:
-        """Custom ask-integer dialog for merge timestamp length."""
+    def _ask_merge_options(self, target_tabs, initial=19):
+        """マージの画面: マージするファイルを選び、並べ替えに使う先頭の文字数を決める。
+        戻り値: (文字数, 選んだタブ) か、キャンセルなら None"""
+        C = UIColors
+        ui = C.UI_FONT
         dlg = tk.Toplevel(self.root)
+        dlg.title("ログをマージ")
         dlg.transient(self.root)
-        dlg.grab_set()
-        dlg.title("マージ")
         dlg.resizable(False, False)
-        try:
-            dlg.configure(bg=UIColors.BG)
-        except tk.TclError:
-            pass
-
+        dlg.configure(bg="#ffffff")
         res = {"value": None}
 
-        content = tk.Frame(dlg, bg=UIColors.BG)
-        content.pack(padx=16, pady=14)
+        body = tk.Frame(dlg, bg="#ffffff")
+        body.pack(fill=tk.BOTH, expand=True, padx=22, pady=(18, 16))
 
-        input_frame = tk.Frame(content, bg=UIColors.BG)
-        input_frame.pack(fill=tk.X)
-        tk.Label(input_frame, text="時刻ソート用の先頭文字数:", anchor="w", font=("Yu Gothic UI", 9, "bold"), bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
-        ent = tk.Entry(input_frame, width=7, justify=tk.RIGHT, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT)
-        ent.pack(side=tk.LEFT, padx=(10, 0))
-        ent.insert(0, str(initial))
+        # 見出し
+        head = tk.Frame(body, bg="#ffffff")
+        head.pack(fill=tk.X)
+        tk.Label(head, text="⇵", bg=C.MERGE, fg="white", font=(ui, 10, "bold"), width=2).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(head, text="ログをマージ", bg="#ffffff", fg=C.TEXT, font=(ui, 14, "bold")).pack(side=tk.LEFT)
+        tk.Label(body, text="選んだファイルの行を、行頭の時刻の文字列で並べ替えて 1 つのタブにまとめます。行の左端の色でどのファイルの行か分かります。",
+                 bg="#ffffff", fg=C.TEXT_2, font=(ui, 9), justify=tk.LEFT, anchor="w", wraplength=440).pack(fill=tk.X, pady=(8, 12))
 
-        btn_frame = tk.Frame(content, bg=UIColors.BG)
-        btn_frame.pack(anchor="e", pady=(14, 0))
+        def card(title):
+            box = tk.Frame(body, bg=C.SURFACE_2, highlightthickness=1, highlightbackground=C.SEP)
+            box.pack(fill=tk.X, pady=(0, 12))
+            tk.Label(box, text=title, bg=C.SURFACE_2, fg=C.TEXT_2, font=(ui, 9, "bold"), anchor="w").pack(fill=tk.X, padx=14, pady=(10, 4))
+            inner = tk.Frame(box, bg=C.SURFACE_2)
+            inner.pack(fill=tk.X, padx=14, pady=(0, 12))
+            return inner
+
+        # マージするファイル
+        files_box = card("マージするファイル")
+        picks, dots = [], []
+        for t in target_tabs:
+            name = os.path.basename(t.file_path)
+            lines = t.original_content.splitlines()
+            srcs = t.line_source_map or []
+            real = sum(1 for i in range(len(lines)) if not (i < len(srcs) and srcs[i] == VIRTUAL_SRC_NAME))
+            var = tk.BooleanVar(value=True)
+            row = tk.Frame(files_box, bg=C.SURFACE_2)
+            row.pack(fill=tk.X, pady=2)
+            tk.Checkbutton(row, variable=var, bg=C.SURFACE_2, activebackground=C.SURFACE_2, command=lambda: update()).pack(side=tk.LEFT)
+            dot = tk.Label(row, text="●", bg=C.SURFACE_2, font=(ui, 10))
+            dot.pack(side=tk.LEFT, padx=(2, 6))
+            tk.Label(row, text=name, bg=C.SURFACE_2, fg=C.TEXT, font=(ui, 9, "bold")).pack(side=tk.LEFT)
+            tk.Label(row, text=f"{real:,} 行", bg=C.SURFACE_2, fg=C.TEXT_3, font=(ui, 9)).pack(side=tk.RIGHT)
+            picks.append((t, var))
+            dots.append(dot)
+
+        # 並べ替えに使う時刻の範囲
+        range_box = card("並べ替えに使う時刻の範囲")
+        srow = tk.Frame(range_box, bg=C.SURFACE_2)
+        srow.pack(fill=tk.X)
+        tk.Label(srow, text="行の先頭から", bg=C.SURFACE_2, fg=C.TEXT, font=(ui, 9)).pack(side=tk.LEFT)
+        stepper = tk.Frame(srow, bg="#ffffff", highlightthickness=1, highlightbackground=C.BORDER)
+        stepper.pack(side=tk.LEFT, padx=8)
+        len_var = tk.StringVar(value=str(initial))
+
+        def step(d):
+            try:
+                v = int(len_var.get())
+            except ValueError:
+                v = initial
+            len_var.set(str(max(1, min(500, v + d))))
+        tk.Button(stepper, text="−", width=3, command=lambda: step(-1), bg="#ffffff", fg=C.TEXT, activebackground=C.SURFACE_3, relief=tk.FLAT, bd=0, cursor="hand2", font=(ui, 10)).pack(side=tk.LEFT)
+        ent = tk.Entry(stepper, textvariable=len_var, width=8, justify=tk.CENTER, relief=tk.FLAT, bd=0, highlightthickness=0, font=("Consolas", 11), fg=C.TEXT)
+        ent.pack(side=tk.LEFT, ipady=4)
+        tk.Button(stepper, text="+", width=3, command=lambda: step(1), bg="#ffffff", fg=C.TEXT, activebackground=C.SURFACE_3, relief=tk.FLAT, bd=0, cursor="hand2", font=(ui, 10)).pack(side=tk.LEFT)
+        tk.Label(srow, text="文字", bg=C.SURFACE_2, fg=C.TEXT, font=(ui, 9)).pack(side=tk.LEFT)
+
+        # 見本: 各ファイルの最初の行で、比べる部分に色を付ける
+        previews = []
+        for t, _var in picks:
+            lines = t.original_content.splitlines()
+            srcs = t.line_source_map or []
+            first = next((ln for i, ln in enumerate(lines) if ln.strip() and not (i < len(srcs) and srcs[i] == VIRTUAL_SRC_NAME)), "")
+            pv = tk.Frame(range_box, bg="#ffffff", highlightthickness=1, highlightbackground=C.SEP)
+            pv.pack(fill=tk.X, pady=(6, 0))
+            pdot = tk.Label(pv, text="●", bg="#ffffff", font=(ui, 9))
+            pdot.pack(side=tk.LEFT, padx=(8, 4))
+            tx = tk.Text(pv, height=1, width=56, wrap=tk.NONE, relief=tk.FLAT, bd=0, highlightthickness=0, font=("Consolas", 10), fg=C.TEXT_2, bg="#ffffff", padx=2, pady=5)
+            tx.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            previews.append((t, first, tx, pdot, pv))
+        note = tk.Label(range_box, text="印の部分を文字列として比べて並べます。時刻だけが入るように文字数を合わせてください。",
+                        bg=C.SURFACE_2, fg=C.TEXT_3, font=(ui, 8), justify=tk.LEFT, anchor="w", wraplength=430)
+        note.pack(fill=tk.X, pady=(8, 0))
+
+        err = tk.Label(body, text="", bg="#ffffff", fg=C.DANGER_FG, font=(ui, 9), anchor="w")
+        err.pack(fill=tk.X)
+
+        btns = tk.Frame(body, bg="#ffffff")
+        btns.pack(fill=tk.X, pady=(6, 0))
+        ok = flat_button(btns, "マージ", lambda: on_ok(), primary=True, padx=18, pady=6)
+        ok.pack(side=tk.RIGHT)
+        flat_button(btns, "キャンセル", lambda: dlg.destroy(), bg=C.SURFACE_3, highlightthickness=0, padx=14, pady=6).pack(side=tk.RIGHT, padx=(0, 8))
+
+        def current_len():
+            try:
+                v = int(len_var.get().strip())
+            except ValueError:
+                return None
+            return v if 1 <= v <= 500 else None
+
+        def update(*_a):
+            chosen = [t for t, v in picks if v.get()]
+            # 色はマージ結果と同じ並び（選んだファイルの順）
+            colors = {id(t): FILE_COLORS[k % len(FILE_COLORS)] for k, t in enumerate(chosen)}
+            for (t, v), dot in zip(picks, dots):
+                dot.config(fg=colors.get(id(t), VIRTUAL_FILE_COLOR))
+            n = current_len()
+            for t, first, tx, pdot, pv in previews:
+                col = colors.get(id(t))
+                if col is None:
+                    pv.pack_forget()
+                    continue
+                pv.pack(fill=tk.X, pady=(6, 0), before=note)
+                pdot.config(fg=col)
+                tx.configure(state=tk.NORMAL)
+                tx.delete("1.0", tk.END)
+                k = n or 0
+                tx.insert("1.0", first[:k] or " ", "mark")
+                tx.insert(tk.END, first[k:k + 80])
+                tx.tag_configure("mark", background=_tint(col, 0.22), foreground=C.TEXT)
+                tx.configure(state=tk.DISABLED)
+            msgs = []
+            if len(chosen) < 2:
+                msgs.append("2 つ以上のファイルを選んでください")
+            if n is None:
+                msgs.append("文字数は 1〜500 の数値で入力してください")
+            err.config(text=" / ".join(msgs))
+            stepper.config(highlightbackground=C.DANGER_FG if n is None else C.BORDER)
+            ok.config(state=tk.DISABLED if msgs else tk.NORMAL, bg=C.ACCENT if not msgs else "#a7c8f0")
 
         def on_ok():
-            try:
-                v = int(ent.get())
-                if v < 0:
-                    return
-                res["value"] = v
-            except Exception:
-                res["value"] = None
+            n = current_len()
+            chosen = [t for t, v in picks if v.get()]
+            if n is None or len(chosen) < 2:
+                return
+            res["value"] = (n, chosen)
             dlg.destroy()
 
-        def on_cancel():
-            dlg.destroy()
-
-        ok = tk.Button(btn_frame, text="OK", width=10, command=on_ok, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2")
-        ok.pack(side=tk.LEFT, padx=(0, 8))
-        cancel = tk.Button(btn_frame, text="キャンセル", width=10, command=on_cancel, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2")
-        cancel.pack(side=tk.LEFT)
-
-        dlg.bind('<Return>', lambda e: on_ok())
-        dlg.bind('<Escape>', lambda e: on_cancel())
-
-        # Apply theme to children
-        try:
-            apply_french_theme(dlg)
-        except Exception:
-            pass
-
-        ent.focus_set()
+        len_var.trace_add("write", update)
+        dlg.bind("<Return>", lambda e: on_ok())
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.bind("<Up>", lambda e: step(1))
+        dlg.bind("<Down>", lambda e: step(-1))
+        update()
+        dlg.update_idletasks()
+        # 親ウィンドウの中央に出す
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - dlg.winfo_reqheight()) // 3)
+        dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dlg.grab_set()
+        dlg.focus_set()   # Enter でマージ、Esc でキャンセル
         self.root.wait_window(dlg)
         return res["value"]
+
     def save_config_dialog_silent(self, filepath=None):
         target_path = filepath if filepath else self.config_path
         data = dict(self.extra_config)
