@@ -42,6 +42,9 @@ GAP_TOP = 20
 # 間隔の色（しきい値の 1/10 以上: 黄、1/3 以上: 橙、しきい値以上: 赤）
 GAP_COLORS = {1: "#fff4c2", 2: "#ffd9a8", 3: "#ffc9c4"}
 GAP_RED = "#d70015"
+# マージ元ファイルごとの色（ファイル列の丸・行番号の左の帯）
+FILE_COLORS = ["#0a84ff", "#ff9f0a", "#30d158", "#bf5af2", "#ff375f", "#5ac8fa", "#ffd60a", "#a2845e"]
+VIRTUAL_FILE_COLOR = "#c7c7cc"
 
 
 def clamp_level(v) -> int:
@@ -308,6 +311,7 @@ class LineNumberCanvas(tk.Canvas):
         nums = getattr(tab, "disp_numbers", None)
         errs = getattr(tab, "disp_err", None)
         gaps = getattr(tab, "disp_gap", None)
+        srcs = getattr(tab, "disp_src", None) if getattr(tab, "src_text", None) is not None else None
         app = getattr(tab, "app", None)
         width = int(self.cget("width"))
         i = self.text_widget.index("@0,0")
@@ -319,6 +323,8 @@ class LineNumberCanvas(tk.Canvas):
             label = nums[n] if nums is not None and n < len(nums) else str(n + 1)
             e = errs[n] if errs is not None and n < len(errs) else ERR_NONE
             color, font = "#888888", ("Consolas", 10)
+            if srcs is not None and n < len(srcs):
+                self.create_rectangle(0, y, 3, y + h, fill=tab.file_colors.get(srcs[n], VIRTUAL_FILE_COLOR), outline="")
             if e and app is not None:
                 c = app.error_colors["error" if e == ERR_ERR else "warn"]
                 self.create_oval(4, y + h / 2 - 3.5, 11, y + h / 2 + 3.5, fill=c, outline="")
@@ -392,13 +398,30 @@ class LogTab(tk.Frame):
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
         
+        # ファイル列: どのファイルの行か（色の丸＋名前）。2 つ以上のファイルをマージしたときだけ出す
+        self.src_text = None
+        self.file_colors = {fn: FILE_COLORS[k % len(FILE_COLORS)] for k, fn in enumerate(self.source_file_names)}
+        if len(self.source_file_names) > 1:
+            src_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
+            self.paned_window.add(src_frame, minsize=60, stretch="never", width=140)
+            tk.Label(src_frame, text="ファイル", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
+            hsb_src = tk.Scrollbar(src_frame, orient=tk.HORIZONTAL)
+            hsb_src.pack(side=tk.BOTTOM, fill=tk.X)
+            self.src_text = tk.Text(src_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, xscrollcommand=hsb_src.set, relief=tk.FLAT, bd=0, padx=4, font=("Consolas", 10))
+            self.src_text.tag_configure("sel", background="#cce8ff", foreground="black")
+            for fn, col in self.file_colors.items():
+                self.src_text.tag_configure(f"dot_{col[1:]}", foreground=col)
+            self.src_text.tag_configure(f"dot_{VIRTUAL_FILE_COLOR[1:]}", foreground=VIRTUAL_FILE_COLOR)
+            self.src_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            hsb_src.config(command=self.src_text.xview)
+
         cmt_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(cmt_frame, minsize=50, stretch="always", width=250)
         
         self.hsb_cmt = tk.Scrollbar(cmt_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
         
-        tk.Label(cmt_frame, text="Comment", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(cmt_frame, text="コメント", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
         
         self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
@@ -422,7 +445,7 @@ class LogTab(tk.Frame):
             hsb.config(command=st_text.xview)
             self.status_texts[fname] = st_text
             
-        self.all_texts =[self.text, self.timediff_text, self.gap_text, self.comment_text] + list(self.status_texts.values())
+        self.all_texts =[self.text, self.timediff_text, self.gap_text] + ([self.src_text] if self.src_text else []) + [self.comment_text] + list(self.status_texts.values())
         
         # 読み取り専用: 文字の入力・Enter・貼り付けでは書き換わらない。
         # クリックでフォーカスを移すので、矢印キーでの移動・選択・Ctrl+C は使える
@@ -1789,14 +1812,13 @@ class LogViewerApp:
 
             line_count += 1
             flines.append(lines[i])
-            s_name = f"[{srcs[i]}] " if (tab.is_merged and srcs[i]) else ""
 
             if timestamps[i] is not None and base_ts is not None:
                 ftimediffs.append(f"{(timestamps[i] - base_ts):.6f}")
             else:
                 ftimediffs.append("")
 
-            base_cmt = f"{s_name}{line_attrs[i]['comment']}"
+            base_cmt = line_attrs[i]['comment']
             fcmts.append(base_cmt)
 
             if line_attrs[i]["color"] != "#ffffff":
@@ -1812,6 +1834,14 @@ class LogViewerApp:
         for w in tab.all_texts:
             w.configure(state=tk.NORMAL)
         tab.gap_text.delete("1.0", tk.END)
+        tab.disp_src = [srcs[i] for i in disp_idx]
+        if tab.src_text is not None:
+            tab.src_text.delete("1.0", tk.END)
+            if flines:
+                tab.src_text.insert("1.0", "\n".join(f"● {'(仮想)' if sname == VIRTUAL_SRC_NAME else sname}" for sname in tab.disp_src))
+                for n, sname in enumerate(tab.disp_src, start=1):
+                    col = tab.file_colors.get(sname, VIRTUAL_FILE_COLOR)
+                    tab.src_text.tag_add(f"dot_{col[1:]}", f"{n}.0", f"{n}.1")
         if flines:
             tab.gap_text.insert("1.0", "\n".join("" if g is None else f"{g:,.3f}" for g in disp_gap), "right")
             for n, g in enumerate(disp_gap, start=1):
