@@ -22,7 +22,7 @@
     --switch-off: #dde2ee;
     --r-card: 16px; --r-ctl: 10px;
     --row-h: 24px;
-    --ln-w: 64px; --src-w: 112px; --dt-w: 108px; --cm-w: 260px; --st-w: 160px;
+    --ln-w: 64px; --src-w: 112px; --dt-w: 108px; --gp-w: 120px; --cm-w: 260px; --st-w: 160px;
     /* 英数字は SF / Segoe UI、日本語はヒラギノ / 游ゴシック UI（英数字用のフォントを先に並べる） */
     --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif;
     --mono: "SF Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, "BIZ UDGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "MS Gothic", monospace;
@@ -211,7 +211,7 @@
   /* 行のセルは上下中央揃え（等幅フォントと UI フォントの高さの違いを吸収） */
   .row .cell { display: flex; align-items: center; line-height: 1.3; }
   .row .cell > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-  .row .cell.ln, .row .cell.dt { justify-content: flex-end; }
+  .row .cell.ln, .row .cell.dt, .row .cell.gp { justify-content: flex-end; }
   .head { position: sticky; top: 0; z-index: 3; font: 600 11.5px var(--ui); letter-spacing: 0; color: var(--text-2);
           background: linear-gradient(var(--surface), var(--surface-2)); border-bottom: 1px solid var(--sep); height: 36px; line-height: 36px; }
   .L, .R { display: flex; flex: none; position: sticky; z-index: 2; }
@@ -221,6 +221,15 @@
   .ln { width: var(--ln-w); text-align: right; color: var(--text-3); background: var(--surface); font-variant-numeric: tabular-nums; }
   .src { width: var(--src-w); color: var(--text-2); background: var(--surface); font-family: var(--ui); font-size: 12px; }
   .dt { width: var(--dt-w); text-align: right; color: var(--text-3); background: var(--surface); font-variant-numeric: tabular-nums; }
+  .gp { width: var(--gp-w); text-align: right; color: var(--text-3); background: var(--surface); font-variant-numeric: tabular-nums; }
+  /* 間隔の色: しきい値に近いほど濃く（1/10 以上: 黄、1/3 以上: 橙、しきい値以上: 赤） */
+  .gp.g1 { background: color-mix(in srgb, #ffd60a 22%, var(--surface)); color: var(--text-2); }
+  .gp.g2 { background: color-mix(in srgb, var(--orange) 30%, var(--surface)); color: var(--text); }
+  .gp.g3 { background: color-mix(in srgb, var(--red) 26%, var(--surface)); color: var(--red); font-weight: 700; }
+  /* しきい値を超えた行の上に区切り線 */
+  .row.gapx::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--red); opacity: .75; z-index: 5; pointer-events: none; }
+  .gap-inline input { width: calc(5ch + 14px); }
+  .gap-inline .i { width: 15px; height: 15px; color: var(--text-2); }
   .log { padding-left: 14px; }
   /* 列の境界線（見出しでドラッグして幅を変更） */
   .head .cell { position: relative; }
@@ -246,14 +255,14 @@
 
   /* 見出しのセル（ドラッグで列を移動） */
   .head .cell { display: flex; align-items: center; gap: 6px; background: transparent; color: var(--text-2); cursor: grab; transition: background-color .15s, color .15s; }
-  .head .cell.ln, .head .cell.dt { justify-content: flex-end; }
+  .head .cell.ln, .head .cell.dt, .head .cell.gp { justify-content: flex-end; }
   .head .cell:hover { color: var(--text); background: color-mix(in srgb, var(--text) 4%, transparent); }
   .head .L, .head .R { background: linear-gradient(var(--surface), var(--surface-2)); }
   .head .R { box-shadow: none; }
   .head .lbl { overflow: hidden; text-overflow: ellipsis; }
   .grip { width: 6px; height: 11px; flex: none; fill: currentColor; opacity: 0; transition: opacity .15s; }
   .head .cell:hover .grip { opacity: .45; }
-  .head .cell.ln .grip, .head .cell.dt .grip { order: -1; margin-right: auto; }
+  .head .cell.ln .grip, .head .cell.dt .grip, .head .cell.gp .grip { order: -1; margin-right: auto; }
   .head .cell.moving { opacity: .35; }
   .doc-title { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; font: 600 12.5px var(--ui); letter-spacing: 0; color: var(--text); }
   .doc-name { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -278,9 +287,9 @@
   .row.sel .ln span { color: #fff; background: var(--accent); }
   .row.insel:not(.sel) .ln span { color: var(--accent-text); background: var(--accent-soft); }
   .row.insel .log { box-shadow: inset 0 0 0 9999px var(--sel); }
-  .row.insel .dt, .row.insel .src, .row.insel .cm, .row.insel .st:not(.c) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  .row.insel .dt, .row.insel .gp:not(.g1):not(.g2):not(.g3), .row.insel .src, .row.insel .cm, .row.insel .st:not(.c) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
   .row.sel .log { box-shadow: inset 0 0 0 9999px var(--sel); }
-  .row.sel .dt, .row.sel .src, .row.sel .cm, .row.sel .st:not(.c) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  .row.sel .dt, .row.sel .gp:not(.g1):not(.g2):not(.g3), .row.sel .src, .row.sel .cm, .row.sel .st:not(.c) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
   .row.base .dt { color: var(--red); font-weight: 600; }
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
   mark.cur { background: var(--mark-cur); }
@@ -472,6 +481,16 @@
     .brand span, .titlebar .btn:not(.merge) .lbl { display: none; }
     .titlebar .btn { padding: 0 9px; }
   }
+  /* さらに狭いときは、マージもアイコンだけにし、検索欄の最小幅を少し詰める */
+  @media (max-width: 1320px) {
+    .titlebar .btn.merge .lbl { display: none; }
+    .titlebar .btn.merge { padding: 0 10px; }
+    .titlebar .fields { flex-basis: 206px; }
+  }
+  @media (max-width: 1240px) {
+    .gap-inline .ge { display: none; }
+    .titlebar .group { gap: 6px; }
+  }
   @media (max-width: 1000px) {
     .switch kbd { display: none; }
     .tsep, .brand { display: none; }
@@ -481,7 +500,7 @@
   @media (max-width: 720px) {
     .strip { margin: 8px 8px 0; }
     .main { margin: 8px 8px 0; border-radius: 14px; }
-    :root { --ln-w: 48px; --dt-w: 88px; --cm-w: 160px; --st-w: 120px; --src-w: 90px; }
+    :root { --ln-w: 48px; --dt-w: 88px; --gp-w: 100px; --cm-w: 160px; --st-w: 120px; --src-w: 90px; }
     .titlebar { padding: 6px 8px; }
     .tsep { display: none; }
     .titlebar .fields { order: 10; width: 100%; }
@@ -551,6 +570,9 @@
       <select id="filterSel" class="filter-sel" aria-label="フィルタ" title="フィルタ: 選んだ優先度以上のフィルタに一致した行だけを表示">
         <option value="0">フィルタなし</option><option value="1">優先度 1以上</option><option value="2">優先度 2以上</option><option value="3">優先度 3以上</option>
       </select>
+      <span class="vs-inline gap-inline" id="gapCtl" title="この時間以上あいた行を赤で強調（空欄で強調しない）。前の行との時間差は「間隔(ms)」列に出ます">
+        <label><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M10 2.5h4M18.5 6.5l1.5-1.5"/></svg><input id="gapIn" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="強調する間隔（ミリ秒）"><span>ms<span class="ge">以上</span></span></label>
+      </span>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
       <span class="vs-inline hidden" id="vsyncInfo">
@@ -1235,6 +1257,16 @@ function buildView(doc) {
     out[k++] = i;
   }
   doc.view = out.subarray(0, k);
+  // 表示中のひとつ前の行からの時間差（ms）。仮想行・時刻のない行は空欄で、差の計算にも使わない
+  const gap = new Float64Array(k).fill(NaN);
+  let prevT = NaN;
+  for (let p = 0; p < k; p++) {
+    const i = doc.view[p], t = doc.ts[i];
+    if (doc.orig[i] === 0 || isNaN(t)) continue;
+    if (!isNaN(prevT)) gap[p] = (t - prevT) * 1000;
+    prevT = t;
+  }
+  doc.gap = gap;
   $("quickCount").textContent = qre ? `${k}行` : "";
 }
 function lowerBound(view, idx) {
@@ -1311,12 +1343,14 @@ function statusCols(doc) { return state.advanced ? doc.fileNames : []; }
 
 // ================= 列（並び替え・幅変更） =================
 // ログ列より左の列は左端に、右の列は右端に固定表示する
-const COL_LABEL = { ln: "行", src: "ファイル", dt: "経過(秒)", log: "ログ", cm: "コメント", st: "区間" };
-const DEFAULT_ORDER = ["ln", "src", "dt", "log", "cm", "st"];
+const COL_LABEL = { ln: "行", src: "ファイル", dt: "経過(秒)", gp: "間隔(ms)", log: "ログ", cm: "コメント", st: "区間" };
+const DEFAULT_ORDER = ["ln", "src", "dt", "gp", "log", "cm", "st"];
 const ORDER_KEY = "logviewer.colOrder.v1";
 let colOrder = DEFAULT_ORDER.slice();
 try {
   const saved = JSON.parse(localStorage.getItem(ORDER_KEY) || "null");
+  // 「間隔」列が無かった頃に保存した並びには、経過の右に足す
+  if (Array.isArray(saved) && !saved.includes("gp") && saved.includes("dt")) saved.splice(saved.indexOf("dt") + 1, 0, "gp");
   if (Array.isArray(saved) && saved.length === DEFAULT_ORDER.length && DEFAULT_ORDER.every((k) => saved.includes(k))) colOrder = saved;
 } catch (e) { /* 既定の並び */ }
 function saveColOrder() { try { localStorage.setItem(ORDER_KEY, JSON.stringify(colOrder)); } catch (e) { /* 無視 */ } }
@@ -1364,8 +1398,8 @@ function renderHead(doc) {
   $("head").innerHTML = `<div class="L">${left.map((k) => headCell(doc, k, "L")).join("")}</div>${headCell(doc, "log", "")}` +
     `<div class="R">${right.map((k) => headCell(doc, k, "R")).join("")}</div>`;
 }
-const COL_VARS = { ln: "--ln-w", src: "--src-w", dt: "--dt-w", cm: "--cm-w", st: "--st-w" };
-const COL_MIN = { ln: 36, src: 56, dt: 56, cm: 70, st: 70 };
+const COL_VARS = { ln: "--ln-w", src: "--src-w", dt: "--dt-w", gp: "--gp-w", cm: "--cm-w", st: "--st-w" };
+const COL_MIN = { ln: 36, src: 56, dt: 56, gp: 56, cm: 70, st: 70 };
 const COL_KEY = "logviewer.colWidths.v1";
 let colWidths = {};
 try { colWidths = JSON.parse(localStorage.getItem(COL_KEY) || "{}") || {}; } catch (e) { colWidths = {}; }
@@ -1498,6 +1532,13 @@ function layout() {
   layout.logW = logW; layout.totalW = totalW;
   render();
 }
+// 間隔の強調: state.gapMs 以上は 3、1/3 以上は 2、1/10 以上は 1（しきい値が空なら強調しない）
+function gapLevel(g) {
+  const t = state.gapMs;
+  if (!(t > 0) || !(g >= t / 10)) return 0;
+  return g >= t ? 3 : g >= t / 3 ? 2 : 1;
+}
+const fmtGap = (g) => g.toLocaleString("ja-JP", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 function render() {
   const doc = cur();
   if (!doc) return;
@@ -1517,6 +1558,12 @@ function render() {
         case "ln": return `<div class="cell ln"><span>${doc.isMerged ? (doc.mergedNo[i] || "") : (doc.orig[i] || "")}</span></div>`;
         case "src": return `<div class="cell src" title="${escapeHtml(src)}"><i class="fdot" style="--c:${fileColor(doc, src)}"></i><span>${escapeHtml(src)}</span></div>`;
         case "dt": { const t = doc.ts[i]; return `<div class="cell dt"><span>${isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6)}</span></div>`; }
+        case "gp": {
+          const g = doc.gap[p];
+          if (isNaN(g)) return '<div class="cell gp"></div>';
+          const lv = gapLevel(g);
+          return `<div class="cell gp${lv ? ` g${lv}` : ""}"${lv === 3 ? ` title="前の行から ${fmtGap(g)} ms"` : ""}><span>${fmtGap(g)}</span></div>`;
+        }
         case "cm": return `<div class="cell cm" title="${escapeHtml(doc.comments[i])}"><span>${escapeHtml(doc.comments[i])}</span></div>`;
         case "st": return stCols.map((fn) => {
           const s = doc.status[fn] ? doc.status[fn][i] : null;
@@ -1525,7 +1572,7 @@ function render() {
         default: return "";
       }
     };
-    const cls = "row" + (i === doc.sel ? " sel" : "") + (rg && p >= rg.lo && p <= rg.hi ? " insel" : "") + (i === doc.base ? " base" : "") + (virt ? " virt" : "") + (doc.isMerged ? " m" : "");
+    const cls = "row" + (i === doc.sel ? " sel" : "") + (rg && p >= rg.lo && p <= rg.hi ? " insel" : "") + (i === doc.base ? " base" : "") + (gapLevel(doc.gap[p]) === 3 ? " gapx" : "") + (virt ? " virt" : "") + (doc.isMerged ? " m" : "");
     const logCell = (doc.colors[i] !== WHITE
       ? `<div class="cell log c" style="width:${layout.logW}px;--c:${escapeHtml(doc.colors[i])}">`
       : `<div class="cell log" style="width:${layout.logW}px">`) + `<span>${highlight(doc.lines[i], sre, i === curIdx)}</span></div>`;
@@ -1574,6 +1621,14 @@ function drawOverviewBase(doc, w, h, dpr) {
     const y = Math.min(h - 1, Math.floor(p / n * h)), r = doc.prio[i] + 1;
     if (r > rank[y]) { rank[y] = r; color[y] = ovShade(c); }
   }
+  if (state.gapMs > 0 && doc.gap) {   // しきい値以上の間隔（検索結果の次に重要）
+    const red = getComputedStyle(document.documentElement).getPropertyValue("--red").trim() || "#ff3b30";
+    for (let p = 0; p < n; p++) {
+      if (!(doc.gap[p] >= state.gapMs)) continue;
+      const y = Math.min(h - 1, Math.floor(p / n * h));
+      rank[y] = 900; color[y] = red;
+    }
+  }
   for (const p of search.hits) {
     const y = Math.min(h - 1, Math.floor(p / n * h));
     rank[y] = 999; color[y] = getComputedStyle(document.documentElement).getPropertyValue("--orange").trim() || "#ff9500";
@@ -1583,7 +1638,7 @@ function drawOverviewBase(doc, w, h, dpr) {
   for (let y = 0; y < h; y++) {
     if (!rank[y]) continue;
     ovBaseCtx.fillStyle = color[y];
-    const isHit = rank[y] === 999;
+    const isHit = rank[y] >= 900;
     ovBaseCtx.fillRect(isHit ? pad : pad + Math.round(dpr), y, w - pad * 2 - (isHit ? 0 : Math.round(dpr) * 2), mark);
   }
 }
@@ -2741,11 +2796,11 @@ function copyTable(doc) {
   if (!sp) return;
   const b = baseTs(doc);
   const esc = (v) => (/[\t\n"]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-  const head = ["行", ...(doc.isMerged ? ["ファイル"] : []), "経過(秒)", "ログ", "コメント"];
+  const head = ["行", ...(doc.isMerged ? ["ファイル"] : []), "経過(秒)", "間隔(ms)", "ログ", "コメント"];
   const out = [head.join("\t")];
   for (let p = sp[0]; p <= sp[1]; p++) {
     const i = doc.view[p], t = doc.ts[i];
-    out.push([doc.orig[i] || "", ...(doc.isMerged ? [doc.srcs[i]] : []), isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6), doc.lines[i], doc.comments[i]].map(esc).join("\t"));
+    out.push([doc.orig[i] || "", ...(doc.isMerged ? [doc.srcs[i]] : []), isNaN(t) || isNaN(b) ? "" : (t - b).toFixed(6), isNaN(doc.gap[p]) ? "" : doc.gap[p].toFixed(3), doc.lines[i], doc.comments[i]].map(esc).join("\t"));
   }
   copyText(out.join("\n"), `${(out.length - 1).toLocaleString()} 行を表形式でコピーしました（Excel に貼り付けできます）`);
 }
@@ -2904,6 +2959,33 @@ function measure() {
   rowH = probe.getBoundingClientRect().height || 20;
   probe.remove();
 }
+// 強調する間隔（ms）。このブラウザに保存する。空欄（0）で強調しない
+const GAP_KEY = "logviewer.gapMs";
+state.gapMs = 100;
+try { const v = localStorage.getItem(GAP_KEY); if (v !== null) state.gapMs = Number(v) || 0; } catch (e) { /* 既定値 */ }
+$("gapIn").value = state.gapMs > 0 ? String(state.gapMs) : "";
+fitVsyncInput($("gapIn"));
+function countGaps(doc) { let c = 0; if (doc && doc.gap && state.gapMs > 0) for (const g of doc.gap) if (g >= state.gapMs) c++; return c; }
+function applyGapInput(announce) {
+  const el = $("gapIn"), raw = el.value.trim();
+  const v = raw === "" ? 0 : Number(raw);
+  if (!isFinite(v) || v < 0) { el.classList.add("bad"); return; }
+  el.classList.remove("bad");
+  if (v === state.gapMs && !announce) return;
+  state.gapMs = v;
+  try { localStorage.setItem(GAP_KEY, String(v)); } catch (e) { /* 無視 */ }
+  ovDirty = true; render();
+  if (announce) {
+    const doc = cur();
+    setStatus(!(v > 0) ? "間隔の強調をやめました" : doc ? `${v.toLocaleString()} ms 以上あいた所: ${countGaps(doc).toLocaleString()} か所（赤い線と右端の印）` : `${v.toLocaleString()} ms 以上あいた所を強調します`);
+  }
+}
+$("gapIn").addEventListener("input", () => { fitVsyncInput($("gapIn")); applyGapInput(false); });
+$("gapIn").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); applyGapInput(true); }
+  else if (e.key === "Escape") { e.preventDefault(); $("gapIn").value = state.gapMs > 0 ? String(state.gapMs) : ""; fitVsyncInput($("gapIn")); applyGapInput(false); scroller.focus({ preventScroll: true }); }
+});
+$("gapIn").addEventListener("change", () => applyGapInput(true));
 state.config = loadStoredConfig();
 measure();
 compileRules();
