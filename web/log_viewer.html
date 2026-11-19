@@ -229,7 +229,32 @@
   /* しきい値を超えた行の上に区切り線 */
   .row.gapx::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--red); opacity: .75; z-index: 5; pointer-events: none; }
   .gap-inline input { width: calc(5ch + 14px); }
-  .gap-inline .i { width: 15px; height: 15px; color: var(--text-2); }
+  .gap-rank { display: inline-grid; place-items: center; width: 22px; height: 24px; margin: 0 -4px 0 -3px; padding: 0; border: 0; border-radius: 7px;
+              background: none; color: var(--text-2); cursor: pointer; }
+  .gap-rank:hover, .gap-rank[aria-expanded="true"] { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+  .gap-rank .i { width: 15px; height: 15px; }
+  .gap-panel { position: fixed; z-index: 42; top: 64px; right: 24px; width: min(520px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 96px));
+               display: flex; flex-direction: column; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-2); animation: pop .16s ease-out; transform-origin: top right; }
+  .gp-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 12px 8px 16px; border-bottom: 1px solid var(--sep); }
+  .gp-head h3 { margin: 0; flex: none; font: 600 13.5px var(--ui); white-space: nowrap; }
+  .gp-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 12px; }
+  .gp-x { margin-left: auto; align-self: center; width: 26px; height: 26px; border: 0; border-radius: 50%; background: none; color: var(--text-2); font-size: 17px; line-height: 1; cursor: pointer; }
+  .gp-x:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+  .gp-list { list-style: none; margin: 0; padding: 6px; overflow: auto; flex: 1; min-height: 0; }
+  .gp-list li { display: grid; grid-template-columns: 26px 96px 64px 1fr; align-items: center; gap: 8px; padding: 0 8px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+  .gp-list li:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  .gp-list li.on { background: var(--accent); color: #fff; }
+  .gp-list li.on .gp-ms, .gp-list li.on .gp-ln, .gp-list li.on .gp-rk { color: #fff; background: none; }
+  .gp-rk { color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
+  .gp-ms { justify-self: end; padding: 2px 7px; border-radius: 6px; font: 600 12px var(--mono); font-variant-numeric: tabular-nums; }
+  .gp-ms.g1 { background: color-mix(in srgb, #ffd60a 26%, transparent); }
+  .gp-ms.g2 { background: color-mix(in srgb, var(--orange) 30%, transparent); }
+  .gp-ms.g3 { background: color-mix(in srgb, var(--red) 22%, transparent); color: var(--red); }
+  .gp-ln { color: var(--text-3); text-align: right; font: 12px var(--mono); }
+  .gp-tx { overflow: hidden; text-overflow: ellipsis; white-space: pre; font: 12px var(--mono); }
+  .gp-empty { padding: 18px 10px; color: var(--text-3); text-align: center; cursor: default !important; display: block !important; height: auto !important; }
+  .gp-foot { margin: 0; padding: 8px 16px 11px; border-top: 1px solid var(--sep); color: var(--text-3); font-size: 11.5px; }
+  .gp-foot kbd { font-size: 10.5px; }
   .log { padding-left: 14px; }
   /* 列の境界線（見出しでドラッグして幅を変更） */
   .head .cell { position: relative; }
@@ -570,8 +595,9 @@
       <select id="filterSel" class="filter-sel" aria-label="フィルタ" title="フィルタ: 選んだ優先度以上のフィルタに一致した行だけを表示">
         <option value="0">フィルタなし</option><option value="1">優先度 1以上</option><option value="2">優先度 2以上</option><option value="3">優先度 3以上</option>
       </select>
-      <span class="vs-inline gap-inline" id="gapCtl" title="この時間以上あいた行を赤で強調（空欄で強調しない）。前の行との時間差は「間隔(ms)」列に出ます">
-        <label><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M10 2.5h4M18.5 6.5l1.5-1.5"/></svg><input id="gapIn" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="強調する間隔（ミリ秒）"><span>ms<span class="ge">以上</span></span></label>
+      <span class="vs-inline gap-inline" id="gapCtl" title="この時間以上あいた行を赤で強調（空欄で強調しない）。Alt+↓ / Alt+↑ で次 / 前の該当行へ">
+        <button type="button" class="gap-rank" id="btnGapRank" data-tip="間隔ランキング（大きい順）" aria-label="間隔ランキング" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M10 2.5h4M18.5 6.5l1.5-1.5"/></svg></button>
+        <label><input id="gapIn" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="強調する間隔（ミリ秒）"><span>ms<span class="ge">以上</span></span></label>
       </span>
       <button class="switch" id="btnAdvanced" role="switch" aria-checked="false" title="区間の列と仮想V周期の表示"><span class="track"></span><span class="label">Advanced</span></button>
       <button class="switch hidden" id="btnVsync" role="switch" aria-checked="false" title="仮想V周期の行を表示"><span class="track"></span><span class="label">仮想V周期</span></button>
@@ -683,6 +709,15 @@
     </div>
   </dialog>
 
+  <div class="gap-panel hidden" id="gapPanel" role="dialog" aria-labelledby="gapPanelTitle">
+    <div class="gp-head">
+      <h3 id="gapPanelTitle">間隔ランキング</h3><span class="gp-sub" id="gapPanelSub"></span>
+      <button type="button" class="gp-x" id="gapPanelClose" aria-label="閉じる" title="閉じる (Esc)">×</button>
+    </div>
+    <ol class="gp-list" id="gapList"></ol>
+    <p class="gp-foot">表示中の行で、前の行との差が大きい順。クリックでその行へ。<kbd>Alt</kbd><kbd>↓</kbd>/<kbd>↑</kbd> でしきい値以上の行を順に移動</p>
+  </div>
+
   <div class="strip">
     <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
   </div>
@@ -692,7 +727,7 @@
         <div class="head" id="head"></div>
         <div class="canvas" id="canvas"></div>
       </div>
-      <canvas class="ovmap" id="ovmap" title="全体マップ: 色の印は色付き行、オレンジは検索結果、青い枠は表示中の範囲（クリック・ドラッグで移動）"></canvas>
+      <canvas class="ovmap" id="ovmap" title="全体マップ: 色の印は色付き行、オレンジは検索結果、赤はしきい値以上の間隔、青い枠は表示中の範囲（クリック・ドラッグで移動）"></canvas>
     </div>
     <dialog id="helpDlg" aria-labelledby="helpTitle">
     <div class="help">
@@ -709,6 +744,8 @@
           <dt><kbd>F3</kbd> / <kbd>Shift</kbd><kbd>F3</kbd></dt><dd>次 / 前の検索結果</dd>
           <dt><kbd>Ctrl</kbd><kbd>G</kbd></dt><dd>行番号へ移動</dd>
           <dt><kbd>F8</kbd> / <kbd>Shift</kbd><kbd>F8</kbd></dt><dd>次 / 前の色付き行</dd>
+          <dt><kbd>Alt</kbd><kbd>↓</kbd> / <kbd>Alt</kbd><kbd>↑</kbd></dt><dd>次 / 前の、間隔がしきい値以上の行</dd>
+          <dt>上部の ⏱ ボタン</dt><dd>間隔ランキング（大きい順）</dd>
           <dt><kbd>Ctrl</kbd><kbd>Home</kbd> / <kbd>End</kbd></dt><dd>ログの先頭 / 末尾へ</dd></dl></section>
         <section><h3>選択・コピー</h3>
           <dl><dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>行を移動</dd>
@@ -729,7 +766,7 @@
       <strong>ログを開きましょう</strong>
       <p>ファイルをここにドロップするか、「開く」から選んでください。複数のファイルを開いてマージもできます。</p>
       <button class="btn primary wide" id="btnOpenEmpty" type="button">ファイルを開く</button>
-      <div class="keys"><span>「フィルタ」 優先度で絞り込み</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
+      <div class="keys"><span>「フィルタ」 優先度で絞り込み</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>Alt</kbd>+<kbd>↓</kbd> 次の間隔の大きい所</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
     </div>
   </main>
   <div class="peek-zone" id="peekZone"></div>
@@ -1721,7 +1758,7 @@ titlebar.addEventListener("focusout", () => setTimeout(unpeek, 0));
 // 選択行（なければ先頭の表示行）の位置を保ったまま表示行を作り直す
 function refreshView({ keep = true } = {}) {
   const doc = cur();
-  if (!doc) { layout(); updateStatus(); return; }
+  if (!doc) { layout(); updateStatus(); if (isGapPanelOpen()) renderGapPanel(); return; }
   let anchor = -1, offset = 0;
   if (keep && doc.view.length) {
     const topPos = Math.floor(scroller.scrollTop / rowH);
@@ -1737,6 +1774,7 @@ function refreshView({ keep = true } = {}) {
   if (anchor >= 0) scroller.scrollTop = lowerBound(doc.view, anchor) * rowH - offset;
   render();
   updateStatus();
+  if (isGapPanelOpen()) renderGapPanel();
 }
 function scrollToPos(pos) {
   const y = pos * rowH;
@@ -1798,6 +1836,80 @@ function nextColored(dir, ruleIdx = null) {
   }
   setStatus("これ以上ありません");
 }
+
+// ================= 間隔（時間差）の大きい所へ移動 =================
+function nextGap(dir) {
+  const doc = cur();
+  if (!doc || !doc.view.length || !doc.gap) return;
+  if (!(state.gapMs > 0)) { setStatus("上部の「ms以上」に、強調する間隔を入れてください"); $("gapIn").focus(); return; }
+  let p = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : (dir > 0 ? -1 : doc.view.length);
+  for (p += dir; p >= 0 && p < doc.view.length; p += dir) {
+    if (doc.gap[p] >= state.gapMs) {
+      setSel(doc, doc.view[p]); scrollToPos(p);
+      setStatus(`前の行から ${fmtGap(doc.gap[p])} ms（${state.gapMs.toLocaleString()} ms 以上: ${countGaps(doc).toLocaleString()} か所）`);
+      markGapPanel();
+      return;
+    }
+  }
+  setStatus(`これより${dir > 0 ? "後" : "前"}に ${state.gapMs.toLocaleString()} ms 以上あいた所はありません`);
+}
+// 間隔ランキング: 表示中の行で、前の行との差が大きい順に 20 件
+const GAP_TOP = 20;
+let gapPanelRows = [];
+function topGaps(doc) {
+  const top = [];   // [gap, pos] を大きい順に保つ
+  if (!doc || !doc.gap) return top;
+  for (let p = 0; p < doc.gap.length; p++) {
+    const g = doc.gap[p];
+    if (!(g > 0) || (top.length === GAP_TOP && g <= top[top.length - 1][0])) continue;
+    let k = top.length;
+    while (k > 0 && top[k - 1][0] < g) k--;
+    top.splice(k, 0, [g, p]);
+    if (top.length > GAP_TOP) top.pop();
+  }
+  return top;
+}
+const isGapPanelOpen = () => !$("gapPanel").classList.contains("hidden");
+function renderGapPanel() {
+  const doc = cur();
+  const top = topGaps(doc);
+  gapPanelRows = top.map(([, p]) => doc.view[p]);
+  $("gapPanelSub").textContent = doc ? `${doc.name}${state.gapMs > 0 ? `　·　${state.gapMs.toLocaleString()} ms 以上: ${countGaps(doc).toLocaleString()} か所` : ""}` : "";
+  $("gapList").innerHTML = !doc ? '<li class="gp-empty">ログを開いてください</li>'
+    : !top.length ? '<li class="gp-empty">時刻のある行が 2 行以上ありません</li>'
+    : top.map(([g, p], k) => {
+      const i = doc.view[p], lv = gapLevel(g), no = doc.isMerged ? doc.mergedNo[i] : doc.orig[i];
+      return `<li data-k="${k}" title="${escapeHtml(doc.lines[i])}"><span class="gp-rk">${k + 1}</span><span class="gp-ms${lv ? ` g${lv}` : ""}">${fmtGap(g)}</span>` +
+        `<span class="gp-ln">${no || ""}</span><span class="gp-tx">${escapeHtml(doc.lines[i])}</span></li>`;
+    }).join("");
+  markGapPanel();
+}
+function markGapPanel() {
+  if (!isGapPanelOpen()) return;
+  const doc = cur();
+  $("gapList").querySelectorAll("li[data-k]").forEach((li) => li.classList.toggle("on", !!doc && gapPanelRows[+li.dataset.k] === doc.sel));
+}
+function setGapPanel(open) {
+  $("gapPanel").classList.toggle("hidden", !open);
+  $("btnGapRank").setAttribute("aria-expanded", String(open));
+  if (open) renderGapPanel();
+}
+$("btnGapRank").onclick = () => setGapPanel(!isGapPanelOpen());
+$("gapPanelClose").onclick = () => { setGapPanel(false); scroller.focus({ preventScroll: true }); };
+$("gapList").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-k]");
+  const doc = cur();
+  if (!li || !doc) return;
+  const i = gapPanelRows[+li.dataset.k], p = lowerBound(doc.view, i);
+  if (doc.view[p] !== i) return;
+  setSel(doc, i);
+  // 遅れた行と、その直前の行が両方見えるように、少し上から表示する
+  const h = scroller.clientHeight - $("head").offsetHeight;
+  scroller.scrollTop = Math.max(0, p * rowH - h / 3);
+  render();
+  setStatus(`前の行から ${fmtGap(doc.gap[p])} ms`);
+  markGapPanel();
+});
 
 // ================= タブ =================
 function renderTabs() {
@@ -2834,6 +2946,8 @@ function openRowMenu(x, y, doc, i) {
     picked ? { label: `「${short}」を検索`, kbd: "Ctrl+F", act: () => { $("search").value = escRe(picked); runSearch(true); render(); } } : null,
     "-",
     { label: "次の色付き行へ", kbd: "F8", act: () => nextColored(1) },
+    { label: "次の間隔の大きい所へ", kbd: "Alt+↓", act: () => nextGap(1) },
+    { label: "間隔ランキングを表示", act: () => setGapPanel(true) },
     { label: "行番号へ移動…", kbd: "Ctrl+G", act: gotoLinePrompt },
     { label: "すべての行を選択", kbd: "Ctrl+A", act: () => selectAll(doc) },
   ].filter(Boolean);
@@ -2894,6 +3008,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault(); $("helpDlg").showModal(); return;
   }
   if (e.key === "Escape") { setMenuOpen(false); if (!rowMenu.classList.contains("hidden")) { closeRowMenu(); return; } }
+  if (e.key === "Escape" && isGapPanelOpen() && e.target.tagName !== "INPUT") { setGapPanel(false); scroller.focus({ preventScroll: true }); return; }
   const doc = cur();
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (ctrl && e.shiftKey && key === "f") { e.preventDefault(); setFocus(!isFocus()); return; }
@@ -2906,6 +3021,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "F3") { e.preventDefault(); goHit(e.shiftKey ? -1 : 1); return; }
   if (e.key === "F8") { e.preventDefault(); nextColored(e.shiftKey ? -1 : 1); return; }
   if (e.target.tagName === "INPUT" || !doc || !doc.view.length) return;
+  if (e.altKey && !ctrl && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); nextGap(e.key === "ArrowDown" ? 1 : -1); return; }
   const pos = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : -1;
   const page = Math.max(1, Math.floor(scroller.clientHeight / rowH) - 2);
   const moves = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page };
@@ -2975,6 +3091,7 @@ function applyGapInput(announce) {
   state.gapMs = v;
   try { localStorage.setItem(GAP_KEY, String(v)); } catch (e) { /* 無視 */ }
   ovDirty = true; render();
+  if (isGapPanelOpen()) renderGapPanel();
   if (announce) {
     const doc = cur();
     setStatus(!(v > 0) ? "間隔の強調をやめました" : doc ? `${v.toLocaleString()} ms 以上あいた所: ${countGaps(doc).toLocaleString()} か所（赤い線と右端の印）` : `${v.toLocaleString()} ms 以上あいた所を強調します`);
