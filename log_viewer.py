@@ -125,17 +125,53 @@ def darker(color: str, k: float = 0.75) -> str:
     return f"#{int(r * k):02x}{int(g * k):02x}{int(b * k):02x}"
 
 class UIColors:
-    BG = "#efe6d5"          # 全体の背景（ライムストーン）
-    PANEL_BG = "#ffffff"    # パネルやキャンバスの背景（クリーンな白）
-    HEADER_BG = "#708090"   # ヘッダー背景（スレートグレー）
-    HEADER_FG = "#ffffff"   # ヘッダーテキスト
-    ACCENT = "#708090"      # アクセント1（スレートグレー）
-    ACCENT_HOVER = "#5c6a78"# アクセント1のホバー
-    ROSE = "#d4a3b3"        # アクセント2（マカロンローズ）
-    ROSE_HOVER = "#c291a1"  # アクセント2のホバー
-    TEXT = "#4a4f54"        # 基本テキスト
-    TEXT_BG = "#ffffff"     # テキストエリア背景
-    BORDER = "#d1cbbd"      # 各種境界線
+    """Web 版（log_viewer.html）と同じ配色"""
+    BG = "#f5f5f7"          # 全体の背景
+    PANEL_BG = "#ffffff"    # 表・パネルの背景
+    SURFACE_2 = "#fafafc"   # 少し沈んだ面（行番号・経過・間隔の列、見出し）
+    SURFACE_3 = "#f0f0f3"   # ボタンの控えめな面
+    HEADER_BG = "#fafafc"   # 列の見出し
+    HEADER_FG = "#6e6e73"   # 見出しの文字
+    ACCENT = "#0071e3"      # 青（主なボタン・ON の状態）
+    ACCENT_HOVER = "#0077ed"
+    ROSE = "#0071e3"        # 以前のアクセント2。主なボタン（OK など）は青にそろえる
+    ROSE_HOVER = "#0077ed"
+    MERGE = "#5e5ce6"       # マージのボタン
+    MERGE_HOVER = "#6b69f0"
+    TEXT = "#1d1d1f"        # 基本の文字
+    TEXT_2 = "#6e6e73"      # 補助の文字
+    TEXT_3 = "#86868b"      # 薄い文字（行番号・経過など）
+    TEXT_BG = "#ffffff"
+    BORDER = "#d2d2d7"      # 入力欄・ボタンの枠
+    SEP = "#e5e5ea"         # 区切り線
+    SEL = "#b3d7ff"         # 選択した文字
+    CURSOR_LINE = "#eaf2fd" # 選択している行
+    FOUND = "#ffb340"       # 検索で見つかった文字
+    DANGER_BG = "#fdecea"   # 削除ボタン
+    DANGER_FG = "#d70015"
+    ORIGIN_ROW = "#f3d6df"  # V周期の起点の行
+    UI_FONT = "Yu Gothic UI"
+
+
+def section_header(parent, text, size=9):
+    """列の見出し: 薄い面に灰色の文字、下に細い区切り線（Web 版の見出しと同じ見え方）"""
+    lbl = tk.Label(parent, text=text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=(UIColors.UI_FONT, size, "bold"),
+                   relief=tk.FLAT, pady=7, anchor="w", padx=10)
+    lbl.pack(side=tk.TOP, fill=tk.X)
+    tk.Frame(parent, bg=UIColors.SEP, height=1).pack(side=tk.TOP, fill=tk.X)
+    return lbl
+
+
+def flat_button(parent, text, command, primary=False, **kw):
+    """平らなボタン。primary は青地に白、それ以外は白地に枠"""
+    if primary:
+        opts = dict(bg=UIColors.ACCENT, fg="white", activebackground=UIColors.ACCENT_HOVER, activeforeground="white", highlightthickness=0)
+    else:
+        opts = dict(bg="#ffffff", fg=UIColors.TEXT, activebackground=UIColors.SURFACE_3, activeforeground=UIColors.TEXT,
+                    highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.BORDER)
+    opts.update(relief=tk.FLAT, bd=0, cursor="hand2", font=(UIColors.UI_FONT, 9, "bold"), padx=12, pady=4)
+    opts.update(kw)
+    return tk.Button(parent, text=text, command=command, **opts)
 
 def apply_french_theme(widget):
     """ダイアログ内の標準ウィジェットにフレンチテーマを一括適用するヘルパー"""
@@ -253,9 +289,9 @@ class Tooltip:
             pass
 
         # Create label with text
-        label = tk.Label(tw, text=text, background="#ffffcc", foreground="#000000",
-                         relief=tk.SOLID, borderwidth=1, font=("Consolas", 9),
-                         padx=5, pady=3, wraplength=300)
+        label = tk.Label(tw, text=text, background="#1e1e20", foreground="#ffffff",
+                         relief=tk.FLAT, borderwidth=0, font=(UIColors.UI_FONT, 9),
+                         padx=9, pady=5, wraplength=320, justify=tk.LEFT)
         label.pack()
 
         # Position tooltip near cursor
@@ -322,7 +358,7 @@ class LineNumberCanvas(tk.Canvas):
             n = int(str(i).split(".")[0]) - 1
             label = nums[n] if nums is not None and n < len(nums) else str(n + 1)
             e = errs[n] if errs is not None and n < len(errs) else ERR_NONE
-            color, font = "#888888", ("Consolas", 10)
+            color, font = UIColors.TEXT_3, ("Consolas", 10)
             if srcs is not None and n < len(srcs):
                 self.create_rectangle(0, y, 3, y + h, fill=tab.file_colors.get(srcs[n], VIRTUAL_FILE_COLOR), outline="")
             if e and app is not None:
@@ -356,36 +392,37 @@ class LogTab(tk.Frame):
         self._create_layout()
 
     def _create_layout(self):
-        self.vsb = tk.Scrollbar(self, orient=tk.VERTICAL)
+        self.vsb = ttk.Scrollbar(self, orient=tk.VERTICAL)
         self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.paned_window = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=6, bg=UIColors.BORDER, bd=0)
+        self.paned_window = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=5, bg=UIColors.SEP, bd=0)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
         
         left_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(left_frame, minsize=100, stretch="always", width=650)
         
-        header_text = "View" if self.is_merged else (self.source_file_names[0] if self.source_file_names else "Log Content")
-        tk.Label(left_frame, text=header_text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
+        # 見出し: 1 つのファイルならファイル名、マージ結果なら「ログ」
+        header_text = self.source_file_names[0] if len(self.source_file_names) == 1 else "ログ"
+        section_header(left_frame, header_text)
         
-        self.hsb_log = tk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
+        self.hsb_log = ttk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
         
         self.text = tk.Text(left_frame, wrap=tk.NONE, xscrollcommand=self.hsb_log.set, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, relief=tk.FLAT, bd=0, font=("Consolas", 10))
-        self.text.tag_configure("sel", background="#cce8ff", foreground="black")
-        self.text.tag_config("found", background=UIColors.ACCENT_HOVER, foreground="white")
+        self.text.tag_configure("sel", background=UIColors.SEL, foreground="black")
+        self.text.tag_config("found", background=UIColors.FOUND, foreground=UIColors.TEXT)
         
-        self.linenumbers = LineNumberCanvas(left_frame, self.text, owner=self, width=58, bg=UIColors.BG, highlightthickness=0)
+        self.linenumbers = LineNumberCanvas(left_frame, self.text, owner=self, width=58, bg=UIColors.SURFACE_2, highlightthickness=0)
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         
-        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, font=("Consolas", 10))
-        self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
+        self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg=UIColors.SURFACE_2, fg=UIColors.TEXT_3, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.timediff_text.tag_configure("sel", background=UIColors.SEL, foreground="black")
         if not self.is_merged:
             self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
 
         # 前の行（表示中）からの時間差 [ms]
-        self.gap_text = tk.Text(left_frame, width=11, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, padx=6, font=("Consolas", 10))
-        self.gap_text.tag_configure("sel", background="#cce8ff", foreground="black")
+        self.gap_text = tk.Text(left_frame, width=11, wrap=tk.NONE, bg=UIColors.SURFACE_2, fg=UIColors.TEXT_3, relief=tk.FLAT, bd=0, padx=6, font=("Consolas", 10))
+        self.gap_text.tag_configure("sel", background=UIColors.SEL, foreground="black")
         self.gap_text.tag_configure("right", justify=tk.RIGHT)
         for lv, col in GAP_COLORS.items():
             self.gap_text.tag_configure(f"g{lv}", background=col, foreground="#4a4f54")
@@ -404,11 +441,11 @@ class LogTab(tk.Frame):
         if len(self.source_file_names) > 1:
             src_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
             self.paned_window.add(src_frame, minsize=60, stretch="never", width=140)
-            tk.Label(src_frame, text="ファイル", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
-            hsb_src = tk.Scrollbar(src_frame, orient=tk.HORIZONTAL)
+            section_header(src_frame, "ファイル")
+            hsb_src = ttk.Scrollbar(src_frame, orient=tk.HORIZONTAL)
             hsb_src.pack(side=tk.BOTTOM, fill=tk.X)
             self.src_text = tk.Text(src_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg=UIColors.TEXT, xscrollcommand=hsb_src.set, relief=tk.FLAT, bd=0, padx=4, font=("Consolas", 10))
-            self.src_text.tag_configure("sel", background="#cce8ff", foreground="black")
+            self.src_text.tag_configure("sel", background=UIColors.SEL, foreground="black")
             for fn, col in self.file_colors.items():
                 self.src_text.tag_configure(f"dot_{col[1:]}", foreground=col)
             self.src_text.tag_configure(f"dot_{VIRTUAL_FILE_COLOR[1:]}", foreground=VIRTUAL_FILE_COLOR)
@@ -418,13 +455,13 @@ class LogTab(tk.Frame):
         cmt_frame = tk.Frame(self.paned_window, bg=UIColors.PANEL_BG)
         self.paned_window.add(cmt_frame, minsize=50, stretch="always", width=250)
         
-        self.hsb_cmt = tk.Scrollbar(cmt_frame, orient=tk.HORIZONTAL)
+        self.hsb_cmt = ttk.Scrollbar(cmt_frame, orient=tk.HORIZONTAL)
         self.hsb_cmt.pack(side=tk.BOTTOM, fill=tk.X)
         
-        tk.Label(cmt_frame, text="コメント", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 10, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
+        section_header(cmt_frame, "コメント")
         
-        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg="#5c7a99", xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
-        self.comment_text.tag_configure("sel", background="#cce8ff", foreground="black")
+        self.comment_text = tk.Text(cmt_frame, wrap=tk.NONE, bg=UIColors.TEXT_BG, fg=UIColors.TEXT_2, xscrollcommand=self.hsb_cmt.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+        self.comment_text.tag_configure("sel", background=UIColors.SEL, foreground="black")
         self.comment_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_cmt.config(command=self.comment_text.xview)
         
@@ -434,13 +471,13 @@ class LogTab(tk.Frame):
             # Advanced ON時のみ paned_window に追加
             if self.app.advance_mode:
                 self.paned_window.add(st_frame, minsize=50, stretch="always", width=120)
-            tk.Label(st_frame, text=f"{fname}の区間", bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, pady=6).pack(side=tk.TOP, fill=tk.X)
+            section_header(st_frame, f"{fname}の区間")
             
-            hsb = tk.Scrollbar(st_frame, orient=tk.HORIZONTAL)
+            hsb = ttk.Scrollbar(st_frame, orient=tk.HORIZONTAL)
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
             
-            st_text = tk.Text(st_frame, wrap=tk.NONE, bg="#faf9f6", fg=UIColors.TEXT, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
-            st_text.tag_configure("sel", background="#cce8ff", foreground="black")
+            st_text = tk.Text(st_frame, wrap=tk.NONE, bg=UIColors.SURFACE_2, fg=UIColors.TEXT, xscrollcommand=hsb.set, relief=tk.FLAT, bd=0, font=("Consolas", 10))
+            st_text.tag_configure("sel", background=UIColors.SEL, foreground="black")
             st_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             hsb.config(command=st_text.xview)
             self.status_texts[fname] = st_text
@@ -456,7 +493,7 @@ class LogTab(tk.Frame):
 
         # カーソル行のハイライト設定
         for w in self.all_texts:
-            w.tag_configure("cursor_line", background="#fff0f5", underline=True)
+            w.tag_configure("cursor_line", background=UIColors.CURSOR_LINE)
             w.bind('<ButtonRelease-1>', self.update_cursor_line)
             w.bind('<KeyRelease>', self.update_cursor_line)
         
@@ -517,11 +554,7 @@ class LogViewerApp:
         self.root.configure(bg=UIColors.BG)
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("TNotebook", background=UIColors.BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=UIColors.BORDER, foreground=UIColors.TEXT, padding=[15, 5], font=("Yu Gothic UI", 9, "bold"), borderwidth=0)
-        style.map("TNotebook.Tab", background=[("selected", UIColors.PANEL_BG)], foreground=[("selected", "#000000")])
+        self._apply_style()
         
         self.keywords_config =[x.copy() for x in DEFAULT_CONFIG["keywords"]]
         self.sections_config =[x.copy() for x in DEFAULT_CONFIG["sections"]]
@@ -609,7 +642,7 @@ class LogViewerApp:
         self.root.config(menu=menubar)
         
         toolbar = tk.Frame(self.root, bg=UIColors.BG)
-        toolbar.pack(fill=tk.X, padx=5, pady=8)
+        toolbar.pack(fill=tk.X, padx=10, pady=(10, 6))
         
         # フィルタ: なし / 優先度 1 以上 / 2 以上 / 3 以上
         self.FILTER_LABELS = ["フィルタなし", "優先度 1以上", "優先度 2以上", "優先度 3以上"]
@@ -621,20 +654,21 @@ class LogViewerApp:
         self.cmb_filter.bind("<Enter>", lambda e: self._filter_tip.show(e, "選んだ優先度以上のフィルタに一致した行だけを表示（3 が一番強い）"))
         self.cmb_filter.bind("<Leave>", lambda e: self._filter_tip.hide())
 
-        tk.Button(toolbar, text="ログをマージ", command=self.merge_logs_action, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.BORDER, cursor="hand2", padx=10).pack(side=tk.LEFT, padx=10)
+        flat_button(toolbar, "ログをマージ", self.merge_logs_action, bg=UIColors.MERGE, fg="white", activebackground=UIColors.MERGE_HOVER,
+                    activeforeground="white", highlightthickness=0, padx=14).pack(side=tk.LEFT, padx=10)
         
-        self.btn_vsync_toggle = tk.Button(toolbar, text="仮想V周期表示: ON", width=18, command=self.toggle_vsync_display, bg=UIColors.ROSE, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ROSE_HOVER, activeforeground="white", cursor="hand2")
+        self.btn_vsync_toggle = flat_button(toolbar, "仮想V周期表示: ON", self.toggle_vsync_display, width=16)
         # Advanced OFF時は非表示のため、pack は toggle_advance_mode()で行う
         
         self.lbl_vsync_info = tk.Label(toolbar, text="", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9))
         # Advanced OFF時は非表示のため、pack は toggle_advance_mode()で行う
         self._update_vsync_info_label()
         
-        self.btn_advance = tk.Button(toolbar, text="Advanced: OFF", width=14, command=self.toggle_advance_mode, bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ACCENT_HOVER, cursor="hand2")
+        self.btn_advance = flat_button(toolbar, "Advanced: OFF", self.toggle_advance_mode, width=13)
         self.btn_advance.pack(side=tk.RIGHT, padx=5)
 
         # エラー・警告の件数（クリックでエラー一覧）
-        self.err_box = tk.Frame(toolbar, bg="#ffffff", highlightbackground=UIColors.BORDER, highlightthickness=1, cursor="hand2")
+        self.err_box = tk.Frame(toolbar, bg="#ffffff", highlightbackground=UIColors.BORDER, highlightthickness=1, cursor="hand2", padx=4)
         self.err_box.pack(side=tk.RIGHT, padx=8)
         self.lbl_err = tk.Label(self.err_box, text="● エラー 0", bg="#ffffff", fg="#999999", font=("Yu Gothic UI", 9, "bold"), padx=6, pady=3, cursor="hand2")
         self.lbl_warn = tk.Label(self.err_box, text="● 警告 0", bg="#ffffff", fg="#999999", font=("Yu Gothic UI", 9, "bold"), padx=6, pady=3, cursor="hand2")
@@ -649,11 +683,11 @@ class LogViewerApp:
         # 間隔のしきい値（ms）と間隔ランキング
         gap_box = tk.Frame(toolbar, bg=UIColors.BG)
         gap_box.pack(side=tk.RIGHT, padx=8)
-        tk.Button(gap_box, text="⏱ ランキング", command=self.open_gap_ranking, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9), activebackground=UIColors.BORDER, cursor="hand2", padx=8).pack(side=tk.LEFT, padx=(0, 6))
+        flat_button(gap_box, "⏱ ランキング", self.open_gap_ranking, font=(UIColors.UI_FONT, 9)).pack(side=tk.LEFT, padx=(0, 8))
         self.gap_var = tk.StringVar(value="")
-        self.ent_gap = tk.Entry(gap_box, textvariable=self.gap_var, width=7, justify=tk.RIGHT, relief=tk.SOLID, bd=1, highlightthickness=0, font=("Consolas", 10))
+        self.ent_gap = tk.Entry(gap_box, textvariable=self.gap_var, width=7, justify=tk.RIGHT, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT, font=("Consolas", 10))
         self.ent_gap.pack(side=tk.LEFT)
-        tk.Label(gap_box, text="ms以上を強調", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(side=tk.LEFT, padx=(4, 0))
+        tk.Label(gap_box, text="ms以上を強調", bg=UIColors.BG, fg=UIColors.TEXT_2, font=(UIColors.UI_FONT, 9)).pack(side=tk.LEFT, padx=(5, 0))
         self.ent_gap.bind("<Return>", lambda e: self._apply_gap_input())
         self.ent_gap.bind("<FocusOut>", lambda e: self._apply_gap_input())
         self._gap_input_tip = Tooltip()
@@ -661,7 +695,7 @@ class LogViewerApp:
         self.ent_gap.bind("<Leave>", lambda e: self._gap_input_tip.hide())
 
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 4))
         
         # Bind tooltip events to notebook tabs
         self.notebook.bind('<Motion>', self._on_notebook_motion)
@@ -676,11 +710,48 @@ class LogViewerApp:
         self._dragged_tab_idx = None
         
         self.status_var = tk.StringVar(value="準備完了")
-        tk.Label(self.root, textvariable=self.status_var, anchor="w", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=2)
+        tk.Label(self.root, textvariable=self.status_var, anchor="w", bg=UIColors.BG, fg=UIColors.TEXT_2, font=(UIColors.UI_FONT, 9)).pack(fill=tk.X, side=tk.BOTTOM, padx=12, pady=(2, 6))
 
         if HAS_DND:
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', lambda e:[self._open_file_path(f) for f in self.root.tk.splitlist(e.data)])
+
+    def _apply_style(self):
+        """ttk の部品を Web 版に近い見た目にする（平らで、薄い枠と細いスクロールバー）"""
+        C = UIColors
+        style = ttk.Style()
+        style.theme_use("clam")
+        ui = (C.UI_FONT, 9)
+        self.root.option_add("*Font", ui)
+        self.root.option_add("*TCombobox*Listbox.font", ui)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", C.ACCENT)
+        self.root.option_add("*Menu.font", ui)
+        style.configure(".", font=ui, background=C.BG, foreground=C.TEXT, bordercolor=C.BORDER, lightcolor=C.BG, darkcolor=C.BG, focuscolor=C.ACCENT)
+        # タブ: 選んでいるタブは表と同じ白、ほかは背景に溶け込ませる
+        style.configure("TNotebook", background=C.BG, borderwidth=0, bordercolor=C.BG, lightcolor=C.BG, darkcolor=C.BG, tabmargins=[6, 4, 6, 0])
+        style.configure("TNotebook.Tab", background=C.BG, foreground=C.TEXT_2, padding=[16, 7], font=(C.UI_FONT, 9, "bold"),
+                        borderwidth=0, bordercolor=C.BG, lightcolor=C.BG, darkcolor=C.BG, focuscolor=C.BG)
+        style.map("TNotebook.Tab",
+                  background=[("selected", C.PANEL_BG), ("active", "#ebebf0")],
+                  foreground=[("selected", C.TEXT), ("active", C.TEXT)],
+                  lightcolor=[("selected", C.PANEL_BG)], darkcolor=[("selected", C.PANEL_BG)], bordercolor=[("selected", C.PANEL_BG)])
+        # スクロールバー: 細く、矢印は目立たせない
+        for orient in ("Vertical", "Horizontal"):
+            style.configure(f"{orient}.TScrollbar", troughcolor=C.SURFACE_2, background="#d1d1d6", bordercolor=C.SURFACE_2,
+                            lightcolor="#d1d1d6", darkcolor="#d1d1d6", arrowcolor=C.TEXT_3, gripcount=0, arrowsize=11, relief=tk.FLAT)
+            style.map(f"{orient}.TScrollbar", background=[("active", "#aeaeb2"), ("pressed", "#8e8e93")],
+                      lightcolor=[("active", "#aeaeb2")], darkcolor=[("active", "#aeaeb2")])
+        # 選択欄
+        style.configure("TCombobox", fieldbackground="#ffffff", background="#ffffff", foreground=C.TEXT, bordercolor=C.BORDER,
+                        lightcolor="#ffffff", darkcolor="#ffffff", arrowcolor=C.TEXT_2, padding=[6, 3])
+        style.map("TCombobox", fieldbackground=[("readonly", "#ffffff")], selectbackground=[("readonly", "#ffffff")],
+                  selectforeground=[("readonly", C.TEXT)], bordercolor=[("focus", C.ACCENT)])
+        # 一覧（間隔ランキング・エラー一覧）
+        style.configure("Treeview", background="#ffffff", fieldbackground="#ffffff", foreground=C.TEXT, rowheight=26, borderwidth=0, font=ui)
+        style.configure("Treeview.Heading", background=C.SURFACE_2, foreground=C.TEXT_2, relief=tk.FLAT, font=(C.UI_FONT, 9, "bold"),
+                        bordercolor=C.SEP, lightcolor=C.SURFACE_2, darkcolor=C.SURFACE_2, padding=[6, 5])
+        style.map("Treeview", background=[("selected", C.ACCENT)], foreground=[("selected", "#ffffff")])
+        style.map("Treeview.Heading", background=[("active", C.SURFACE_3)])
 
     @property
     def use_keyword_filter(self) -> bool:
@@ -967,14 +1038,14 @@ class LogViewerApp:
         f_start_time = tk.Frame(frame_start, bg=UIColors.BG)
         f_start_time.pack(anchor="w", padx=5, pady=5)
         tk.Label(f_start_time, text="指定した時刻(秒)から強制開始:", bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
-        e_start_time = tk.Entry(f_start_time, width=15, relief=tk.SOLID, bd=1, highlightthickness=0)
+        e_start_time = tk.Entry(f_start_time, width=15, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT)
         e_start_time.pack(side=tk.LEFT, padx=5)
         e_start_time.insert(0, str(conf.get("start_time_val", "0.0")))
 
         f_manual = tk.Frame(frame_start, bg=UIColors.BG)
         f_manual.pack(anchor="w", padx=5, pady=5)
         tk.Label(f_manual, text="挿入間隔 (ms):", bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
-        e_ms = tk.Entry(f_manual, width=10, relief=tk.SOLID, bd=1, highlightthickness=0)
+        e_ms = tk.Entry(f_manual, width=10, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT)
         e_ms.pack(side=tk.LEFT, padx=5)
         e_ms.insert(0, str(conf.get("manual_ms", 16.666)))
         
@@ -1018,7 +1089,7 @@ class LogViewerApp:
         input_frame = tk.Frame(content, bg=UIColors.BG)
         input_frame.pack(fill=tk.X)
         tk.Label(input_frame, text="時刻ソート用の先頭文字数:", anchor="w", font=("Yu Gothic UI", 9, "bold"), bg=UIColors.BG, fg=UIColors.TEXT).pack(side=tk.LEFT)
-        ent = tk.Entry(input_frame, width=7, justify=tk.RIGHT, relief=tk.SOLID, bd=1, highlightthickness=0)
+        ent = tk.Entry(input_frame, width=7, justify=tk.RIGHT, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT)
         ent.pack(side=tk.LEFT, padx=(10, 0))
         ent.insert(0, str(initial))
 
@@ -1412,9 +1483,9 @@ class LogViewerApp:
         if not force_update:
             self.show_vsync_lines = not self.show_vsync_lines
         if self.show_vsync_lines:
-            self.btn_vsync_toggle.config(text="仮想V周期表示: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+            self.btn_vsync_toggle.config(text="仮想V周期表示: ON", bg=UIColors.ACCENT, fg="white", activebackground=UIColors.ACCENT_HOVER, activeforeground="white", highlightbackground=UIColors.ACCENT)
         else:
-            self.btn_vsync_toggle.config(text="仮想V周期表示: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
+            self.btn_vsync_toggle.config(text="仮想V周期表示: OFF", bg="#ffffff", fg=UIColors.TEXT, activebackground=UIColors.SURFACE_3, activeforeground=UIColors.TEXT, highlightbackground=UIColors.BORDER)
         
         self._update_vsync_info_label()
             
@@ -1425,9 +1496,9 @@ class LogViewerApp:
     def toggle_advance_mode(self):
         self.advance_mode = not self.advance_mode
         if self.advance_mode:
-            self.btn_advance.config(text="Advanced: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+            self.btn_advance.config(text="Advanced: ON", bg=UIColors.ACCENT, fg="white", activebackground=UIColors.ACCENT_HOVER, activeforeground="white", highlightbackground=UIColors.ACCENT)
         else:
-            self.btn_advance.config(text="Advanced: OFF", bg=UIColors.BORDER, activebackground=UIColors.ACCENT_HOVER)
+            self.btn_advance.config(text="Advanced: OFF", bg="#ffffff", fg=UIColors.TEXT, activebackground=UIColors.SURFACE_3, activeforeground=UIColors.TEXT, highlightbackground=UIColors.BORDER)
         
         # メニュー項目を作り直す（区間設定・V周期設定は Advanced ON 時のみ）
         self._build_config_menu()
@@ -1690,7 +1761,7 @@ class LogViewerApp:
         for idx in range(len(lines)):
             if "<<< [V-SYNC 起点]" in lines[idx]:
                 if line_attrs[idx]["priority"] < 30:
-                    line_attrs[idx]["color"] = UIColors.ROSE 
+                    line_attrs[idx]["color"] = UIColors.ORIGIN_ROW 
                     line_attrs[idx]["comment"] = f"{line_attrs[idx]['comment']}[基準位置]".strip()
                     line_attrs[idx]["priority"] = 30
 
@@ -2094,13 +2165,13 @@ class LogViewerApp:
             tree.column(col, width=w, anchor=anchor, stretch=(col == "log"))
         for lv, col in GAP_COLORS.items():
             tree.tag_configure(f"g{lv}", background=col)
-        sb = tk.Scrollbar(fr, orient=tk.VERTICAL, command=tree.yview)
+        sb = ttk.Scrollbar(fr, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         win.tree = tree
         tk.Label(win, text="表示中の行で、前の行との差が大きい順。クリックでその行へ。Alt+↓ / Alt+↑ でしきい値以上の行を順に移動",
-                 anchor="w", bg=UIColors.BG, fg="#888888", font=("Yu Gothic UI", 8), wraplength=600, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=6)
+                 anchor="w", bg=UIColors.BG, fg=UIColors.TEXT_3, font=("Yu Gothic UI", 8), wraplength=600, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=6)
 
         def on_select(_e=None):
             sel = tree.selection()
@@ -2148,9 +2219,9 @@ class LogViewerApp:
         bar = tk.Frame(win, bg=UIColors.BG)
         bar.pack(fill=tk.X, padx=10, pady=(8, 4))
         win.rb_err = tk.Radiobutton(bar, text="エラー", variable=win.type_var, value="error", indicatoron=False, padx=12, pady=3,
-                                    bg="#ffffff", selectcolor=UIColors.BORDER, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), command=self._render_error_list)
+                                    bg="#ffffff", selectcolor=UIColors.SURFACE_3, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, font=("Yu Gothic UI", 9, "bold"), command=self._render_error_list)
         win.rb_warn = tk.Radiobutton(bar, text="警告", variable=win.type_var, value="warn", indicatoron=False, padx=12, pady=3,
-                                     bg="#ffffff", selectcolor=UIColors.BORDER, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), command=self._render_error_list)
+                                     bg="#ffffff", selectcolor=UIColors.SURFACE_3, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, font=("Yu Gothic UI", 9, "bold"), command=self._render_error_list)
         win.rb_err.pack(side=tk.LEFT)
         win.rb_warn.pack(side=tk.LEFT, padx=(2, 0))
         cmb = ttk.Combobox(bar, textvariable=win.sort_var, values=["件数の多い順", "出た順"], state="readonly", width=12)
@@ -2164,7 +2235,7 @@ class LogViewerApp:
         for col, label, w, anchor in (("count", "件数", 60, tk.E), ("msg", "内容（数字は # にまとめる）", 380, tk.W), ("when", "時刻（最初〜最後）", 200, tk.W), ("line", "最初の行", 70, tk.E)):
             tree.heading(col, text=label)
             tree.column(col, width=w, anchor=anchor, stretch=(col == "msg"))
-        sb = tk.Scrollbar(fr, orient=tk.VERTICAL, command=tree.yview)
+        sb = ttk.Scrollbar(fr, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -2172,7 +2243,7 @@ class LogViewerApp:
         win.groups = []
         win.cursor = {}
         tk.Label(win, text="数字・16進数を除いて同じ文のものを 1 つにまとめています。クリックで最初の行へ、続けてクリックで次の発生へ。F9 で順に移動",
-                 anchor="w", bg=UIColors.BG, fg="#888888", font=("Yu Gothic UI", 8), wraplength=720, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=6)
+                 anchor="w", bg=UIColors.BG, fg=UIColors.TEXT_3, font=("Yu Gothic UI", 8), wraplength=720, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=6)
 
         def on_click(event):
             iid = tree.identify_row(event.y)
@@ -2226,7 +2297,7 @@ class LogViewerApp:
         win.sub.config(text=f"{getattr(tab, 'base_title', '')}　·　{len(lst)} 種類 / {vis} 件{hidden}" if lst else
                        (f"{kind}はすべてフィルタで非表示です" if total else f"{kind}は見つかっていません"))
         color = self.error_colors["error" if want == ERR_ERR else "warn"]
-        tree.tag_configure("kind", foreground=darker(color, 0.8))
+        tree.tag_configure("kind", foreground=UIColors.TEXT)   # 種類の色は上の切り替えに出すので、一覧は読みやすい黒にする
         for k, g in enumerate(lst):
             t0, t1 = tab.all_ts_raw[g["idx"][0]], tab.all_ts_raw[g["idx"][-1]]
             when = t0 if len(g["rows"]) == 1 else (f"{t0} 〜 {t1}" if t0 and t1 else "")
@@ -2247,7 +2318,7 @@ class LogViewerApp:
 
         tk.Label(self.find_window_ref, text="検索文字列:", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9, "bold")).pack(pady=(10, 0))
         
-        entry = tk.Entry(self.find_window_ref, width=40, relief=tk.SOLID, bd=1, highlightthickness=0)
+        entry = tk.Entry(self.find_window_ref, width=40, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT)
         entry.pack(pady=5, padx=10)
         entry.insert(0, self.last_search_keyword)
         entry.select_range(0, tk.END)
@@ -2336,8 +2407,8 @@ class LogViewerApp:
         hdr.pack(fill=tk.X)
         
         cv = tk.Canvas(wrapper, bg=UIColors.PANEL_BG, highlightthickness=0)
-        sc_y = tk.Scrollbar(wrapper, orient=tk.VERTICAL, command=cv.yview)
-        sc_x = tk.Scrollbar(wrapper, orient=tk.HORIZONTAL, command=cv.xview)
+        sc_y = ttk.Scrollbar(wrapper, orient=tk.VERTICAL, command=cv.yview)
+        sc_x = ttk.Scrollbar(wrapper, orient=tk.HORIZONTAL, command=cv.xview)
         sf = tk.Frame(cv, bg=UIColors.PANEL_BG)
         cv.configure(yscrollcommand=sc_y.set, xscrollcommand=sc_x.set)
         
@@ -2430,9 +2501,9 @@ class LogViewerApp:
             f_btn.grid(row=i, column=0, sticky="w", padx=2, pady=2)
 
             tk.Checkbutton(f_btn, variable=item["enabled"], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
-            tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
-            tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1), bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=1)
-            tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx), bg="#e8c5c5", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, padx=2)
+            tk.Button(f_btn, text="↑", width=2, command=lambda idx=i: move(idx, -1), bg=UIColors.SURFACE_3, fg=UIColors.TEXT_2, activebackground=UIColors.SEP, relief=tk.FLAT, bd=0, cursor="hand2").pack(side=tk.LEFT, padx=1)
+            tk.Button(f_btn, text="↓", width=2, command=lambda idx=i: move(idx, 1), bg=UIColors.SURFACE_3, fg=UIColors.TEXT_2, activebackground=UIColors.SEP, relief=tk.FLAT, bd=0, cursor="hand2").pack(side=tk.LEFT, padx=1)
+            tk.Button(f_btn, text="削除", width=3, command=lambda idx=i: delete(idx), bg=UIColors.DANGER_BG, fg=UIColors.DANGER_FG, activebackground="#fbd5d2", activeforeground=UIColors.DANGER_FG, relief=tk.FLAT, bd=0, cursor="hand2").pack(side=tk.LEFT, padx=2)
 
             for c_idx, c_id, _c_txt, c_w in col_defs:
                 if c_id == "btn":
@@ -2443,7 +2514,7 @@ class LogViewerApp:
                 f_cell.grid(row=i, column=c_idx, sticky="w", padx=2, pady=2)
 
                 if c_id in simple_entry_fields:
-                    tk.Entry(f_cell, textvariable=item[c_id], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
+                    tk.Entry(f_cell, textvariable=item[c_id], relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT).pack(fill=tk.BOTH, expand=True)
                 elif c_id in bool_fields:
                     tk.Checkbutton(f_cell, variable=item[c_id], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
                 elif c_id == "priority":
@@ -2453,11 +2524,11 @@ class LogViewerApp:
                 elif c_id == "type":
                     ttk.Combobox(f_cell, textvariable=item["type"], values=["エラー", "警告"], state="readonly", width=6).pack(fill=tk.BOTH, expand=True)
                 elif c_id == "end":
-                    tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                    tk.Entry(f_cell, textvariable=item["end"], relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                     if key == "sections":
                         tk.Button(f_cell, text="V", width=4, command=lambda v=item["end"]: v.set(VSYNC_TAG), bg=UIColors.ROSE, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
                 elif c_id == "color":
-                    tk.Entry(f_cell, textvariable=item["color"], width=7, relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                    tk.Entry(f_cell, textvariable=item["color"], width=7, relief=tk.FLAT, bd=0, highlightthickness=1, highlightbackground=UIColors.BORDER, highlightcolor=UIColors.ACCENT).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                     tk.Button(f_cell, text="色", command=lambda v=item["color"]: v.set(colorchooser.askcolor(v.get())[1] or v.get()), bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, cursor="hand2").pack(side=tk.LEFT, fill=tk.Y, padx=1)
 
         def refresh():
@@ -2526,7 +2597,7 @@ class LogViewerApp:
         # Reserve the operation panel first. Packing the expanding table first
         # pushed these controls outside the visible area on narrower screens.
         l_fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Button(btn_fr, text="行を追加", command=add, width=20, height=2, bg=UIColors.ACCENT, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2").pack(pady=5)
+        flat_button(btn_fr, "＋ 行を追加", add, primary=True, width=20, pady=8).pack(pady=5, fill=tk.X)
         
         info_text = ""
         if key == "sections":
@@ -2621,7 +2692,7 @@ class LogViewerApp:
             tk.Button(cat, text="既定に戻す", command=reset_defaults, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2", font=("Yu Gothic UI", 9)).pack(anchor="e", padx=6, pady=(0, 6))
 
         if info_text:
-            info_lbl = tk.Label(btn_fr,text=info_text, justify=tk.LEFT, anchor="nw", bg="#faf9f6", fg=UIColors.TEXT, relief=tk.FLAT, bd=1, highlightbackground=UIColors.BORDER, highlightthickness=1, padx=12, pady=12, font=("Yu Gothic UI", 9), wraplength=230)
+            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#ffffff", fg=UIColors.TEXT_2, relief=tk.FLAT, bd=0, highlightbackground=UIColors.SEP, highlightthickness=1, padx=12, pady=12, font=("Yu Gothic UI", 9), wraplength=230)
             info_lbl.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def save():
@@ -2664,7 +2735,7 @@ class LogViewerApp:
                     if isinstance(w, LogTab): self.apply_display_update(w)
                 except: pass
 
-        tk.Button(btn_fr, text="OK", command=save, width=20, bg=UIColors.ROSE, fg="white", font=("Yu Gothic UI", 9, "bold"), relief=tk.FLAT, cursor="hand2", height=2).pack(side=tk.BOTTOM, pady=5)
+        flat_button(btn_fr, "OK", save, primary=True, width=20, pady=8).pack(side=tk.BOTTOM, pady=5, fill=tk.X)
 
     # --- IO ---
     def load_config_dialog(self):
