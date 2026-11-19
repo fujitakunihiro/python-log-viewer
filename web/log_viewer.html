@@ -156,11 +156,22 @@
   .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 10px 0 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
           flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .tabs::-webkit-scrollbar { display: none; }
+  .err-pill { flex: none; margin: 0 0 5px auto; display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 12px; border-radius: 999px;
+              border: 1px solid var(--sep-strong); background: var(--surface); color: var(--text-3); font: 600 12px var(--ui); cursor: pointer; white-space: nowrap; }
+  .err-pill:hover { border-color: var(--text-3); }
+  .err-pill .e, .err-pill .w { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+  .err-pill .e::before, .err-pill .w::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .err-pill .e.on { color: var(--red); }
+  .err-pill .w.on { color: #b25000; }
+  .err-pill .w.on::before { background: #ff9f0a; }
   .tabs:empty { display: none; }
   .tab { position: relative; display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 8px 0 14px; border-radius: 10px 10px 0 0;
          cursor: pointer; white-space: nowrap; flex: none; max-width: 220px; font-weight: 500; color: var(--text-2);
          transition: background-color .15s, color .15s; user-select: none; }
   .tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tab-err { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff;
+             font: 700 10.5px/18px var(--ui); text-align: center; font-variant-numeric: tabular-nums; }
+  .tab-err.warn { background: #ff9f0a; }
   .tab:hover:not(.active) { color: var(--text); background: linear-gradient(rgba(255, 255, 255, .78), rgba(255, 255, 255, .44));
                             box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 .5px rgba(90, 110, 170, .14); }
   /* 選択中のタブは表と同じ白で、下の左右が内側にカーブして表へつながる */
@@ -316,6 +327,13 @@
   .row.sel .log { box-shadow: inset 0 0 0 9999px var(--sel); }
   .row.sel .dt, .row.sel .gp:not(.g1):not(.g2):not(.g3), .row.sel .src, .row.sel .cm, .row.sel .st:not(.c) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
   .row.base .dt { color: var(--red); font-weight: 600; }
+  /* エラー・警告の行: 行番号の左に印、行番号を色付きに */
+  .row.err .cell.ln, .row.warn .cell.ln { position: relative; font-weight: 600; }
+  .row.err .cell.ln { color: var(--red); }
+  .row.warn .cell.ln { color: #b25000; }
+  .row.err .cell.ln::before, .row.warn .cell.ln::before { content: ""; position: absolute; left: 9px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; }
+  .row.err .cell.ln::before { background: var(--red); }
+  .row.warn .cell.ln::before { background: #ff9f0a; }
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
   mark.cur { background: var(--mark-cur); }
 
@@ -720,6 +738,7 @@
 
   <div class="strip">
     <nav class="tabs" id="tabs" aria-label="開いているログ"></nav>
+    <button type="button" class="err-pill hidden" id="btnErr" title="クリック / F9: 次のエラー　Shift+クリック / Shift+F9: 前のエラー"></button>
   </div>
   <main class="main">
     <div class="vrow">
@@ -727,7 +746,7 @@
         <div class="head" id="head"></div>
         <div class="canvas" id="canvas"></div>
       </div>
-      <canvas class="ovmap" id="ovmap" title="全体マップ: 色の印は色付き行、オレンジは検索結果、赤はしきい値以上の間隔、青い枠は表示中の範囲（クリック・ドラッグで移動）"></canvas>
+      <canvas class="ovmap" id="ovmap" title="全体マップ: 左端の細い帯はエラー（赤）・警告（橙）、色の印は色付き行、オレンジは検索結果、赤はしきい値以上の間隔、青い枠は表示中の範囲（クリック・ドラッグで移動）"></canvas>
     </div>
     <dialog id="helpDlg" aria-labelledby="helpTitle">
     <div class="help">
@@ -744,6 +763,7 @@
           <dt><kbd>F3</kbd> / <kbd>Shift</kbd><kbd>F3</kbd></dt><dd>次 / 前の検索結果</dd>
           <dt><kbd>Ctrl</kbd><kbd>G</kbd></dt><dd>行番号へ移動</dd>
           <dt><kbd>F8</kbd> / <kbd>Shift</kbd><kbd>F8</kbd></dt><dd>次 / 前の色付き行</dd>
+          <dt><kbd>F9</kbd> / <kbd>Shift</kbd><kbd>F9</kbd></dt><dd>次 / 前のエラー（エラーがなければ警告）</dd>
           <dt><kbd>Alt</kbd><kbd>↓</kbd> / <kbd>Alt</kbd><kbd>↑</kbd></dt><dd>次 / 前の、間隔がしきい値以上の行</dd>
           <dt>上部の ⏱ ボタン</dt><dd>間隔ランキング（大きい順）</dd>
           <dt><kbd>Ctrl</kbd><kbd>Home</kbd> / <kbd>End</kbd></dt><dd>ログの先頭 / 末尾へ</dd></dl></section>
@@ -766,7 +786,7 @@
       <strong>ログを開きましょう</strong>
       <p>ファイルをここにドロップするか、「開く」から選んでください。複数のファイルを開いてマージもできます。</p>
       <button class="btn primary wide" id="btnOpenEmpty" type="button">ファイルを開く</button>
-      <div class="keys"><span>「フィルタ」 優先度で絞り込み</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>Alt</kbd>+<kbd>↓</kbd> 次の間隔の大きい所</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
+      <div class="keys"><span>「フィルタ」 優先度で絞り込み</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> 検索</span><span><kbd>Ctrl</kbd>+<kbd>G</kbd> 行へ移動</span><span><kbd>F8</kbd> 次の色付き行</span><span><kbd>F9</kbd> 次のエラー</span><span><kbd>Alt</kbd>+<kbd>↓</kbd> 次の間隔の大きい所</span><span><kbd>F5</kbd> 再読み込み</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 集中モード</span><span>ダブルクリック 経過時間の基準</span></div>
     </div>
   </main>
   <div class="peek-zone" id="peekZone"></div>
@@ -1204,6 +1224,22 @@ function findKeywordMatches(lines, srcs, rules) {
 }
 
 // 文書の解析（Python: _analyze_tab）
+// ================= エラー・警告の検出（既定のルール） =================
+// 英単語は単語単位（NOERROR などには一致しない）。〜Exception / 〜Error の例外名も拾う
+const ERR_RE = /(?<![A-Za-z0-9_])(?:ERROR|FATAL|CRITICAL|SEVERE|PANIC|EMERG(?:ENCY)?|Traceback)(?![A-Za-z0-9_])|失敗|異常|エラー/i;
+const ERR_NAME_RE = /(?:Exception|Error)(?![A-Za-z0-9_])/;   // ValueError・NullPointerException など（大文字小文字を区別）
+const WARN_RE = /(?<![A-Za-z0-9_])(?:WARN|WARNING|timeout|timed out|retry|retrying)(?![A-Za-z0-9_])|警告/i;
+const ERR_NONE = 0, ERR_WARN = 1, ERR_ERR = 2;
+function detectErrors(lines, orig) {
+  const n = lines.length, err = new Uint8Array(n);
+  let nErr = 0, nWarn = 0;
+  for (let i = 0; i < n; i++) {
+    if (orig[i] === 0) continue;   // 仮想行は対象外
+    if (ERR_RE.test(lines[i]) || ERR_NAME_RE.test(lines[i])) { err[i] = ERR_ERR; nErr++; }
+    else if (WARN_RE.test(lines[i])) { err[i] = ERR_WARN; nWarn++; }
+  }
+  return { err, nErr, nWarn };
+}
 function analyze(doc) {
   let text = doc.procLines.join("\n");
   if (state.config.replace_patterns.length) text = applyReplacements(text);
@@ -1235,6 +1271,8 @@ function analyze(doc) {
   const mergedNo = new Int32Array(n);
   let realNo = 0;
   for (let i = 0; i < n; i++) if (orig[i] > 0) mergedNo[i] = ++realNo;
+  const ed = detectErrors(lines, orig);
+  Object.assign(doc, { err: ed.err, nErr: ed.nErr, nWarn: ed.nWarn });
   Object.assign(doc, { lines, srcs, orig, ts, isVsync, status, colors, comments, prio, level: km.level, rule: km.rule, isStart: km.isStart, counts: km.counts, maxLen, mergedNo });
 }
 
@@ -1609,7 +1647,7 @@ function render() {
         default: return "";
       }
     };
-    const cls = "row" + (i === doc.sel ? " sel" : "") + (rg && p >= rg.lo && p <= rg.hi ? " insel" : "") + (i === doc.base ? " base" : "") + (gapLevel(doc.gap[p]) === 3 ? " gapx" : "") + (virt ? " virt" : "") + (doc.isMerged ? " m" : "");
+    const cls = "row" + (i === doc.sel ? " sel" : "") + (rg && p >= rg.lo && p <= rg.hi ? " insel" : "") + (i === doc.base ? " base" : "") + (gapLevel(doc.gap[p]) === 3 ? " gapx" : "") + (doc.err[i] === ERR_ERR ? " err" : doc.err[i] === ERR_WARN ? " warn" : "") + (virt ? " virt" : "") + (doc.isMerged ? " m" : "");
     const logCell = (doc.colors[i] !== WHITE
       ? `<div class="cell log c" style="width:${layout.logW}px;--c:${escapeHtml(doc.colors[i])}">`
       : `<div class="cell log" style="width:${layout.logW}px">`) + `<span>${highlight(doc.lines[i], sre, i === curIdx)}</span></div>`;
@@ -1624,7 +1662,8 @@ function render() {
 const ov = $("ovmap"), ovCtx = ov.getContext("2d");
 const ovBase = document.createElement("canvas"), ovBaseCtx = ovBase.getContext("2d");
 let ovDirty = true;
-// 薄いルール色を地図上で見えるように濃くする
+// 薄いルール色を地図上で見えるように濃くする（色名や #rgb を #rrggbb に直すのにキャンバスを使う）
+const colorCtx = document.createElement("canvas").getContext("2d");
 const shadeCache = new Map();
 function ovShade(color) {
   let v = shadeCache.get(color);
@@ -1672,6 +1711,21 @@ function drawOverviewBase(doc, w, h, dpr) {
   }
   const mark = Math.max(2 * dpr, Math.ceil(h / n));
   const pad = Math.round(3 * dpr);
+  // エラー・警告（左端の細い帯。ほかの印とは別の列に描くので重ならない）
+  const eRank = new Uint8Array(h);
+  for (let p = 0; p < n; p++) {
+    const e = doc.err[doc.view[p]];
+    if (!e) continue;
+    const y = Math.min(h - 1, Math.floor(p / n * h));
+    if (e > eRank[y]) eRank[y] = e;
+  }
+  const red = getComputedStyle(document.documentElement).getPropertyValue("--red").trim() || "#ff3b30";
+  const eW = Math.max(2, Math.round(3 * dpr));
+  for (let y = 0; y < h; y++) {
+    if (!eRank[y]) continue;
+    ovBaseCtx.fillStyle = eRank[y] === ERR_ERR ? red : "#ff9f0a";
+    ovBaseCtx.fillRect(0, y, eW, mark);
+  }
   for (let y = 0; y < h; y++) {
     if (!rank[y]) continue;
     ovBaseCtx.fillStyle = color[y];
@@ -1758,7 +1812,7 @@ titlebar.addEventListener("focusout", () => setTimeout(unpeek, 0));
 // 選択行（なければ先頭の表示行）の位置を保ったまま表示行を作り直す
 function refreshView({ keep = true } = {}) {
   const doc = cur();
-  if (!doc) { layout(); updateStatus(); if (isGapPanelOpen()) renderGapPanel(); return; }
+  if (!doc) { layout(); updateStatus(); updateErrPill(); if (isGapPanelOpen()) renderGapPanel(); return; }
   let anchor = -1, offset = 0;
   if (keep && doc.view.length) {
     const topPos = Math.floor(scroller.scrollTop / rowH);
@@ -1774,6 +1828,7 @@ function refreshView({ keep = true } = {}) {
   if (anchor >= 0) scroller.scrollTop = lowerBound(doc.view, anchor) * rowH - offset;
   render();
   updateStatus();
+  updateErrPill();
   if (isGapPanelOpen()) renderGapPanel();
 }
 function scrollToPos(pos) {
@@ -1836,6 +1891,36 @@ function nextColored(dir, ruleIdx = null) {
   }
   setStatus("これ以上ありません");
 }
+
+// ================= エラーへ移動 =================
+// エラーがあればエラーだけ、なければ警告を順に移動する
+function nextError(dir) {
+  const doc = cur();
+  if (!doc || !doc.view.length) return;
+  if (!doc.nErr && !doc.nWarn) { setStatus("エラー・警告は見つかっていません"); return; }
+  const want = doc.nErr ? ERR_ERR : ERR_WARN, kind = want === ERR_ERR ? "エラー" : "警告";
+  let p = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : (dir > 0 ? -1 : doc.view.length);
+  for (p += dir; p >= 0 && p < doc.view.length; p += dir) {
+    if (doc.err[doc.view[p]] === want) {
+      setSel(doc, doc.view[p]); scrollToPos(p);
+      let k = 0, vis = 0;
+      for (let q = 0; q < doc.view.length; q++) if (doc.err[doc.view[q]] === want) { vis++; if (q <= p) k++; }
+      const total = want === ERR_ERR ? doc.nErr : doc.nWarn;
+      setStatus(`${kind} ${k.toLocaleString()} / ${vis.toLocaleString()} 件目${vis < total ? `（${(total - vis).toLocaleString()} 件はフィルタ・絞り込みで非表示）` : ""}`);
+      return;
+    }
+  }
+  let vis = 0;
+  for (let q = 0; q < doc.view.length; q++) if (doc.err[doc.view[q]] === want) vis++;
+  setStatus(vis ? `これより${dir > 0 ? "後" : "前"}に${kind}はありません` : `${kind}はすべてフィルタ・絞り込みで非表示です`);
+}
+function updateErrPill() {
+  const doc = cur(), b = $("btnErr");
+  b.classList.toggle("hidden", !doc);
+  if (!doc) return;
+  b.innerHTML = `<span class="e${doc.nErr ? " on" : ""}">エラー ${doc.nErr.toLocaleString()}</span><span class="w${doc.nWarn ? " on" : ""}">警告 ${doc.nWarn.toLocaleString()}</span>`;
+}
+$("btnErr").onclick = (e) => { nextError(e.shiftKey ? -1 : 1); scroller.focus({ preventScroll: true }); };
 
 // ================= 間隔（時間差）の大きい所へ移動 =================
 function nextGap(dir) {
@@ -1912,10 +1997,15 @@ $("gapList").addEventListener("click", (e) => {
 });
 
 // ================= タブ =================
+function errBadge(d) {
+  if (d.nErr) return `<span class="tab-err" title="エラー ${d.nErr.toLocaleString()} 件${d.nWarn ? `・警告 ${d.nWarn.toLocaleString()} 件` : ""}">${d.nErr > 999 ? "999+" : d.nErr}</span>`;
+  if (d.nWarn) return `<span class="tab-err warn" title="警告 ${d.nWarn.toLocaleString()} 件">${d.nWarn > 999 ? "999+" : d.nWarn}</span>`;
+  return "";
+}
 function renderTabs() {
   $("tabs").innerHTML = state.docs.map((d, i) =>
     `<div class="tab${i === state.active ? " active" : ""}${d.isMerged ? " merged" : ""}" data-t="${i}" draggable="true">` +
-    `${d.isMerged ? `<span class="tab-ic">${ICON.merge}</span>` : ""}<span class="tab-name">${escapeHtml(d.name)}</span><button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
+    `${d.isMerged ? `<span class="tab-ic">${ICON.merge}</span>` : ""}<span class="tab-name">${escapeHtml(d.name)}</span>${errBadge(d)}<button class="x" data-close="${i}" title="閉じる (Ctrl+W)">×</button></div>`
   ).join("");
   $("tabs").querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   // マージは 2 つ以上のファイルを開いているときだけ使える
@@ -2050,7 +2140,8 @@ function pushDoc(doc, t0) {
   renderTabs();
   scroller.scrollTop = 0; scroller.scrollLeft = 0;
   refreshView({ keep: false });
-  setStatus(`${doc.name}: ${doc.lines.length.toLocaleString()} 行を ${Math.round(performance.now() - t0)} ms で表示`);
+  setStatus(`${doc.name}: ${doc.lines.length.toLocaleString()} 行を ${Math.round(performance.now() - t0)} ms で表示` +
+    (doc.nErr || doc.nWarn ? `　·　エラー ${doc.nErr.toLocaleString()} 件・警告 ${doc.nWarn.toLocaleString()} 件（F9 で移動）` : ""));
   return doc;
 }
 function addDoc(name, text, source = null) { const t0 = performance.now(); return pushDoc(buildFileDoc(name, text, source), t0); }
@@ -2079,9 +2170,9 @@ function replaceDoc(oldDoc, nd) {
   nd.base = findLine(nd, lineKey(oldDoc, oldDoc.base));
   nd.scrollTop = oldDoc.scrollTop; nd.scrollLeft = oldDoc.scrollLeft;
   state.docs[idx] = nd;
+  renderTabs();   // 再読み込みでエラー件数のバッジが変わる
   if (isActive) {
     const left = scroller.scrollLeft;
-    renderTabs();
     refreshView({ keep: false });
     const ti = findLine(nd, top);
     if (ti >= 0) scroller.scrollTop = lowerBound(nd.view, ti) * rowH - offset;
@@ -2946,6 +3037,7 @@ function openRowMenu(x, y, doc, i) {
     picked ? { label: `「${short}」を検索`, kbd: "Ctrl+F", act: () => { $("search").value = escRe(picked); runSearch(true); render(); } } : null,
     "-",
     { label: "次の色付き行へ", kbd: "F8", act: () => nextColored(1) },
+    { label: "次のエラーへ", kbd: "F9", act: () => nextError(1) },
     { label: "次の間隔の大きい所へ", kbd: "Alt+↓", act: () => nextGap(1) },
     { label: "間隔ランキングを表示", act: () => setGapPanel(true) },
     { label: "行番号へ移動…", kbd: "Ctrl+G", act: gotoLinePrompt },
@@ -3020,6 +3112,7 @@ document.addEventListener("keydown", (e) => {
   if (ctrl && key === "w" && doc) { e.preventDefault(); closeDoc(state.active); return; }
   if (e.key === "F3") { e.preventDefault(); goHit(e.shiftKey ? -1 : 1); return; }
   if (e.key === "F8") { e.preventDefault(); nextColored(e.shiftKey ? -1 : 1); return; }
+  if (e.key === "F9") { e.preventDefault(); nextError(e.shiftKey ? -1 : 1); return; }
   if (e.target.tagName === "INPUT" || !doc || !doc.view.length) return;
   if (e.altKey && !ctrl && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); nextGap(e.key === "ArrowDown" ? 1 : -1); return; }
   const pos = doc.sel >= 0 ? lowerBound(doc.view, doc.sel) : -1;
