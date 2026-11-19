@@ -413,7 +413,22 @@ class LogTab(tk.Frame):
         
         # 見出し: 1 つのファイルならファイル名、マージ結果なら「ログ」
         header_text = self.source_file_names[0] if len(self.source_file_names) == 1 else "ログ"
-        section_header(left_frame, header_text)
+        # 見出しの行: 「行」「経過(秒)」「間隔(ms)」とログの見出しを、下の列と同じ幅で並べる
+        head_row = tk.Frame(left_frame, bg=UIColors.HEADER_BG)
+        head_row.pack(side=tk.TOP, fill=tk.X)
+        tk.Frame(left_frame, bg=UIColors.SEP, height=1).pack(side=tk.TOP, fill=tk.X)
+        head_font = (UIColors.UI_FONT, 9, "bold")
+
+        def head_cell(col, text, anchor, padx=(0, 8)):
+            lbl = tk.Label(head_row, text=text, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=head_font, anchor=anchor, pady=7)
+            lbl.grid(row=0, column=col, sticky="ew", padx=padx)
+            return lbl
+        head_cell(0, "行", "e", padx=(0, 4))
+        self._head_dt = head_cell(1, "経過(秒)", "e") if not self.is_merged else None
+        head_cell(2, "間隔(ms)", "e", padx=(0, 6))
+        head_cell(3, header_text, "w", padx=(10, 0))
+        head_row.grid_columnconfigure(3, weight=1)
+        self._head_row = head_row
         
         self.hsb_log = ttk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
         self.hsb_log.pack(side=tk.BOTTOM, fill=tk.X)
@@ -444,6 +459,14 @@ class LogTab(tk.Frame):
 
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
+
+        # 見出しの幅を、下の列の実際の幅に合わせる（列の幅が変わったときも追従する）
+        def fit_head(col, widget):
+            widget.bind("<Configure>", lambda e, c=col: head_row.grid_columnconfigure(c, minsize=e.width), add="+")
+        fit_head(0, self.linenumbers)
+        if not self.is_merged:
+            fit_head(1, self.timediff_text)
+        fit_head(2, self.gap_text)
         
         # ファイル列: どのファイルの行か（色の丸＋名前）。2 つ以上のファイルをマージしたときだけ出す
         self.src_text = None
