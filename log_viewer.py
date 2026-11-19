@@ -23,6 +23,105 @@ VSYNC_REGEX = r"V_START|V-Sync|VIRTUAL V-SYNC|\[VIRTUAL V-SYNC\]"
 VSYNC_MARKER = "--- [VIRTUAL V-SYNC] ---"
 VIRTUAL_SRC_NAME = "(Virtual)"
 
+# --- エラー検出（HTML 版と同じ既定値。config.json の error_rules / error_colors） ---
+DEFAULT_ERROR_COLORS = {"error": "#ff3b30", "warn": "#ff9f0a"}
+DEFAULT_ERROR_RULES = (
+    [{"keyword": k, "type": "error", "word": True, "case": False, "enabled": True}
+     for k in ["ERROR", "FATAL", "CRITICAL", "SEVERE", "PANIC", "Traceback"]]
+    + [{"keyword": r"\w*(Exception|Error)\b", "type": "error", "word": False, "case": True, "enabled": True}]
+    + [{"keyword": k, "type": "error", "word": False, "case": False, "enabled": True} for k in ["失敗", "異常", "エラー"]]
+    + [{"keyword": k, "type": "warn", "word": True, "case": False, "enabled": True}
+       for k in ["WARN", "WARNING", "timeout", "timed out", "retry", "retrying"]]
+    + [{"keyword": "警告", "type": "warn", "word": False, "case": False, "enabled": True}]
+)
+ERR_NONE, ERR_WARN, ERR_ERR = 0, 1, 2
+DEFAULT_GAP_MS = 100.0
+# 時刻: 既定のパターンは秒数のみ。表示では hh:mm:ss(.fff) も読む（HTML 版と同じ）
+PY_DEFAULT_TS = r"^\[?\s*(\d+(?:\.\d+)?)\]?"
+EXT_DEFAULT_TS = r"^\[?\s*(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?|\d+(?:\.\d+)?)\]?"
+GAP_TOP = 20
+# 間隔の色（しきい値の 1/10 以上: 黄、1/3 以上: 橙、しきい値以上: 赤）
+GAP_COLORS = {1: "#fff4c2", 2: "#ffd9a8", 3: "#ffc9c4"}
+GAP_RED = "#d70015"
+
+
+def clamp_level(v) -> int:
+    """優先度は 1〜3（3 が一番強い）。それ以外は 1。"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return 1
+    return n if n in (2, 3) else 1
+
+
+def _word_wrap(p: str) -> str:
+    """英単語の途中では一致させない（ERROR は NOERROR / ERRORS に一致しない）"""
+    return rf"(?<![A-Za-z0-9_])(?:{p})(?![A-Za-z0-9_])"
+
+
+def compile_error_rules(rules) -> Tuple[Dict[str, List[Any]], List[str]]:
+    """種類・大小区別ごとに 1 つの正規表現にまとめる。戻り値: ({"error": [re...], "warn": [re...]}, エラー文)"""
+    parts = {"error": {"i": [], "c": []}, "warn": {"i": [], "c": []}}
+    errors = []
+    for k, r in enumerate(rules or []):
+        kw = str(r.get("keyword", "") or "").strip()
+        if r.get("enabled", True) is False or not kw:
+            continue
+        typ = "warn" if r.get("type") == "warn" else "error"
+        src = _word_wrap(kw) if r.get("word") else kw
+        try:
+            re.compile(src)
+        except re.error as e:
+            errors.append(f"エラー検出{k + 1}「{kw}」: {e}")
+            continue
+        parts[typ]["c" if r.get("case") else "i"].append(f"(?:{src})")
+    groups = {"error": [], "warn": []}
+    for typ in ("error", "warn"):
+        if parts[typ]["i"]:
+            groups[typ].append(re.compile("|".join(parts[typ]["i"]), re.I))
+        if parts[typ]["c"]:
+            groups[typ].append(re.compile("|".join(parts[typ]["c"])))
+    return groups, errors
+
+
+def detect_errors(lines: List[str], srcs: List[str], groups) -> List[int]:
+    """行ごとの種類（0: なし、1: 警告、2: エラー）。仮想行は対象外"""
+    out = [ERR_NONE] * len(lines)
+    for i, line in enumerate(lines):
+        if i < len(srcs) and srcs[i] == VIRTUAL_SRC_NAME:
+            continue
+        if any(rx.search(line) for rx in groups["error"]):
+            out[i] = ERR_ERR
+        elif any(rx.search(line) for rx in groups["warn"]):
+            out[i] = ERR_WARN
+    return out
+
+
+def error_message_key(line: str, re_ts) -> str:
+    """同じ内容のエラーをまとめるための文: 行頭の時刻を除き、16進数・数字を # にする"""
+    m = re_ts.match(line) if re_ts else None
+    t = line[m.end():] if m else line
+    t = re.sub(r"0x[0-9a-f]+", "#", t, flags=re.I)
+    t = re.sub(r"\b[0-9a-f]{8,}\b", "#", t, flags=re.I)
+    t = re.sub(r"\d+(?:\.\d+)?", "#", t)
+    return re.sub(r"\s+", " ", t).strip()[:300]
+
+
+def gap_level(g, threshold) -> int:
+    if not threshold or threshold <= 0 or g is None or g < threshold / 10:
+        return 0
+    return 3 if g >= threshold else 2 if g >= threshold / 3 else 1
+
+
+def darker(color: str, k: float = 0.75) -> str:
+    """#rrggbb を少し暗くする（行番号の文字色など）"""
+    m = re.fullmatch(r"#([0-9a-fA-F]{6})", color or "")
+    if not m:
+        return color
+    v = int(m.group(1), 16)
+    r, g, b = (v >> 16) & 255, (v >> 8) & 255, v & 255
+    return f"#{int(r * k):02x}{int(g * k):02x}{int(b * k):02x}"
+
 class UIColors:
     BG = "#efe6d5"          # 全体の背景（ライムストーン）
     PANEL_BG = "#ffffff"    # パネルやキャンバスの背景（クリーンな白）
@@ -99,20 +198,27 @@ def _find_keyword_matches(
     for start, end in _group_log_entries(lines, sources):
         entry_text = "\n".join(lines[start:end])
         entry_source = sources[start] if start < len(sources) else ""
+        best_idx, best_level = -1, 0
         for rule_idx, rule in enumerate(rules):
             if not rule["file_pat_re"].search(entry_source):
                 continue
             if not rule["regex"].search(entry_text):
                 continue
-
+            # 一致したフィルタのうち優先度が一番強いもの（同じ強さなら上にあるもの）を使う
+            level = rule.get("level", 1)
+            if level > best_level:
+                best_idx, best_level = rule_idx, level
+                if level >= 3:
+                    break
+        if best_idx >= 0:
+            rule = rules[best_idx]
             # Select the complete entry. +行 can extend a single-line entry
             # farther and remains compatible with existing configurations.
             color_end = min(max(end, start + rule["extra"] + 1), len(lines))
             for idx in range(start, color_end):
-                matches.setdefault(idx, rule_idx)
-            if matches.get(start) == rule_idx:
-                match_starts[start] = rule_idx
-            break
+                matches.setdefault(idx, best_idx)
+            if matches.get(start) == best_idx:
+                match_starts[start] = best_idx
     return matches, match_starts
 
 class Tooltip:
@@ -186,25 +292,44 @@ DEFAULT_CONFIG = {
         "time_pattern": r"^\[?\s*(\d+(?:\.\d+)?)\]?",
         "manual_ms": 16.666,
         "start_time_val": "0.0"
-    }
+    },
+    "error_rules": [dict(r) for r in DEFAULT_ERROR_RULES],
+    "error_colors": dict(DEFAULT_ERROR_COLORS),
 }
 
 class LineNumberCanvas(tk.Canvas):
-    def __init__(self, master, text_widget, **kwargs):
+    def __init__(self, master, text_widget, owner=None, **kwargs):
         super().__init__(master, **kwargs)
         self.text_widget = text_widget
+        self.owner = owner
         for ev in['<KeyRelease>', '<MouseWheel>', '<Configure>', '<<Modified>>', '<Button-1>']:
-            self.text_widget.bind(ev, self.redraw)
+            self.text_widget.bind(ev, self.redraw, add="+")
 
     def redraw(self, *args):
         self.delete("all")
+        tab = self.owner
+        nums = getattr(tab, "disp_numbers", None)
+        errs = getattr(tab, "disp_err", None)
+        gaps = getattr(tab, "disp_gap", None)
+        app = getattr(tab, "app", None)
+        width = int(self.cget("width"))
         i = self.text_widget.index("@0,0")
         while True:
             dline = self.text_widget.dlineinfo(i)
             if dline is None: break
-            y = dline[1]
-            linenum = str(i).split(".")[0]
-            self.create_text(40, y, anchor="ne", text=linenum, fill="#888888", font=("Consolas", 10))
+            y, h = dline[1], dline[3]
+            n = int(str(i).split(".")[0]) - 1
+            label = nums[n] if nums is not None and n < len(nums) else str(n + 1)
+            e = errs[n] if errs is not None and n < len(errs) else ERR_NONE
+            color, font = "#888888", ("Consolas", 10)
+            if e and app is not None:
+                c = app.error_colors["error" if e == ERR_ERR else "warn"]
+                self.create_oval(4, y + h / 2 - 3.5, 11, y + h / 2 + 3.5, fill=c, outline="")
+                color, font = darker(c, 0.8), ("Consolas", 10, "bold")
+            self.create_text(width - 4, y, anchor="ne", text=label, fill=color, font=font)
+            # しきい値以上の間隔があいた行の上に赤い線
+            if gaps is not None and app is not None and n < len(gaps) and gap_level(gaps[n], app.gap_ms) == 3:
+                self.create_line(0, y, width, y, fill=GAP_RED, width=2)
             i = self.text_widget.index(f"{i}+1line")
 
 class LogTab(tk.Frame):
@@ -247,13 +372,25 @@ class LogTab(tk.Frame):
         self.text.tag_configure("sel", background="#cce8ff", foreground="black")
         self.text.tag_config("found", background=UIColors.ACCENT_HOVER, foreground="white")
         
-        self.linenumbers = LineNumberCanvas(left_frame, self.text, width=45, bg=UIColors.BG, highlightthickness=0)
+        self.linenumbers = LineNumberCanvas(left_frame, self.text, owner=self, width=58, bg=UIColors.BG, highlightthickness=0)
         self.linenumbers.pack(side=tk.LEFT, fill=tk.Y)
         
         self.timediff_text = tk.Text(left_frame, width=12, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, font=("Consolas", 10))
         self.timediff_text.tag_configure("sel", background="#cce8ff", foreground="black")
         if not self.is_merged:
             self.timediff_text.pack(side=tk.LEFT, fill=tk.Y)
+
+        # 前の行（表示中）からの時間差 [ms]
+        self.gap_text = tk.Text(left_frame, width=11, wrap=tk.NONE, bg="#faf9f6", fg="#999999", relief=tk.FLAT, bd=0, padx=6, font=("Consolas", 10))
+        self.gap_text.tag_configure("sel", background="#cce8ff", foreground="black")
+        self.gap_text.tag_configure("right", justify=tk.RIGHT)
+        for lv, col in GAP_COLORS.items():
+            self.gap_text.tag_configure(f"g{lv}", background=col, foreground="#4a4f54")
+        self.gap_text.tag_configure("g3", foreground=GAP_RED, font=("Consolas", 10, "bold"))
+        self.gap_text.pack(side=tk.LEFT, fill=tk.Y)
+        self._gap_tip = Tooltip()
+        self.gap_text.bind("<Enter>", lambda e: self._gap_tip.show(e, "間隔(ms): 表示中の前の行からの時間差"))
+        self.gap_text.bind("<Leave>", lambda e: self._gap_tip.hide())
 
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.hsb_log.config(command=self.text.xview)
@@ -288,7 +425,7 @@ class LogTab(tk.Frame):
             hsb.config(command=st_text.xview)
             self.status_texts[fname] = st_text
             
-        self.all_texts =[self.text, self.timediff_text, self.comment_text] + list(self.status_texts.values())
+        self.all_texts =[self.text, self.timediff_text, self.gap_text, self.comment_text] + list(self.status_texts.values())
         
         # カーソル行のハイライト設定
         for w in self.all_texts:
@@ -328,6 +465,8 @@ class LogTab(tk.Frame):
             
         for t in self.all_texts: 
             t.bind('<MouseWheel>', on_mw)
+            t.bind('<Alt-Down>', lambda e: (self.app.next_gap(1), "break")[1])
+            t.bind('<Alt-Up>', lambda e: (self.app.next_gap(-1), "break")[1])
 
     def update_cursor_line(self, event=None):
         if not hasattr(self, 'all_texts'): return
@@ -362,7 +501,13 @@ class LogViewerApp:
         self.replace_patterns_config =[]
         self.vsync_config = DEFAULT_CONFIG["vsync_auto_insert"].copy()
         
-        self.use_keyword_filter = False
+        self.min_level = 0               # 0: フィルタなし、1〜3: その優先度以上のフィルタに一致した行だけ表示
+        self.error_rules_config = [dict(r) for r in DEFAULT_ERROR_RULES]
+        self.error_colors = dict(DEFAULT_ERROR_COLORS)
+        self.gap_ms = DEFAULT_GAP_MS     # この時間(ms)以上あいた行を強調（0 で強調しない）
+        self.extra_config: Dict[str, Any] = {}   # このアプリが使わない項目も、保存のときに残す
+        self.gap_win = None
+        self.err_win = None
         self.show_vsync_lines = False 
         self.advance_mode = False
         self.last_merge_ts_len = 19
@@ -382,7 +527,9 @@ class LogViewerApp:
         self.root.bind('<Control-f>', lambda e: self.open_find_dialog())
         self.root.bind('<F3>', lambda e: self.find_next())
         self.root.bind('<Shift-F3>', lambda e: self.find_prev())
-        
+        self.root.bind('<F9>', lambda e: self.next_error(1))
+        self.root.bind('<Shift-F9>', lambda e: self.next_error(-1))
+
         if os.path.exists(self.config_path):
             try:
                 self.load_config(self.config_path)
@@ -396,7 +543,8 @@ class LogViewerApp:
                 pass
             
         self.toggle_vsync_display(force_update=True)
-        self.toggle_filter(force_update=True)
+        self._sync_filter_combo()
+        self._sync_gap_input()
 
     def _build_ui(self):
         menubar = tk.Menu(self.root)
@@ -420,25 +568,34 @@ class LogViewerApp:
 
         cmenu = tk.Menu(menubar, tearoff=0)
         self.cmenu = cmenu
-        cmenu.add_command(label="設定読み込み...", command=self.load_config_dialog)
-        cmenu.add_command(label="設定保存...", command=self.save_config_dialog)
-        cmenu.add_separator()
-        cmenu.add_command(label="フィルタ設定の編集 (行単位)...", command=self.edit_keywords_dialog)
-        # 「区間設定の編集」と「V周期設定」は Advanced ON時のみ追加
-        cmenu.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog)
-        cmenu.add_separator()
-        # Advancedモード
-        cmenu.add_command(label="Advancedモード", command=self.toggle_advance_mode)
+        self._build_config_menu()
         menubar.add_cascade(label="設定", menu=cmenu)
+
+        vmenu = tk.Menu(menubar, tearoff=0)
+        vmenu.add_command(label="次のエラー", command=lambda: self.next_error(1), accelerator="F9")
+        vmenu.add_command(label="前のエラー", command=lambda: self.next_error(-1), accelerator="Shift+F9")
+        vmenu.add_command(label="エラー一覧...", command=self.open_error_list)
+        vmenu.add_separator()
+        vmenu.add_command(label="次の間隔の大きい所", command=lambda: self.next_gap(1), accelerator="Alt+↓")
+        vmenu.add_command(label="前の間隔の大きい所", command=lambda: self.next_gap(-1), accelerator="Alt+↑")
+        vmenu.add_command(label="間隔ランキング...", command=self.open_gap_ranking)
+        menubar.add_cascade(label="移動", menu=vmenu)
         
         self.root.config(menu=menubar)
         
         toolbar = tk.Frame(self.root, bg=UIColors.BG)
         toolbar.pack(fill=tk.X, padx=5, pady=8)
         
-        self.btn_kw_filter = tk.Button(toolbar, text="フィルタ: OFF", width=14, command=self.toggle_filter, bg=UIColors.ACCENT, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ACCENT_HOVER, activeforeground="white", cursor="hand2")
-        self.btn_kw_filter.pack(side=tk.LEFT, padx=5)
-        
+        # フィルタ: なし / 優先度 1 以上 / 2 以上 / 3 以上
+        self.FILTER_LABELS = ["フィルタなし", "優先度 1以上", "優先度 2以上", "優先度 3以上"]
+        self.filter_var = tk.StringVar(value=self.FILTER_LABELS[0])
+        self.cmb_filter = ttk.Combobox(toolbar, textvariable=self.filter_var, values=self.FILTER_LABELS, state="readonly", width=13, font=("Yu Gothic UI", 9))
+        self.cmb_filter.pack(side=tk.LEFT, padx=5)
+        self.cmb_filter.bind("<<ComboboxSelected>>", lambda e: self.set_filter_level(self.FILTER_LABELS.index(self.filter_var.get())))
+        self._filter_tip = Tooltip()
+        self.cmb_filter.bind("<Enter>", lambda e: self._filter_tip.show(e, "選んだ優先度以上のフィルタに一致した行だけを表示（3 が一番強い）"))
+        self.cmb_filter.bind("<Leave>", lambda e: self._filter_tip.hide())
+
         tk.Button(toolbar, text="ログをマージ", command=self.merge_logs_action, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.BORDER, cursor="hand2", padx=10).pack(side=tk.LEFT, padx=10)
         
         self.btn_vsync_toggle = tk.Button(toolbar, text="仮想V周期表示: ON", width=18, command=self.toggle_vsync_display, bg=UIColors.ROSE, fg="white", relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ROSE_HOVER, activeforeground="white", cursor="hand2")
@@ -451,6 +608,33 @@ class LogViewerApp:
         self.btn_advance = tk.Button(toolbar, text="Advanced: OFF", width=14, command=self.toggle_advance_mode, bg=UIColors.BORDER, fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), activebackground=UIColors.ACCENT_HOVER, cursor="hand2")
         self.btn_advance.pack(side=tk.RIGHT, padx=5)
 
+        # エラー・警告の件数（クリックでエラー一覧）
+        self.err_box = tk.Frame(toolbar, bg="#ffffff", highlightbackground=UIColors.BORDER, highlightthickness=1, cursor="hand2")
+        self.err_box.pack(side=tk.RIGHT, padx=8)
+        self.lbl_err = tk.Label(self.err_box, text="● エラー 0", bg="#ffffff", fg="#999999", font=("Yu Gothic UI", 9, "bold"), padx=6, pady=3, cursor="hand2")
+        self.lbl_warn = tk.Label(self.err_box, text="● 警告 0", bg="#ffffff", fg="#999999", font=("Yu Gothic UI", 9, "bold"), padx=6, pady=3, cursor="hand2")
+        self.lbl_err.pack(side=tk.LEFT)
+        self.lbl_warn.pack(side=tk.LEFT)
+        for w in (self.err_box, self.lbl_err, self.lbl_warn):
+            w.bind("<Button-1>", lambda e: self.open_error_list())
+        self._err_tip = Tooltip()
+        self.err_box.bind("<Enter>", lambda e: self._err_tip.show(e, "クリック: エラー一覧　F9 / Shift+F9: 次 / 前のエラー"))
+        self.err_box.bind("<Leave>", lambda e: self._err_tip.hide())
+
+        # 間隔のしきい値（ms）と間隔ランキング
+        gap_box = tk.Frame(toolbar, bg=UIColors.BG)
+        gap_box.pack(side=tk.RIGHT, padx=8)
+        tk.Button(gap_box, text="⏱ ランキング", command=self.open_gap_ranking, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, font=("Yu Gothic UI", 9), activebackground=UIColors.BORDER, cursor="hand2", padx=8).pack(side=tk.LEFT, padx=(0, 6))
+        self.gap_var = tk.StringVar(value="")
+        self.ent_gap = tk.Entry(gap_box, textvariable=self.gap_var, width=7, justify=tk.RIGHT, relief=tk.SOLID, bd=1, highlightthickness=0, font=("Consolas", 10))
+        self.ent_gap.pack(side=tk.LEFT)
+        tk.Label(gap_box, text="ms以上を強調", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(side=tk.LEFT, padx=(4, 0))
+        self.ent_gap.bind("<Return>", lambda e: self._apply_gap_input())
+        self.ent_gap.bind("<FocusOut>", lambda e: self._apply_gap_input())
+        self._gap_input_tip = Tooltip()
+        self.ent_gap.bind("<Enter>", lambda e: self._gap_input_tip.show(e, "この時間以上あいた行を強調（空欄で強調しない）。Alt+↓ / Alt+↑ で次 / 前の該当行へ"))
+        self.ent_gap.bind("<Leave>", lambda e: self._gap_input_tip.hide())
+
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
@@ -462,6 +646,7 @@ class LogViewerApp:
         self.notebook.bind('<Button-1>', self._on_tab_press)
         self.notebook.bind('<ButtonRelease-1>', self._on_tab_release)
         
+        self.notebook.bind("<<NotebookTabChanged>>", lambda e: self._on_tab_changed())
         self.notebook_tooltip = Tooltip()
         self._dragged_tab_idx = None
         
@@ -471,6 +656,10 @@ class LogViewerApp:
         if HAS_DND:
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', lambda e:[self._open_file_path(f) for f in self.root.tk.splitlist(e.data)])
+
+    @property
+    def use_keyword_filter(self) -> bool:
+        return self.min_level > 0
 
     def get_current_tab(self) -> Optional[LogTab]:
         cid = self.notebook.select()
@@ -650,6 +839,7 @@ class LogViewerApp:
             tab.line_source_map = new_src_map
         else:
             tab = LogTab(self.notebook, self, path, content, source_files_list=[fname], source_file_paths={fname: path})
+        tab.base_title = fname
         self.notebook.add(tab, text=fname)
         self.notebook.select(tab)
         self.apply_display_update(tab)
@@ -743,6 +933,7 @@ class LogViewerApp:
             
         m_tab = LogTab(self.notebook, self, "Merged", "\n".join(final_lines), source_files_list=unique_srcs, source_file_paths=src_paths_map, is_merged=True)
         m_tab.line_source_map = final_src
+        m_tab.base_title = "マージ結果"
         self.notebook.add(m_tab, text="マージ結果")
         self.notebook.select(m_tab)
         self.apply_display_update(m_tab)
@@ -859,12 +1050,16 @@ class LogViewerApp:
         return res["value"]
     def save_config_dialog_silent(self, filepath=None):
         target_path = filepath if filepath else self.config_path
-        data = {
-            "keywords": self.keywords_config, 
-            "sections": self.sections_config, 
-            "replace_patterns": self.replace_patterns_config, 
-            "vsync_auto_insert": self.vsync_config
-        }
+        data = dict(self.extra_config)
+        data.update({
+            "keywords": self.keywords_config,
+            "sections": self.sections_config,
+            "replace_patterns": self.replace_patterns_config,
+            "vsync_auto_insert": self.vsync_config,
+            "error_rules": self.error_rules_config,
+            "error_colors": self.error_colors,
+            "gap_threshold_ms": self.gap_ms,
+        })
         try:
             with open(target_path, "w", encoding="utf-8") as f: 
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -903,6 +1098,18 @@ class LogViewerApp:
         except OSError:
             return ""
 
+    def _valid_color(self, c) -> bool:
+        if not isinstance(c, str) or not c.strip():
+            return False
+        try:
+            self.root.winfo_rgb(c.strip())
+            return True
+        except tk.TclError:
+            return False
+
+    def _safe_color(self, c, default="#ffffff") -> str:
+        return c.strip() if self._valid_color(c) else default
+
     def _compile_section_rules(self) -> List[dict]:
         section_rules = []
         for s in self.sections_config:
@@ -930,7 +1137,7 @@ class LogViewerApp:
                     "end_wait": s.get("end_wait", False),
                     "duration_ms": dur_ms,
                     "name": s["name"],
-                    "color": s.get("color", "#ffffff"),
+                    "color": self._safe_color(s.get("color", "#ffffff")),
                     "file_pat_re": re.compile(fp, re.I),
                     "is_vsync_end": is_vsync_end,
                 })
@@ -949,8 +1156,9 @@ class LogViewerApp:
                     "file_pat_re": re.compile(itm.get("file_pattern", ".*") or ".*", re.I),
                     "regex": re.compile(_normalize_user_pattern(itm["pattern"]), re.I | re.DOTALL),
                     "comment": itm.get("comment", ""),
-                    "color": itm.get("color", "#ffffff"),
+                    "color": self._safe_color(itm.get("color", "#ffffff")),
                     "extra": extra_lines,
+                    "level": clamp_level(itm.get("priority", 1)),
                 }
                 rules.append(rule)
             except Exception:
@@ -964,6 +1172,7 @@ class LogViewerApp:
                 "comment": "タイマー満了",
                 "color": "#ffe8d6",
                 "extra": 0,
+                "level": 1,
             })
         return rules
 
@@ -1179,17 +1388,21 @@ class LogViewerApp:
         return "\n".join(lines_final), src_map_final
 
     # --- Filter & Display ---
+    def set_filter_level(self, level: int):
+        self.min_level = max(0, min(3, int(level)))
+        self._sync_filter_combo()
+        t = self.get_current_tab()
+        if t: self.apply_display_update(t)
+
     def toggle_filter(self, force_update=False):
+        """以前の「フィルタ ON/OFF」: OFF なら 優先度 1 以上、ON なら フィルタなし"""
         if not force_update:
-            self.use_keyword_filter = not self.use_keyword_filter
-        if self.use_keyword_filter:
-            self.btn_kw_filter.config(text="フィルタ: ON", bg=UIColors.ROSE, activebackground=UIColors.ROSE_HOVER)
+            self.set_filter_level(0 if self.min_level else 1)
         else:
-            self.btn_kw_filter.config(text="フィルタ: OFF", bg=UIColors.ACCENT, activebackground=UIColors.ACCENT_HOVER)
-        
-        if not force_update:
-            t = self.get_current_tab()
-            if t: self.apply_display_update(t)
+            self._sync_filter_combo()
+
+    def _sync_filter_combo(self):
+        self.filter_var.set(self.FILTER_LABELS[self.min_level])
 
     def toggle_vsync_display(self, force_update=False):
         if not force_update:
@@ -1212,23 +1425,8 @@ class LogViewerApp:
         else:
             self.btn_advance.config(text="Advanced: OFF", bg=UIColors.BORDER, activebackground=UIColors.ACCENT_HOVER)
         
-        # メニュー項目を追加/削除
-        try:
-            if self.advance_mode:
-                # Advanced ON時：「区間設定の編集」と「V周期設定」を追加
-                self.cmenu.insert(4, "command", label="区間設定の編集 (開始-終了)...", command=self.edit_sections_dialog)
-                self.cmenu.insert(5, "separator")
-                self.cmenu.insert(7, "command", label="V周期(仮想)挿入の設定...", command=self.open_vsync_settings_dialog)
-                self.cmenu.insert(8, "separator")
-            else:
-                # Advanced OFF時：メニュー項目を削除
-                # 逆順で削除（インデックスがずれないようにするため）
-                self.cmenu.delete(8)  # separator
-                self.cmenu.delete(7)  # V周期設定
-                self.cmenu.delete(5)  # separator
-                self.cmenu.delete(4)  # 区間設定の編集
-        except:
-            pass
+        # メニュー項目を作り直す（区間設定・V周期設定は Advanced ON 時のみ）
+        self._build_config_menu()
         
         # V周期表示ボタンを表示/非表示
         if self.advance_mode:
@@ -1265,6 +1463,22 @@ class LogViewerApp:
         t = self.get_current_tab()
         if t: self.apply_display_update(t)
     
+    def _build_config_menu(self):
+        m = self.cmenu
+        m.delete(0, "end")
+        m.add_command(label="設定読み込み...", command=self.load_config_dialog)
+        m.add_command(label="設定保存...", command=self.save_config_dialog)
+        m.add_separator()
+        m.add_command(label="フィルタ設定の編集 (行単位)...", command=self.edit_keywords_dialog)
+        m.add_command(label="エラー検出の設定...", command=self.edit_error_rules_dialog)
+        if self.advance_mode:
+            m.add_command(label="区間設定の編集 (開始-終了)...", command=self.edit_sections_dialog)
+        m.add_command(label="説明パターンの編集...", command=self.edit_replace_patterns_dialog)
+        if self.advance_mode:
+            m.add_command(label="V周期(仮想)挿入の設定...", command=self.open_vsync_settings_dialog)
+        m.add_separator()
+        m.add_command(label=("✓ " if self.advance_mode else "") + "Advancedモード", command=self.toggle_advance_mode)
+
     def _update_vsync_info_label(self):
         start_time = self.vsync_config.get("start_time_val", "0.0")
         manual_ms = self.vsync_config.get("manual_ms", 16.666)
@@ -1275,28 +1489,27 @@ class LogViewerApp:
         if self.replace_patterns_config: data = self._apply_replacements(data)
         lines = data.splitlines()
         
-        line_attrs =[{"color": "#ffffff", "comment": "", "priority": 0} for _ in range(len(lines))]
+        line_attrs =[{"color": "#ffffff", "comment": "", "priority": 0, "level": 0} for _ in range(len(lines))]
         
         srcs = tab.line_source_map if tab.line_source_map else (tab.source_file_names * len(lines))
         if len(srcs) < len(lines): srcs.extend([""] * (len(lines) - len(srcs))) 
 
         section_rules = self._compile_section_rules()
 
-        ts_pat = self.vsync_config.get("time_pattern", r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-        try:
-            re_ts = re.compile(ts_pat)
-        except:
-            re_ts = re.compile(r"^\[?\s*(\d+(?:\.\d+)?)\]?")
-            
+        re_ts = self._ts_regex()
+
         timestamps =[]
+        ts_raw = []
         for line in lines:
             m = re_ts.search(line)
             if m:
                 timestamps.append(self._parse_time_seconds(m.group(1)))
+                ts_raw.append(m.group(1))
             else:
                 timestamps.append(None)
+                ts_raw.append("")
 
-        active_states = {fn: None for fn in tab.source_file_names}
+        active_states= {fn: None for fn in tab.source_file_names}
         pending_states = {fn: None for fn in tab.source_file_names}
         status_buffers = {fn:[] for fn in tab.source_file_names}
         
@@ -1468,6 +1681,7 @@ class LogViewerApp:
                         new_cmt = rule["comment"]
                         line_attrs[idx]["comment"] = f"{base_cmt} {new_cmt}".strip()
                     line_attrs[idx]["priority"] = 20
+                    line_attrs[idx]["level"] = rule.get("level", 1)
 
         for idx in range(len(lines)):
             if "<<< [V-SYNC 起点]" in lines[idx]:
@@ -1486,8 +1700,10 @@ class LogViewerApp:
                 attr = line_attrs[i]
                 if self.use_keyword_filter:
                     if "[VIRTUAL TIMER]" in lines[i] or "<<< [V-SYNC 起点]" in lines[i]:
-                        is_visible[i] = True 
-                    elif attr["priority"] == 0: 
+                        is_visible[i] = True
+                    elif attr["priority"] == 0:
+                        is_visible[i] = False
+                    elif attr["priority"] == 20 and attr["level"] < self.min_level:
                         is_visible[i] = False
                     elif re_vsync.search(lines[i]):
                         is_in_section = any(status_buffers[fn][i][0] != "" for fn in tab.source_file_names)
@@ -1544,6 +1760,37 @@ class LogViewerApp:
                 visible_mapping[i] = display_line_count
                 display_line_count += 1
 
+        # 実際の行番号（仮想行は数えない）。マージ結果ではマージ後の通し番号になる
+        real_no, cnt = [], 0
+        for i in range(len(lines)):
+            if srcs[i] == VIRTUAL_SRC_NAME:
+                real_no.append("")
+            else:
+                cnt += 1
+                real_no.append(str(cnt))
+        err_groups, err_msgs = compile_error_rules(self.error_rules_config)
+        err_all = detect_errors(lines, srcs, err_groups)
+        disp_idx, disp_gap = [], []
+        prev_t = None
+        for i in range(len(lines)):
+            if not is_visible[i]:
+                continue
+            disp_idx.append(i)
+            t = timestamps[i]
+            if srcs[i] == VIRTUAL_SRC_NAME or t is None:
+                disp_gap.append(None)
+                continue
+            disp_gap.append(None if prev_t is None else (t - prev_t) * 1000.0)
+            prev_t = t
+        tab.all_lines, tab.all_ts_raw, tab.all_err = lines, ts_raw, err_all
+        tab.disp_idx = disp_idx
+        tab.disp_gap = disp_gap
+        tab.disp_err = [err_all[i] for i in disp_idx]
+        tab.disp_numbers = [real_no[i] for i in disp_idx]
+        tab.n_err = sum(1 for e in err_all if e == ERR_ERR)
+        tab.n_warn = sum(1 for e in err_all if e == ERR_WARN)
+        tab.err_msgs = err_msgs
+
         flines, fcmts, ftimediffs = [], [], []
         main_tags = []
         final_st_lines = {fn: [] for fn in tab.source_file_names}
@@ -1579,6 +1826,14 @@ class LogViewerApp:
                 final_st_lines[fn].append(txt)
                 if col != "#ffffff":
                     final_st_tags[fn].append((line_count, col))
+
+        tab.gap_text.delete("1.0", tk.END)
+        if flines:
+            tab.gap_text.insert("1.0", "\n".join("" if g is None else f"{g:,.3f}" for g in disp_gap), "right")
+            for n, g in enumerate(disp_gap, start=1):
+                lv = gap_level(g, self.gap_ms)
+                if lv:
+                    tab.gap_text.tag_add(f"g{lv}", f"{n}.0", f"{n}.end")
 
         if flines:
             tab.text.delete("1.0", tk.END)
@@ -1621,6 +1876,12 @@ class LogViewerApp:
 
         tab.linenumbers.redraw()
         tab.update_cursor_line()
+        self._update_tab_badge(tab)
+        if tab is self.get_current_tab():
+            self._update_err_box()
+            self._refresh_panels()
+            if err_msgs:
+                self.status_var.set("無効なエラー検出の設定: " + " / ".join(err_msgs))
 
     def _apply_replacements(self, content: str) -> str:
         for itm in self.replace_patterns_config:
@@ -1628,6 +1889,333 @@ class LogViewerApp:
                 try: content = re.sub(itm["search"], lambda m: f"{m.group(0)}({m.expand(itm['replace'])})", content, flags=re.I)
                 except: pass
         return content
+
+    # --- 間隔・エラー ---
+    def _ts_regex(self):
+        """表示・間隔・エラー一覧に使う時刻の正規表現。
+        既定のパターン（秒数のみ）のときは、HTML 版と同じく hh:mm:ss(.fff) も読む"""
+        ts_pat = self.vsync_config.get("time_pattern", PY_DEFAULT_TS)
+        if ts_pat == PY_DEFAULT_TS:
+            ts_pat = EXT_DEFAULT_TS
+        try:
+            return re.compile(ts_pat)
+        except re.error:
+            return re.compile(r"^\[?\s*(\d+(?:\.\d+)?)\]?")
+
+    def _sync_gap_input(self):
+        v = self.gap_ms
+        self.gap_var.set("" if not v else (str(int(v)) if float(v).is_integer() else str(v)))
+        self.ent_gap.config(bg="#ffffff")
+
+    def _apply_gap_input(self):
+        raw = self.gap_var.get().strip()
+        try:
+            v = 0.0 if raw == "" else float(raw)
+            if v < 0:
+                raise ValueError
+        except ValueError:
+            self.ent_gap.config(bg="#ffe0e0")
+            self.status_var.set("間隔は 0 以上の数値で入力してください（空欄で強調しない）")
+            return
+        self.ent_gap.config(bg="#ffffff")
+        if v == self.gap_ms:
+            return
+        self.gap_ms = v
+        self.save_config()
+        t = self.get_current_tab()
+        if t:
+            self.apply_display_update(t)
+            n = sum(1 for g in t.disp_gap if g is not None and v and g >= v)
+            self.status_var.set(f"{v:g} ms 以上あいた所: {n} か所（Alt+↓ で移動）" if v else "間隔の強調をやめました")
+
+    def _current_line(self, tab) -> int:
+        try:
+            return int(tab.text.index("insert").split(".")[0])
+        except Exception:
+            return 0
+
+    def goto_display_line(self, tab, n: int):
+        """表示中の n 行目（1 始まり）を選んで見えるようにする"""
+        pos = f"{n}.0"
+        tab.text.mark_set("insert", pos)
+        tab.text.see(pos)
+        tab.update_cursor_line()
+        tab.linenumbers.redraw()
+        tab.text.focus_set()
+
+    def next_gap(self, direction: int):
+        tab = self.get_current_tab()
+        if not tab or not getattr(tab, "disp_gap", None):
+            return
+        if not self.gap_ms:
+            self.status_var.set("ツールバーの「ms以上を強調」に、強調する間隔を入れてください")
+            self.ent_gap.focus_set()
+            return
+        gaps = tab.disp_gap
+        n = self._current_line(tab) - 1 + direction
+        while 0 <= n < len(gaps):
+            g = gaps[n]
+            if g is not None and g >= self.gap_ms:
+                self.goto_display_line(tab, n + 1)
+                total = sum(1 for x in gaps if x is not None and x >= self.gap_ms)
+                self.status_var.set(f"前の行から {g:,.3f} ms（{self.gap_ms:g} ms 以上: {total} か所）")
+                self._mark_panels()
+                return
+            n += direction
+        self.status_var.set(f"これより{'後' if direction > 0 else '前'}に {self.gap_ms:g} ms 以上あいた所はありません")
+
+    def next_error(self, direction: int):
+        tab = self.get_current_tab()
+        if not tab or getattr(tab, "disp_err", None) is None:
+            return
+        if not tab.n_err and not tab.n_warn:
+            self.status_var.set("エラー・警告は見つかっていません")
+            return
+        want = ERR_ERR if tab.n_err else ERR_WARN
+        kind = "エラー" if want == ERR_ERR else "警告"
+        errs = tab.disp_err
+        total = tab.n_err if want == ERR_ERR else tab.n_warn
+        vis = sum(1 for e in errs if e == want)
+        n = self._current_line(tab) - 1 + direction
+        while 0 <= n < len(errs):
+            if errs[n] == want:
+                self.goto_display_line(tab, n + 1)
+                k = sum(1 for e in errs[:n + 1] if e == want)
+                hidden = f"（{total - vis} 件はフィルタで非表示）" if vis < total else ""
+                self.status_var.set(f"{kind} {k} / {vis} 件目{hidden}")
+                self._mark_panels()
+                return
+            n += direction
+        self.status_var.set(f"これより{'後' if direction > 0 else '前'}に{kind}はありません" if vis else f"{kind}はすべてフィルタで非表示です")
+
+    # --- タブの件数・ツールバーの件数 ---
+    def _badge_image(self, color: str):
+        cache = self.__dict__.setdefault("_badge_cache", {})
+        if color not in cache:
+            img = tk.PhotoImage(width=10, height=10)
+            for y in range(10):
+                dx = int(((4.6 ** 2) - (y - 4.5) ** 2) ** 0.5) if abs(y - 4.5) < 4.6 else -1
+                if dx >= 0:
+                    img.put(color, to=(max(0, 5 - dx), y, min(10, 5 + dx), y + 1))
+            cache[color] = img
+        return cache[color]
+
+    def _update_tab_badge(self, tab):
+        base = getattr(tab, "base_title", None)
+        if base is None:
+            try:
+                base = tab.base_title = self.notebook.tab(tab, "text")
+            except tk.TclError:
+                return
+        try:
+            if tab.n_err:
+                self.notebook.tab(tab, text=f"{base}  {tab.n_err}", image=self._badge_image(self.error_colors["error"]), compound=tk.RIGHT)
+            elif tab.n_warn:
+                self.notebook.tab(tab, text=f"{base}  {tab.n_warn}", image=self._badge_image(self.error_colors["warn"]), compound=tk.RIGHT)
+            else:
+                self.notebook.tab(tab, text=base, image="")
+        except tk.TclError:
+            pass
+
+    def _update_err_box(self):
+        tab = self.get_current_tab()
+        ne = getattr(tab, "n_err", 0) if tab else 0
+        nw = getattr(tab, "n_warn", 0) if tab else 0
+        self.lbl_err.config(text=f"● エラー {ne}", fg=darker(self.error_colors["error"], 0.85) if ne else "#999999")
+        self.lbl_warn.config(text=f"● 警告 {nw}", fg=darker(self.error_colors["warn"], 0.75) if nw else "#999999")
+
+    def _on_tab_changed(self):
+        self._update_err_box()
+        self._refresh_panels()
+
+    def _refresh_panels(self):
+        if self.gap_win is not None and self.gap_win.winfo_exists():
+            self._render_gap_ranking()
+        if self.err_win is not None and self.err_win.winfo_exists():
+            self._render_error_list()
+
+    def _mark_panels(self):
+        """一覧の中で、今の行に当たる項目を選んだ状態にする"""
+        tab = self.get_current_tab()
+        if not tab:
+            return
+        n = self._current_line(tab)
+        if self.gap_win is not None and self.gap_win.winfo_exists():
+            tree = self.gap_win.tree
+            iid = str(n)
+            tree.selection_set(iid) if tree.exists(iid) else tree.selection_remove(tree.selection())
+        if self.err_win is not None and self.err_win.winfo_exists():
+            w = self.err_win
+            for k, g in enumerate(w.groups):
+                if n in g["rows"]:
+                    w.tree.selection_set(str(k))
+                    w.tree.see(str(k))
+                    break
+
+    def _panel_window(self, title, geometry):
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.geometry(geometry)
+        win.configure(bg=UIColors.BG)
+        win.transient(self.root)
+        win.bind("<Escape>", lambda e: win.destroy())
+        return win
+
+    # --- 間隔ランキング ---
+    def open_gap_ranking(self):
+        if self.gap_win is not None and self.gap_win.winfo_exists():
+            self.gap_win.lift()
+            self._render_gap_ranking()
+            return
+        win = self.gap_win = self._panel_window("間隔ランキング", "640x480")
+        win.sub = tk.Label(win, text="", anchor="w", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9))
+        win.sub.pack(fill=tk.X, padx=10, pady=(8, 4))
+        fr = tk.Frame(win, bg=UIColors.BG)
+        fr.pack(fill=tk.BOTH, expand=True, padx=10)
+        tree = ttk.Treeview(fr, columns=("rank", "ms", "line", "log"), show="headings", selectmode="browse")
+        for col, label, w, anchor in (("rank", "順位", 50, tk.E), ("ms", "間隔(ms)", 110, tk.E), ("line", "行", 70, tk.E), ("log", "ログ", 380, tk.W)):
+            tree.heading(col, text=label)
+            tree.column(col, width=w, anchor=anchor, stretch=(col == "log"))
+        for lv, col in GAP_COLORS.items():
+            tree.tag_configure(f"g{lv}", background=col)
+        sb = tk.Scrollbar(fr, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        win.tree = tree
+        tk.Label(win, text="表示中の行で、前の行との差が大きい順。クリックでその行へ。Alt+↓ / Alt+↑ でしきい値以上の行を順に移動",
+                 anchor="w", bg=UIColors.BG, fg="#888888", font=("Yu Gothic UI", 8), wraplength=600, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=6)
+
+        def on_select(_e=None):
+            sel = tree.selection()
+            tab = self.get_current_tab()
+            if not sel or not tab:
+                return
+            n = int(sel[0])
+            self.goto_display_line(tab, n)
+            g = tab.disp_gap[n - 1]
+            if g is not None:
+                self.status_var.set(f"前の行から {g:,.3f} ms")
+        tree.bind("<ButtonRelease-1>", on_select)
+        tree.bind("<Return>", on_select)
+        self._render_gap_ranking()
+
+    def _render_gap_ranking(self):
+        win = self.gap_win
+        tree = win.tree
+        tree.delete(*tree.get_children())
+        tab = self.get_current_tab()
+        if not tab or not getattr(tab, "disp_gap", None):
+            win.sub.config(text="ログを開いてください")
+            return
+        top = sorted(((g, n) for n, g in enumerate(tab.disp_gap) if g is not None and g > 0), key=lambda x: -x[0])[:GAP_TOP]
+        cnt = sum(1 for g in tab.disp_gap if g is not None and self.gap_ms and g >= self.gap_ms)
+        base = getattr(tab, "base_title", "")
+        win.sub.config(text=f"{base}　·　{self.gap_ms:g} ms 以上: {cnt} か所" if self.gap_ms else base)
+        for k, (g, n) in enumerate(top, start=1):
+            lv = gap_level(g, self.gap_ms)
+            line = tab.all_lines[tab.disp_idx[n]]
+            tree.insert("", tk.END, iid=str(n + 1), values=(k, f"{g:,.3f}", tab.disp_numbers[n], line), tags=(f"g{lv}",) if lv else ())
+        if not top:
+            win.sub.config(text="時刻のある行が 2 行以上ありません")
+
+    # --- エラー一覧 ---
+    def open_error_list(self):
+        if self.err_win is not None and self.err_win.winfo_exists():
+            self.err_win.lift()
+            self._render_error_list()
+            return
+        win = self.err_win = self._panel_window("エラー一覧", "760x500")
+        tab = self.get_current_tab()
+        win.type_var = tk.StringVar(value="warn" if tab and not getattr(tab, "n_err", 0) and getattr(tab, "n_warn", 0) else "error")
+        win.sort_var = tk.StringVar(value="件数の多い順")
+        bar = tk.Frame(win, bg=UIColors.BG)
+        bar.pack(fill=tk.X, padx=10, pady=(8, 4))
+        win.rb_err = tk.Radiobutton(bar, text="エラー", variable=win.type_var, value="error", indicatoron=False, padx=12, pady=3,
+                                    bg="#ffffff", selectcolor=UIColors.BORDER, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), command=self._render_error_list)
+        win.rb_warn = tk.Radiobutton(bar, text="警告", variable=win.type_var, value="warn", indicatoron=False, padx=12, pady=3,
+                                     bg="#ffffff", selectcolor=UIColors.BORDER, relief=tk.FLAT, font=("Yu Gothic UI", 9, "bold"), command=self._render_error_list)
+        win.rb_err.pack(side=tk.LEFT)
+        win.rb_warn.pack(side=tk.LEFT, padx=(2, 0))
+        cmb = ttk.Combobox(bar, textvariable=win.sort_var, values=["件数の多い順", "出た順"], state="readonly", width=12)
+        cmb.pack(side=tk.RIGHT)
+        cmb.bind("<<ComboboxSelected>>", lambda e: self._render_error_list())
+        win.sub = tk.Label(win, text="", anchor="w", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9))
+        win.sub.pack(fill=tk.X, padx=10)
+        fr = tk.Frame(win, bg=UIColors.BG)
+        fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        tree = ttk.Treeview(fr, columns=("count", "msg", "when", "line"), show="headings", selectmode="browse")
+        for col, label, w, anchor in (("count", "件数", 60, tk.E), ("msg", "内容（数字は # にまとめる）", 380, tk.W), ("when", "時刻（最初〜最後）", 200, tk.W), ("line", "最初の行", 70, tk.E)):
+            tree.heading(col, text=label)
+            tree.column(col, width=w, anchor=anchor, stretch=(col == "msg"))
+        sb = tk.Scrollbar(fr, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        win.tree = tree
+        win.groups = []
+        win.cursor = {}
+        tk.Label(win, text="数字・16進数を除いて同じ文のものを 1 つにまとめています。クリックで最初の行へ、続けてクリックで次の発生へ。F9 で順に移動",
+                 anchor="w", bg=UIColors.BG, fg="#888888", font=("Yu Gothic UI", 8), wraplength=720, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=6)
+
+        def on_click(event):
+            iid = tree.identify_row(event.y)
+            tab = self.get_current_tab()
+            if not iid or not tab:
+                return
+            k = int(iid)
+            g = win.groups[k]
+            nxt = (win.cursor.get(k, -1) + 1) % len(g["rows"])
+            win.cursor[k] = nxt
+            self.goto_display_line(tab, g["rows"][nxt])
+            tree.selection_set(iid)
+            self.status_var.set(f"このまとまりの {nxt + 1} / {len(g['rows'])} 件目")
+        tree.bind("<ButtonRelease-1>", on_click)
+        self._render_error_list()
+
+    def _render_error_list(self):
+        win = self.err_win
+        tree = win.tree
+        tree.delete(*tree.get_children())
+        win.groups, win.cursor = [], {}
+        tab = self.get_current_tab()
+        if not tab or getattr(tab, "disp_err", None) is None:
+            win.sub.config(text="ログを開いてください")
+            return
+        want = ERR_WARN if win.type_var.get() == "warn" else ERR_ERR
+        kind = "エラー" if want == ERR_ERR else "警告"
+        v_err = sum(1 for e in tab.disp_err if e == ERR_ERR)
+        v_warn = sum(1 for e in tab.disp_err if e == ERR_WARN)
+        win.rb_err.config(text=f"エラー {v_err}", fg=darker(self.error_colors["error"], 0.85) if v_err else "#999999")
+        win.rb_warn.config(text=f"警告 {v_warn}", fg=darker(self.error_colors["warn"], 0.75) if v_warn else "#999999")
+        re_ts = self._ts_regex()
+        groups: Dict[str, Dict[str, Any]] = {}
+        for n, e in enumerate(tab.disp_err, start=1):
+            if e != want:
+                continue
+            i = tab.disp_idx[n - 1]
+            key = error_message_key(tab.all_lines[i], re_ts) or tab.all_lines[i]
+            groups.setdefault(key, {"key": key, "rows": [], "idx": []})
+            groups[key]["rows"].append(n)
+            groups[key]["idx"].append(i)
+        lst = list(groups.values())
+        if win.sort_var.get() == "件数の多い順":
+            lst.sort(key=lambda g: (-len(g["rows"]), g["rows"][0]))
+        else:
+            lst.sort(key=lambda g: g["rows"][0])
+        win.groups = lst
+        total = tab.n_err if want == ERR_ERR else tab.n_warn
+        vis = v_err if want == ERR_ERR else v_warn
+        hidden = f"（{total - vis} 件は非表示）" if vis < total else ""
+        win.sub.config(text=f"{getattr(tab, 'base_title', '')}　·　{len(lst)} 種類 / {vis} 件{hidden}" if lst else
+                       (f"{kind}はすべてフィルタで非表示です" if total else f"{kind}は見つかっていません"))
+        color = self.error_colors["error" if want == ERR_ERR else "warn"]
+        tree.tag_configure("kind", foreground=darker(color, 0.8))
+        for k, g in enumerate(lst):
+            t0, t1 = tab.all_ts_raw[g["idx"][0]], tab.all_ts_raw[g["idx"][-1]]
+            when = t0 if len(g["rows"]) == 1 else (f"{t0} 〜 {t1}" if t0 and t1 else "")
+            first_no = tab.disp_numbers[g["rows"][0] - 1]
+            tree.insert("", tk.END, iid=str(k), values=(len(g["rows"]), g["key"], when, first_no), tags=("kind",))
 
     # --- Search Logic ---
     def open_find_dialog(self):
@@ -1696,8 +2284,11 @@ class LogViewerApp:
         for l, r in presets: menu.add_command(label=l, command=lambda t=r: entry_widget.insert(tk.INSERT, t))
         menu.tk_popup(parent_btn.winfo_rootx(), parent_btn.winfo_rooty() + parent_btn.winfo_height())
 
-    def edit_keywords_dialog(self): 
-        self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords",["file_pattern", "pattern","color","comment","extra_lines"])
+    def edit_keywords_dialog(self):
+        self._edit_dlg("フィルタ設定の編集 ※正規表現にマッチした行を抽出し、指定の色とコメントを付与します。", "keywords",["file_pattern", "pattern", "priority", "color","comment","extra_lines"])
+
+    def edit_error_rules_dialog(self):
+        self._edit_dlg("エラー検出の設定 ※キーワードを含む行をエラー・警告として知らせます。", "error_rules", ["keyword", "type", "word", "case"])
         
     def edit_replace_patterns_dialog(self): 
         self._edit_dlg("説明パターンの編集 ※正規表現にマッチした文字列の直後に、 (説明)を付与します。", "replace_patterns",["search","replace"])
@@ -1757,6 +2348,14 @@ class LogViewerApp:
             scroll_update_id["value"] = dlg.after_idle(update_scroll_region)
         sf.bind("<Configure>", on_configure)
 
+        header_tip = Tooltip()
+        HEADER_TIPS = {
+            "priority": "ログレベル 3が最優先（1が最弱）",
+            "keyword": "この文字列を含む行を検出する。正規表現も使える（例: NG|E\\d+）",
+            "type": "エラー: F9 で移動。警告: エラーが無いときに F9 で移動",
+            "word": "ON: 英単語として一致したときだけ（ERROR は NOERROR や ERRORS に一致しない）",
+            "case": "ON: 大文字と小文字を区別する",
+        }
         col_defs =[]
         col_idx = 1
         col_defs.append((0, "btn", "", 135))
@@ -1774,6 +2373,11 @@ class LogViewerApp:
             elif f == "replace": col_defs.append((col_idx, f, "置換/説明", 165))
             elif f == "comment": col_defs.append((col_idx, f, "コメント", 145))
             elif f == "extra_lines": col_defs.append((col_idx, f, "+行", 45))
+            elif f == "priority": col_defs.append((col_idx, f, "優先度", 62))
+            elif f == "keyword": col_defs.append((col_idx, f, "キーワード（正規表現）", 230))
+            elif f == "type": col_defs.append((col_idx, f, "種類", 80))
+            elif f == "word": col_defs.append((col_idx, f, "単語単位", 62))
+            elif f == "case": col_defs.append((col_idx, f, "大小区別", 62))
             col_idx += 1
 
         config_count = len(getattr(self, f"{key}_config"))
@@ -1792,11 +2396,17 @@ class LogViewerApp:
             h_cell.pack_propagate(False)
             h_cell.grid(row=0, column=c_idx, sticky="w", padx=2, pady=2)
             if c_txt:
-                tk.Label(h_cell, text=c_txt, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), anchor="w").pack(side=tk.LEFT, fill=tk.BOTH)
+                h_lbl = tk.Label(h_cell, text=c_txt, bg=UIColors.HEADER_BG, fg=UIColors.HEADER_FG, font=("Yu Gothic UI", 9, "bold"), anchor="w")
+                h_lbl.pack(side=tk.LEFT, fill=tk.BOTH)
+                tip_text = HEADER_TIPS.get(c_id)
+                if tip_text:
+                    h_lbl.bind("<Enter>", lambda e, t=tip_text: header_tip.show(e, t))
+                    h_lbl.bind("<Leave>", lambda e: header_tip.hide())
 
         entries =[]
         render_state = {"generation": 0}
-        simple_entry_fields = {"file_pattern", "pattern", "search", "name", "start", "duration_ms", "replace", "comment", "extra_lines"}
+        simple_entry_fields = {"file_pattern", "pattern", "search", "name", "start", "duration_ms", "replace", "comment", "extra_lines", "keyword"}
+        bool_fields = {"start_wait", "end_wait", "word", "case"}
         render_batch_size = 8
 
         def render_row(i, item):
@@ -1819,8 +2429,14 @@ class LogViewerApp:
 
                 if c_id in simple_entry_fields:
                     tk.Entry(f_cell, textvariable=item[c_id], relief=tk.SOLID, bd=1, highlightthickness=0).pack(fill=tk.BOTH, expand=True)
-                elif c_id in {"start_wait", "end_wait"}:
+                elif c_id in bool_fields:
                     tk.Checkbutton(f_cell, variable=item[c_id], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
+                elif c_id == "priority":
+                    om = tk.OptionMenu(f_cell, item["priority"], "3", "2", "1")
+                    om.config(relief=tk.FLAT, bg="#ffffff", highlightthickness=0, font=("Consolas", 9))
+                    om.pack(fill=tk.BOTH, expand=True)
+                elif c_id == "type":
+                    ttk.Combobox(f_cell, textvariable=item["type"], values=["エラー", "警告"], state="readonly", width=6).pack(fill=tk.BOTH, expand=True)
                 elif c_id == "end":
                     tk.Entry(f_cell, textvariable=item["end"], relief=tk.SOLID, bd=1, highlightthickness=0).pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                     if key == "sections":
@@ -1856,9 +2472,15 @@ class LogViewerApp:
 
         def add(data=None, refresh_ui=True):
             item = {"enabled": tk.BooleanVar(value=data.get("enabled", True) if data else True)}
+            item["_orig"] = dict(data) if data else {}   # 編集画面に出ない項目（HTML 版の項目など）も保存で残す
             for f in fields:
-                if f in["start_wait", "end_wait"]:
-                    item[f] = tk.BooleanVar(value=data.get(f, False) if data else False)
+                if f in bool_fields:
+                    # 新しく追加したエラー検出のルールは「単語単位」を ON にする
+                    item[f] = tk.BooleanVar(value=bool(data.get(f, False)) if data else (f == "word"))
+                elif f == "priority":
+                    item[f] = tk.StringVar(value=str(clamp_level(data.get("priority", 1)) if data else 1))
+                elif f == "type":
+                    item[f] = tk.StringVar(value="警告" if data and data.get("type") == "warn" else "エラー")
                 else:
                     def_val = "0" if f == "extra_lines" else (".*" if f == "file_pattern" else "")
                     val = data.get(f, def_val) if data and f in data else def_val
@@ -1920,7 +2542,27 @@ class LogViewerApp:
                 "【使い方】\n\n"
                 "正規表現に一致したログを抽出し、色とコメントを付けます。\n\n"
                 "字下げされた行は、直前の行とまとめて1件として判定します。\n\n"
-                "「対象ファイル」はファイル名の正規表現、「+行」は追加で表示する行数です。"
+                "「対象ファイル」はファイル名の正規表現、「+行」は追加で表示する行数です。\n\n"
+                "■優先度（1〜3、3が一番強い）\n"
+                "1行に複数一致したら、優先度が一番強いものの色とコメントが付きます。\n"
+                "ツールバーの「優先度 N以上」で、その強さ以上のフィルタに一致した行だけを表示できます。"
+            )
+        elif key == "error_rules":
+            info_text = (
+                "【エラー検出の使い方】\n\n"
+                "キーワードを含む行を、エラー・警告として知らせます。\n\n"
+                "■知らせ方\n"
+                " ・行番号の左に色の印\n"
+                " ・タブとツールバーに件数\n"
+                " ・F9 / Shift+F9 で次 / 前のエラーへ\n\n"
+                "■項目\n"
+                " ・キーワード: 正規表現も使えます\n"
+                " ・種類: 両方に一致したらエラー\n"
+                " ・単語単位: ERROR は NOERROR や\n"
+                "   error_count に一致しません。\n"
+                "   日本語のキーワードでは外してください\n"
+                " ・大小区別: 大文字と小文字を区別\n\n"
+                "すべて消して OK を押すと、\nエラー検出をしなくなります。"
             )
         elif key == "replace_patterns":
             info_text = (
@@ -1936,22 +2578,67 @@ class LogViewerApp:
                 " の形式で表示されます。"
             )
 
+        color_vars = {}
+        if key == "error_rules":
+            cat = tk.LabelFrame(btn_fr, text="種類の色", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9, "bold"))
+            cat.pack(fill=tk.X, pady=(6, 0))
+            row = tk.Frame(cat, bg=UIColors.BG)
+            row.pack(fill=tk.X, padx=6, pady=6)
+            for typ, label in (("error", "エラー"), ("warn", "警告")):
+                var = color_vars[typ] = tk.StringVar(value=self.error_colors[typ])
+                btn = tk.Button(row, text="  ", width=3, bg=var.get(), activebackground=var.get(), relief=tk.FLAT, cursor="hand2")
+                def pick(v=var, b=None):
+                    c = colorchooser.askcolor(v.get(), parent=dlg)[1]
+                    if c:
+                        v.set(c)
+                btn.config(command=pick)
+                var.trace_add("write", lambda *_a, b=btn, v=var: b.config(bg=v.get(), activebackground=v.get()))
+                btn.pack(side=tk.LEFT, padx=(0, 4))
+                tk.Label(row, text=label, bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9)).pack(side=tk.LEFT, padx=(0, 10))
+
+            def reset_defaults():
+                entries.clear()
+                for r in DEFAULT_ERROR_RULES:
+                    add(r, refresh_ui=False)
+                refresh()
+                for typ, v in color_vars.items():
+                    v.set(DEFAULT_ERROR_COLORS[typ])
+            tk.Button(cat, text="既定に戻す", command=reset_defaults, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2", font=("Yu Gothic UI", 9)).pack(anchor="e", padx=6, pady=(0, 6))
+
         if info_text:
-            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#faf9f6", fg=UIColors.TEXT, relief=tk.FLAT, bd=1, highlightbackground=UIColors.BORDER, highlightthickness=1, padx=12, pady=12, font=("Yu Gothic UI", 9), wraplength=230)
+            info_lbl = tk.Label(btn_fr,text=info_text, justify=tk.LEFT, anchor="nw", bg="#faf9f6", fg=UIColors.TEXT, relief=tk.FLAT, bd=1, highlightbackground=UIColors.BORDER, highlightthickness=1, padx=12, pady=12, font=("Yu Gothic UI", 9), wraplength=230)
             info_lbl.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def save():
             new_cfg =[]
-            for item in entries:
+            errs = []
+            for n, item in enumerate(entries, start=1):
                 valid = False
-                for k in["pattern", "search", "start"]:
+                for k in["pattern", "search", "start", "keyword"]:
                     if k in fields and item[k].get(): valid = True
                 if valid:
-                    d = {f: item[f].get() for f in fields}
+                    d = dict(item["_orig"])
+                    for f in fields:
+                        v = item[f].get()
+                        if f == "priority":
+                            v = clamp_level(v)
+                        elif f == "type":
+                            v = "warn" if v == "警告" else "error"
+                        d[f] = v
                     d["enabled"] = item["enabled"].get()
+                    if key == "error_rules" and d["enabled"]:
+                        try:
+                            re.compile(d["keyword"])
+                        except re.error as e:
+                            errs.append(f"{n}行目「{d['keyword']}」: {e}")
                     new_cfg.append(d)
-            
+            if errs:
+                messagebox.showerror("修正が必要です", "正規表現が正しくありません（無効にすれば保存できます）:\n" + "\n".join(errs), parent=dlg)
+                return
+
             setattr(self, f"{key}_config", new_cfg)
+            if color_vars:
+                self.error_colors = {k: v.get() for k, v in color_vars.items()}
             # 設定変更時に自動的にconfig.jsonを保存
             self.save_config()
             
@@ -1983,8 +2670,20 @@ class LogViewerApp:
                 self.sections_config = d.get("sections",[])
                 self.replace_patterns_config = d.get("replace_patterns",[])
                 self.vsync_config = d.get("vsync_auto_insert", self.vsync_config)
-            
+                # 項目が無い設定（以前の設定）は既定のルールを使う。空の配列なら検出しない
+                rules = d.get("error_rules")
+                self.error_rules_config = rules if isinstance(rules, list) else [dict(r) for r in DEFAULT_ERROR_RULES]
+                ec = d.get("error_colors") if isinstance(d.get("error_colors"), dict) else {}
+                self.error_colors = {k: ec.get(k) if self._valid_color(ec.get(k)) else v for k, v in DEFAULT_ERROR_COLORS.items()}
+                try:
+                    self.gap_ms = max(0.0, float(d.get("gap_threshold_ms", self.gap_ms)))
+                except (TypeError, ValueError):
+                    self.gap_ms = DEFAULT_GAP_MS
+                known = {"keywords", "sections", "replace_patterns", "vsync_auto_insert", "error_rules", "error_colors", "gap_threshold_ms"}
+                self.extra_config = {k: v for k, v in d.items() if k not in known}
+
             self._update_vsync_info_label()
+            self._sync_gap_input()
             # すべてのタブに対して表示を更新
             for tab_id in self.notebook.tabs():
                 try:
