@@ -33,6 +33,7 @@
     --sep: rgba(255, 255, 255, .10); --sep-strong: rgba(255, 255, 255, .18);
     --accent: #0a84ff; --accent-hover: #409cff; --accent-soft: rgba(10, 132, 255, .18); --accent-text: #4aa3ff;
     --red: #ff453a; --green: #30d158; --orange: #ff9f0a;
+    --err-c: #ff3b30; --warn-c: #ff9f0a;   /* エラー・警告の色（エラー検出の設定で変えられる） */
     --sel: rgba(10, 132, 255, .22); --hover: rgba(255, 255, 255, .04);
     --mark: #8a6d00; --mark-cur: #b36b00;
     --tint: 32%;
@@ -161,17 +162,18 @@
   .err-pill:hover { border-color: var(--text-3); }
   .err-pill .e, .err-pill .w { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
   .err-pill .e::before, .err-pill .w::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .err-pill .e.on { color: var(--red); }
-  .err-pill .w.on { color: #b25000; }
-  .err-pill .w.on::before { background: #ff9f0a; }
+  .err-pill .e.on { color: color-mix(in srgb, var(--err-c) 82%, #000); }
+  .err-pill .w.on { color: color-mix(in srgb, var(--warn-c) 70%, #000); }
+  .err-pill .e.on::before { background: var(--err-c); }
+  .err-pill .w.on::before { background: var(--warn-c); }
   .tabs:empty { display: none; }
   .tab { position: relative; display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 8px 0 14px; border-radius: 10px 10px 0 0;
          cursor: pointer; white-space: nowrap; flex: none; max-width: 220px; font-weight: 500; color: var(--text-2);
          transition: background-color .15s, color .15s; user-select: none; }
   .tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .tab-err { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff;
+  .tab-err { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--err-c); color: #fff;
              font: 700 10.5px/18px var(--ui); text-align: center; font-variant-numeric: tabular-nums; }
-  .tab-err.warn { background: #ff9f0a; }
+  .tab-err.warn { background: var(--warn-c); }
   .tab:hover:not(.active) { color: var(--text); background: linear-gradient(rgba(255, 255, 255, .78), rgba(255, 255, 255, .44));
                             box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 .5px rgba(90, 110, 170, .14); }
   /* 選択中のタブは表と同じ白で、下の左右が内側にカーブして表へつながる */
@@ -329,11 +331,11 @@
   .row.base .dt { color: var(--red); font-weight: 600; }
   /* エラー・警告の行: 行番号の左に印、行番号を色付きに */
   .row.err .cell.ln, .row.warn .cell.ln { position: relative; font-weight: 600; }
-  .row.err .cell.ln { color: var(--red); }
-  .row.warn .cell.ln { color: #b25000; }
+  .row.err .cell.ln { color: color-mix(in srgb, var(--err-c) 82%, #000); }
+  .row.warn .cell.ln { color: color-mix(in srgb, var(--warn-c) 70%, #000); }
   .row.err .cell.ln::before, .row.warn .cell.ln::before { content: ""; position: absolute; left: 9px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; }
-  .row.err .cell.ln::before { background: var(--red); }
-  .row.warn .cell.ln::before { background: #ff9f0a; }
+  .row.err .cell.ln::before { background: var(--err-c); }
+  .row.warn .cell.ln::before { background: var(--warn-c); }
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
   mark.cur { background: var(--mark-cur); }
 
@@ -447,8 +449,14 @@
                      background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
                      background-size: 5px 5px; background-repeat: no-repeat; background-position: right 13px center, right 8px center; transition: border-color .15s, box-shadow .15s; }
   .ed-table select.errtype { width: 78px; font-family: var(--ui); font-weight: 600; }
-  .ed-table select.errtype.error { color: var(--red); }
-  .ed-table select.errtype.warn { color: #b25000; }
+  .ed-table select.errtype.error { color: color-mix(in srgb, var(--err-c) 82%, #000); }
+  .ed-table select.errtype.warn { color: color-mix(in srgb, var(--warn-c) 70%, #000); }
+  /* 種類の色（エラー検出の設定のみ） */
+  .ed-cats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 12px; color: var(--text-2); }
+  .ed-cats .t { width: 100%; font-weight: 600; color: var(--text); }
+  .ed-cats label { display: inline-flex; align-items: center; gap: 6px; }
+  .ed-cats .ed-reset { margin-left: auto; height: 26px; padding: 0 10px; font-size: 12px; }
+  .ed-cats input[type=color] { width: 30px; height: 24px; padding: 0 2px; border: 1px solid var(--sep-strong); border-radius: 6px; background: var(--surface); cursor: pointer; }
   .lv-chips { display: inline-flex; gap: 4px; align-items: center; }
   .lv-chips .lv { min-width: 28px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--sep-strong); background: var(--surface);
                   color: var(--text-3); font: 600 12px var(--ui); cursor: pointer; transition: background-color .12s, color .12s, transform .05s; }
@@ -680,10 +688,15 @@
         <div class="ed-side">
           <button class="btn primary wide" id="edAdd" type="button">＋ 行を追加</button>
           <label class="help-toggle" title="初心者向けの使い方を表示します。慣れたら外すと、画面を広く使えます"><input type="checkbox" id="edHelpOn" checked> 使い方を表示</label>
+          <div class="ed-cats hidden" id="edCats">
+            <span class="t">種類の色</span>
+            <label title="エラーの行の印・全体マップの帯・タブの件数の色"><input type="color" id="edColErr"> エラー</label>
+            <label title="警告の行の印・全体マップの帯・タブの件数の色"><input type="color" id="edColWarn"> 警告</label>
+            <button class="btn secondary ed-reset hidden" id="edReset" type="button" title="最初のルールと色に戻す（保存するまで反映されません）">既定に戻す</button>
+          </div>
           <div class="ed-info" id="edInfo"></div>
           <div class="ed-err" id="edErr"></div>
           <div class="ed-actions">
-            <button class="btn secondary wide hidden" id="edReset" type="button" title="最初のルールに戻す（保存するまで反映されません）">既定に戻す</button>
             <button class="btn secondary wide" id="edUndo" type="button" disabled title="直前の操作を取り消す (Ctrl+Z)">取り消し</button>
             <button class="btn secondary wide" id="edCancel" type="button">キャンセル</button>
             <button class="btn primary wide" id="edOk" type="button">保存</button>
@@ -829,6 +842,9 @@ const DEFAULT_CONFIG = {
   replace_patterns: [],
   vsync_auto_insert: { enabled: true, time_pattern: DEFAULT_TS, manual_ms: 16.666, start_time_val: "0.0" },
 };
+// エラー・警告の既定の色（種類ごとに 1 色）
+const DEFAULT_ERROR_COLORS = { error: "#ff3b30", warn: "#ff9f0a" };
+const validColor = (c) => typeof c === "string" && c.trim() !== "" && CSS.supports("color", c.trim());
 // エラー検出の既定ルール。word: 英単語として一致（NOERROR などは除く）、case: 大文字小文字を区別
 const DEFAULT_ERROR_RULES = [
   ...["ERROR", "FATAL", "CRITICAL", "SEVERE", "PANIC", "Traceback"].map((k) => ({ keyword: k, type: "error", word: true, case: false, enabled: true })),
@@ -855,6 +871,8 @@ function normalizeConfig(cfg) {
   c.replace_patterns = Array.isArray(c.replace_patterns) ? c.replace_patterns : [];
   // 項目が無い設定（以前の設定・Python 版の config.json）は既定のルールを使う。空の配列なら検出しない
   c.error_rules = Array.isArray(c.error_rules) ? c.error_rules : JSON.parse(JSON.stringify(DEFAULT_ERROR_RULES));
+  const ec = c.error_colors || {};
+  c.error_colors = { error: validColor(ec.error) ? ec.error.trim() : DEFAULT_ERROR_COLORS.error, warn: validColor(ec.warn) ? ec.warn.trim() : DEFAULT_ERROR_COLORS.warn };
   c.vsync_auto_insert = Object.assign({ enabled: true, time_pattern: DEFAULT_TS, manual_ms: 16.666, start_time_val: "0.0" }, c.vsync_auto_insert || {});
   return c;
 }
@@ -893,6 +911,8 @@ function compileRules() {
   const cfg = state.config;
   state.rules = []; state.sections = []; state.errors = [];
   compileErrRules(cfg);
+  document.documentElement.style.setProperty("--err-c", cfg.error_colors.error);
+  document.documentElement.style.setProperty("--warn-c", cfg.error_colors.warn);
   cfg.keywords.forEach((k, i) => {
     if (k.enabled === false) return;
     try {
@@ -1751,11 +1771,10 @@ function drawOverviewBase(doc, w, h, dpr) {
     const y = Math.min(h - 1, Math.floor(p / n * h));
     if (e > eRank[y]) eRank[y] = e;
   }
-  const red = getComputedStyle(document.documentElement).getPropertyValue("--red").trim() || "#ff3b30";
-  const eW = Math.max(2, Math.round(3 * dpr));
+  const eW = Math.max(2, Math.round(3 * dpr)), ecol = state.config.error_colors;
   for (let y = 0; y < h; y++) {
     if (!eRank[y]) continue;
-    ovBaseCtx.fillStyle = eRank[y] === ERR_ERR ? red : "#ff9f0a";
+    ovBaseCtx.fillStyle = eRank[y] === ERR_ERR ? ecol.error : ecol.warn;
     ovBaseCtx.fillRect(0, y, eW, mark);
   }
   for (let y = 0; y < h; y++) {
@@ -2462,7 +2481,7 @@ const EDITORS = {
   error_rules: {
     title: "エラー検出の設定", sub: "キーワードを含む行をエラー・警告として、行の印・タブの件数・F9 で知らせます。",
     fields: ["keyword", "type", "word", "case"], required: "keyword", noun: "ルール", resettable: true,
-    info: "【エラー検出の使い方】\nキーワードを含む行を、エラー（赤）・警告（橙）として知らせます。\n\n■知らせ方\n・行番号の左に赤・橙の印\n・全体マップの左端に帯\n・タブとタブの並びの右端に件数\n・F9 / Shift+F9 で次 / 前のエラーへ移動\n\n■項目の意味\n・キーワード：探す文字列。正規表現も使えます。\n  例: NG  /  \\[E\\]  /  code=(500|503)\n・種類：エラーか警告か。両方に一致したらエラーになります。\n・単語単位：英単語として一致したときだけ検出します。\n  ERROR は「NOERROR」「ERRORS」「error_count」に一致しません。\n  日本語のキーワードでは外してください。\n・大小区別：大文字と小文字を区別します。\n\n■ヒント\n・フィルタの色付けとは別の仕組みです。フィルタの色は変わりません。\n・「既定に戻す」で最初のルールに戻せます。\n・すべて消して保存すると、エラー検出をしなくなります。",
+    info: "【エラー検出の使い方】\nキーワードを含む行を、エラー（赤）・警告（橙）として知らせます。\n\n■知らせ方\n・行番号の左に赤・橙の印\n・全体マップの左端に帯\n・タブとタブの並びの右端に件数\n・F9 / Shift+F9 で次 / 前のエラーへ移動\n\n■項目の意味\n・キーワード：探す文字列。正規表現も使えます。\n  例: NG  /  \\[E\\]  /  code=(500|503)\n・種類：エラーか警告か。両方に一致したらエラーになります。\n・単語単位：英単語として一致したときだけ検出します。\n  ERROR は「NOERROR」「ERRORS」「error_count」に一致しません。\n  日本語のキーワードでは外してください。\n・大小区別：大文字と小文字を区別します。\n\n■種類の色\n上の「種類の色」で、エラー・警告それぞれの色を選べます。\n行の印・全体マップの帯・タブの件数がこの色になります。\n\n■ヒント\n・フィルタの色付けとは別の仕組みです。フィルタの色は変わりません。\n・「既定に戻す」で最初のルールに戻せます。\n・すべて消して保存すると、エラー検出をしなくなります。",
   },
   replace_patterns: {
     title: "説明パターンの編集", sub: "正規表現にマッチした文字列の直後に (説明) を付与します。",
@@ -2612,6 +2631,11 @@ function openEditor(key) {
     if (doc && !doc.isMerged && editor.rows.some((r) => patOf(r) === filePattern(doc.name))) editor.scope = filePattern(doc.name);
   }
   $("edReset").classList.toggle("hidden", !def.resettable);
+  $("edCats").classList.toggle("hidden", key !== "error_rules");
+  $("edColErr").value = toHex6(state.config.error_colors.error, DEFAULT_ERROR_COLORS.error);
+  $("edColWarn").value = toHex6(state.config.error_colors.warn, DEFAULT_ERROR_COLORS.warn);
+  editor.catsOriginal = $("edColErr").value + $("edColWarn").value;
+  document.querySelector(".ed-table").style.removeProperty("--err-c"); document.querySelector(".ed-table").style.removeProperty("--warn-c");
   $("edTitle").textContent = def.title;
   $("edSub").textContent = def.sub;
   $("edInfo").textContent = def.info + "\n\n■並べ替え\n行の左のつまみ（⋮⋮）をドラッグして並べ替えられます。" + (def.scoped ? "左の対象ファイルの一覧にドロップすると、その対象へ移せます。" : "") + "Esc で取り消せます。";
@@ -2814,8 +2838,18 @@ $("edAdd").onclick = () => {
   wrap.scrollTop = wrap.scrollHeight;
   wrap.querySelector("tbody tr:last-child input[type=text]")?.focus();
 };
+// 色の選択欄に入れられる #rrggbb にする（色名なども直す）
+function toHex6(c, fallback) {
+  colorCtx.fillStyle = fallback; colorCtx.fillStyle = c;
+  return /^#[0-9a-f]{6}$/i.test(colorCtx.fillStyle) ? colorCtx.fillStyle : fallback;
+}
+const catsChanged = () => editor.key === "error_rules" && $("edColErr").value + $("edColWarn").value !== editor.catsOriginal;
+// 色を選んでいる間も、種類の選択欄の文字色を合わせて見せる
+for (const id of ["edColErr", "edColWarn"]) $(id).addEventListener("input", () => {
+  document.querySelector(".ed-table").style.setProperty(id === "edColErr" ? "--err-c" : "--warn-c", $(id).value);
+});
 function closeEditor() {
-  if (JSON.stringify(editor.rows) !== editor.original && !confirm("変更を破棄して閉じますか？")) return;
+  if ((JSON.stringify(editor.rows) !== editor.original || catsChanged()) && !confirm("変更を破棄して閉じますか？")) return;
   $("editDlg").close();
 }
 $("edCancel").onclick = closeEditor;
@@ -2825,7 +2859,9 @@ $("edReset").onclick = () => {
   editor.rows = DEFAULT_ERROR_RULES.map((c) => ({ enabled: c.enabled !== false, keyword: c.keyword, type: c.type, word: !!c.word, case: !!c.case }));
   renderEditorRows();
   document.querySelector(".ed-table-wrap").scrollTop = 0;
-  $("edErr").textContent = "既定のルールに戻しました（保存で反映、取り消しで元に戻せます）";
+  $("edColErr").value = DEFAULT_ERROR_COLORS.error; $("edColWarn").value = DEFAULT_ERROR_COLORS.warn;
+  document.querySelector(".ed-table").style.removeProperty("--err-c"); document.querySelector(".ed-table").style.removeProperty("--warn-c");
+  $("edErr").textContent = "既定のルールと色に戻しました（保存で反映）";
 };
 $("edUndo").onclick = undoEdit;
 $("editDlg").addEventListener("keydown", (e) => {
@@ -2855,7 +2891,8 @@ $("edOk").onclick = () => {
   }
   const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = FIELDS[f].kind === "level" ? clampLevel(r[f]) : FIELDS[f].kind === "errtype" ? (r[f] === "warn" ? "warn" : "error") : r[f]; d.enabled = r.enabled; if (def.scoped) d.file_pattern = patOf(r); return d; });
   $("editDlg").close();
-  applyConfig(Object.assign({}, state.config, { [editor.key]: out }));
+  const extra = editor.key === "error_rules" ? { error_colors: { error: $("edColErr").value, warn: $("edColWarn").value } } : {};
+  applyConfig(Object.assign({}, state.config, { [editor.key]: out }, extra));
   setStatus(`${def.title}: 保存しました（ブラウザに記憶されます。ファイルにするには 設定 > 設定保存）`);
 };
 
