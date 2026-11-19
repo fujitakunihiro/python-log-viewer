@@ -807,18 +807,31 @@ class LogViewerApp:
             tab = self.notebook.nametowidget(self.notebook.tabs()[tab_id])
             
             if isinstance(tab, LogTab):
-                # Get file path
-                if tab.file_path and tab.file_path != "Merged":
-                    self.notebook_tooltip.show(event, tab.file_path)
-                else:
-                    self.notebook_tooltip.hide()
+                text = self._tab_tip_text(tab)
+                # 同じタブの上で動いている間は出し直さない（ちらつき防止）
+                if getattr(self, "_tab_tip_key", None) != (str(tab), text) or not self.notebook_tooltip.tooltip:
+                    self._tab_tip_key = (str(tab), text)
+                    self.notebook_tooltip.show(event, text)
             else:
+                self._tab_tip_key = None
                 self.notebook_tooltip.hide()
         except:
+            self._tab_tip_key = None
             self.notebook_tooltip.hide()
+
+    def _tab_tip_text(self, tab) -> str:
+        """タブのチップ: 場所（マージ結果なら元のファイル）と、エラー・警告の件数"""
+        if tab.file_path and tab.file_path != "Merged":
+            where = tab.file_path
+        else:
+            where = "マージ結果（" + ", ".join(tab.source_file_names) + "）"
+        ne, nw = getattr(tab, "n_err", 0), getattr(tab, "n_warn", 0)
+        counts = "　・　".join(x for x in (f"エラー {ne:,} 件" if ne else "", f"警告 {nw:,} 件" if nw else "") if x) or "エラー・警告なし"
+        return f"{where}\n{counts}"
     
     def _on_notebook_leave(self, event):
         """Hide tooltip when mouse leaves notebook"""
+        self._tab_tip_key = None
         self.notebook_tooltip.hide()
     
     def _on_tab_press(self, event):
