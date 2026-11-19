@@ -446,6 +446,9 @@
                      /* 下向きの矢印: 2 つの三角形を並べて描く（画像を使わない） */
                      background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
                      background-size: 5px 5px; background-repeat: no-repeat; background-position: right 13px center, right 8px center; transition: border-color .15s, box-shadow .15s; }
+  .ed-table select.errtype { width: 78px; font-family: var(--ui); font-weight: 600; }
+  .ed-table select.errtype.error { color: var(--red); }
+  .ed-table select.errtype.warn { color: #b25000; }
   .lv-chips { display: inline-flex; gap: 4px; align-items: center; }
   .lv-chips .lv { min-width: 28px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--sep-strong); background: var(--surface);
                   color: var(--text-3); font: 600 12px var(--ui); cursor: pointer; transition: background-color .12s, color .12s, transform .05s; }
@@ -647,6 +650,7 @@
         <button data-act="save" role="menuitem">設定保存…</button>
         <hr>
         <button data-act="keywords" role="menuitem">フィルタ設定の編集 (行単位)…</button>
+        <button data-act="error_rules" role="menuitem">エラー検出の設定…</button>
         <button data-act="sections" role="menuitem" class="adv-only">区間設定の編集 (開始-終了)…</button>
         <button data-act="vsync" role="menuitem" class="adv-only">V周期(仮想)挿入の設定…</button>
         <hr>
@@ -679,6 +683,7 @@
           <div class="ed-info" id="edInfo"></div>
           <div class="ed-err" id="edErr"></div>
           <div class="ed-actions">
+            <button class="btn secondary wide hidden" id="edReset" type="button" title="最初のルールに戻す（保存するまで反映されません）">既定に戻す</button>
             <button class="btn secondary wide" id="edUndo" type="button" disabled title="直前の操作を取り消す (Ctrl+Z)">取り消し</button>
             <button class="btn secondary wide" id="edCancel" type="button">キャンセル</button>
             <button class="btn primary wide" id="edOk" type="button">保存</button>
@@ -824,6 +829,14 @@ const DEFAULT_CONFIG = {
   replace_patterns: [],
   vsync_auto_insert: { enabled: true, time_pattern: DEFAULT_TS, manual_ms: 16.666, start_time_val: "0.0" },
 };
+// エラー検出の既定ルール。word: 英単語として一致（NOERROR などは除く）、case: 大文字小文字を区別
+const DEFAULT_ERROR_RULES = [
+  ...["ERROR", "FATAL", "CRITICAL", "SEVERE", "PANIC", "Traceback"].map((k) => ({ keyword: k, type: "error", word: true, case: false, enabled: true })),
+  { keyword: String.raw`\w*(Exception|Error)\b`, type: "error", word: false, case: true, enabled: true },
+  ...["失敗", "異常", "エラー"].map((k) => ({ keyword: k, type: "error", word: false, case: false, enabled: true })),
+  ...["WARN", "WARNING", "timeout", "timed out", "retry", "retrying"].map((k) => ({ keyword: k, type: "warn", word: true, case: false, enabled: true })),
+  { keyword: "警告", type: "warn", word: false, case: false, enabled: true },
+];
 const STORE_KEY = "logviewer.config.v2";
 const OVERSCAN = 20;
 
@@ -840,6 +853,8 @@ function normalizeConfig(cfg) {
   c.keywords = Array.isArray(c.keywords) ? c.keywords : [];
   c.sections = Array.isArray(c.sections) ? c.sections : [];
   c.replace_patterns = Array.isArray(c.replace_patterns) ? c.replace_patterns : [];
+  // 項目が無い設定（以前の設定・Python 版の config.json）は既定のルールを使う。空の配列なら検出しない
+  c.error_rules = Array.isArray(c.error_rules) ? c.error_rules : JSON.parse(JSON.stringify(DEFAULT_ERROR_RULES));
   c.vsync_auto_insert = Object.assign({ enabled: true, time_pattern: DEFAULT_TS, manual_ms: 16.666, start_time_val: "0.0" }, c.vsync_auto_insert || {});
   return c;
 }
@@ -877,6 +892,7 @@ const clampLevel = (v) => { const n = Number(v); return n === 2 || n === 3 ? n :
 function compileRules() {
   const cfg = state.config;
   state.rules = []; state.sections = []; state.errors = [];
+  compileErrRules(cfg);
   cfg.keywords.forEach((k, i) => {
     if (k.enabled === false) return;
     try {
@@ -1225,18 +1241,34 @@ function findKeywordMatches(lines, srcs, rules) {
 
 // 文書の解析（Python: _analyze_tab）
 // ================= エラー・警告の検出（既定のルール） =================
-// 英単語は単語単位（NOERROR などには一致しない）。〜Exception / 〜Error の例外名も拾う
-const ERR_RE = /(?<![A-Za-z0-9_])(?:ERROR|FATAL|CRITICAL|SEVERE|PANIC|EMERG(?:ENCY)?|Traceback)(?![A-Za-z0-9_])|失敗|異常|エラー/i;
-const ERR_NAME_RE = /(?:Exception|Error)(?![A-Za-z0-9_])/;   // ValueError・NullPointerException など（大文字小文字を区別）
-const WARN_RE = /(?<![A-Za-z0-9_])(?:WARN|WARNING|timeout|timed out|retry|retrying)(?![A-Za-z0-9_])|警告/i;
+// 設定（エラー検出の設定）のルールを、種類と大文字小文字の区別ごとに 1 つの正規表現にまとめる
 const ERR_NONE = 0, ERR_WARN = 1, ERR_ERR = 2;
+const wordWrap = (p) => `(?<![A-Za-z0-9_])(?:${p})(?![A-Za-z0-9_])`;   // 英単語の途中では一致させない
+let errRe = { error: [], warn: [] };
+function compileErrRules(cfg) {
+  const parts = { error: { i: [], c: [] }, warn: { i: [], c: [] } };
+  (cfg.error_rules || []).forEach((r, k) => {
+    const kw = String(r.keyword ?? "").trim();
+    if (r.enabled === false || !kw) return;
+    const type = r.type === "warn" ? "warn" : "error";
+    const src = r.word ? wordWrap(pyToJsRegex(kw)) : pyToJsRegex(kw);
+    try { new RegExp(src); } catch (e) { state.errors.push(`エラー検出${k + 1}「${kw}」: ${e.message}`); return; }
+    parts[type][r.case ? "c" : "i"].push(`(?:${src})`);
+  });
+  errRe = { error: [], warn: [] };
+  for (const type of ["error", "warn"]) {
+    if (parts[type].i.length) errRe[type].push(new RegExp(parts[type].i.join("|"), "i"));
+    if (parts[type].c.length) errRe[type].push(new RegExp(parts[type].c.join("|")));
+  }
+}
 function detectErrors(lines, orig) {
   const n = lines.length, err = new Uint8Array(n);
   let nErr = 0, nWarn = 0;
+  const hit = (list, line) => list.some((re) => re.test(line));
   for (let i = 0; i < n; i++) {
     if (orig[i] === 0) continue;   // 仮想行は対象外
-    if (ERR_RE.test(lines[i]) || ERR_NAME_RE.test(lines[i])) { err[i] = ERR_ERR; nErr++; }
-    else if (WARN_RE.test(lines[i])) { err[i] = ERR_WARN; nWarn++; }
+    if (hit(errRe.error, lines[i])) { err[i] = ERR_ERR; nErr++; }
+    else if (hit(errRe.warn, lines[i])) { err[i] = ERR_WARN; nWarn++; }
   }
   return { err, nErr, nWarn };
 }
@@ -2357,6 +2389,7 @@ function applyConfig(cfg) {
     return sources.length >= 2 ? Object.assign(buildMergedDoc(sources, d.mergeTsLen), { sel: d.sel, base: d.base }) : d;
   });
   for (const d of state.docs) analyze(d);
+  renderTabs();   // タブのエラー件数を描き直す
   updateVsyncInfo(); refreshView();
 }
 // ================= 設定メニュー =================
@@ -2410,6 +2443,10 @@ const FIELDS = {
   color: { label: "色", w: 120, kind: "color", tip: "一致した行の背景色" },
   replace: { label: "置換/説明", w: 210, kind: "text", tip: "置換後の文字列、または行に付ける説明" },
   comment: { label: "コメント", w: 180, kind: "text", tip: "一致した行に付けるコメント" },
+  keyword: { label: "キーワード（正規表現）", w: 260, kind: "regex", tip: "この文字列を含む行を検出する。正規表現も使える（例: NG|E\\d+）" },
+  type: { label: "種類", w: 90, kind: "errtype", def: "error", tip: "エラー: 赤で表示、F9 で移動。警告: 橙で表示（エラーが無いときに F9 で移動）" },
+  word: { label: "単語単位", w: 80, kind: "bool", def: true, tip: "ON: 英単語として一致したときだけ（ERROR は NOERROR や ERRORS に一致しない）" },
+  case: { label: "大小区別", w: 80, kind: "bool", tip: "ON: 大文字と小文字を区別する（例: Error は error に一致しない）" },
 };
 const EDITORS = {
   keywords: {
@@ -2421,6 +2458,11 @@ const EDITORS = {
     title: "区間設定の編集", sub: "ファイル毎に開始～終了パターンを定義して色分けします。",
     fields: ["file_pattern", "name", "start", "start_wait", "end", "end_wait", "duration_ms", "color"], required: "start", scoped: true, noun: "区間",
     info: "【区間設定の使い方】\nログの「開始」から「終了」までを区間として色を付けます。\n\n■基本の流れ\n1. 左の一覧で対象を選ぶ\n2. ＋ 行を追加 を押す\n3. 開始パターンと終了パターンを入れる\n4. 保存を押す\n\n■項目の意味\n・開始パターン：区間の開始になる行（正規表現）。\n・終了パターン：区間の終わりになる行（正規表現）。\n  [V] を押すと、終わりの目印 <VSYNC> を入れられます。\n  空欄なら、下の持続(ms)の時間だけで終わります。\n・+V待（開始・終了）：チェックすると、条件を満たした直後の\n  V周期から開始・終了します。\n・持続(ms)：この時間が経つと区間が終わります。\n  終わるときに [VIRTUAL TIMER] の行が自動で入ります。\n  終了パターンと両方ある場合は、持続(ms)が経つまで\n  終了パターンは無視されます。\n\n■対象（左の一覧）\n・ファイル専用の区間は、共通の区間より先に調べられます。",
+  },
+  error_rules: {
+    title: "エラー検出の設定", sub: "キーワードを含む行をエラー・警告として、行の印・タブの件数・F9 で知らせます。",
+    fields: ["keyword", "type", "word", "case"], required: "keyword", noun: "ルール", resettable: true,
+    info: "【エラー検出の使い方】\nキーワードを含む行を、エラー（赤）・警告（橙）として知らせます。\n\n■知らせ方\n・行番号の左に赤・橙の印\n・全体マップの左端に帯\n・タブとタブの並びの右端に件数\n・F9 / Shift+F9 で次 / 前のエラーへ移動\n\n■項目の意味\n・キーワード：探す文字列。正規表現も使えます。\n  例: NG  /  \\[E\\]  /  code=(500|503)\n・種類：エラーか警告か。両方に一致したらエラーになります。\n・単語単位：英単語として一致したときだけ検出します。\n  ERROR は「NOERROR」「ERRORS」「error_count」に一致しません。\n  日本語のキーワードでは外してください。\n・大小区別：大文字と小文字を区別します。\n\n■ヒント\n・フィルタの色付けとは別の仕組みです。フィルタの色は変わりません。\n・「既定に戻す」で最初のルールに戻せます。\n・すべて消して保存すると、エラー検出をしなくなります。",
   },
   replace_patterns: {
     title: "説明パターンの編集", sub: "正規表現にマッチした文字列の直後に (説明) を付与します。",
@@ -2569,6 +2611,7 @@ function openEditor(key) {
     const doc = cur();
     if (doc && !doc.isMerged && editor.rows.some((r) => patOf(r) === filePattern(doc.name))) editor.scope = filePattern(doc.name);
   }
+  $("edReset").classList.toggle("hidden", !def.resettable);
   $("edTitle").textContent = def.title;
   $("edSub").textContent = def.sub;
   $("edInfo").textContent = def.info + "\n\n■並べ替え\n行の左のつまみ（⋮⋮）をドラッグして並べ替えられます。" + (def.scoped ? "左の対象ファイルの一覧にドロップすると、その対象へ移せます。" : "") + "Esc で取り消せます。";
@@ -2582,7 +2625,7 @@ function openEditor(key) {
 }
 function blankRow(def) {
   const r = { enabled: true };
-  for (const f of def.fields) r[f] = FIELDS[f].kind === "bool" ? false : (FIELDS[f].def ?? "");
+  for (const f of def.fields) r[f] = FIELDS[f].kind === "bool" ? !!FIELDS[f].def : (FIELDS[f].def ?? "");
   return r;
 }
 function renderEditorRows() {
@@ -2591,8 +2634,9 @@ function renderEditorRows() {
     if (editor.scoped && patOf(r) !== editor.scope) return "";
     const cells = cols.map((f, ci) => {
       const cls = `${groupClass(f)}${isGroupEdge(cols, ci) ? " edge" : ""}`.trim();
-      const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" || kind === "level" ? "" : fieldError(f, v);
+      const v = r[f], kind = FIELDS[f].kind, err = kind === "bool" || kind === "level" || kind === "errtype" ? "" : fieldError(f, v);
       const text = (extra = "") => `<input type="text" data-i="${i}" data-f="${f}" value="${escapeHtml(v)}" class="${err ? "bad" : ""}" title="${escapeHtml(err)}"${extra}>`;
+      if (kind === "errtype") return `<td class="${cls}"><select class="errtype ${v === "warn" ? "warn" : "error"}" data-i="${i}" data-f="${f}">${[["error", "エラー"], ["warn", "警告"]].map(([k, t]) => `<option value="${k}"${(v === "warn" ? "warn" : "error") === k ? " selected" : ""}>${t}</option>`).join("")}</select></td>`;
       if (kind === "level") return `<td class="${cls}"><select data-i="${i}" data-f="${f}" title="3が一番強い">${[3, 2, 1].map((n) => `<option value="${n}"${Number(v) === n ? " selected" : ""}>${n}</option>`).join("")}</select></td>`;
       if (kind === "bool") return `<td class="${cls}" style="text-align:center"><input type="checkbox" data-i="${i}" data-f="${f}"${v ? " checked" : ""}></td>`;
       if (kind === "color") {
@@ -2618,6 +2662,7 @@ $("edRows").addEventListener("input", (e) => {
     return;
   }
   row[f] = t.value;
+  if (t.classList.contains("errtype")) { t.classList.toggle("warn", t.value === "warn"); t.classList.toggle("error", t.value !== "warn"); return; }
   if (t.type === "color") {
     const txt = t.parentElement.querySelector('input[type="text"]');
     txt.value = t.value;
@@ -2774,6 +2819,14 @@ function closeEditor() {
   $("editDlg").close();
 }
 $("edCancel").onclick = closeEditor;
+$("edReset").onclick = () => {
+  if (editor.key !== "error_rules") return;
+  snapEdit();
+  editor.rows = DEFAULT_ERROR_RULES.map((c) => ({ enabled: c.enabled !== false, keyword: c.keyword, type: c.type, word: !!c.word, case: !!c.case }));
+  renderEditorRows();
+  document.querySelector(".ed-table-wrap").scrollTop = 0;
+  $("edErr").textContent = "既定のルールに戻しました（保存で反映、取り消しで元に戻せます）";
+};
 $("edUndo").onclick = undoEdit;
 $("editDlg").addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && e.target.tagName !== "INPUT") { e.preventDefault(); undoEdit(); }
@@ -2787,7 +2840,7 @@ $("edOk").onclick = () => {
   rows.forEach((r) => {
     if (!r.enabled) return;
     for (const f of def.fields) {
-      if (FIELDS[f].kind === "bool" || FIELDS[f].kind === "level") continue;
+      if (FIELDS[f].kind === "bool" || FIELDS[f].kind === "level" || FIELDS[f].kind === "errtype") continue;
       const err = fieldError(f, r[f]);
       if (!err) continue;
       const where = def.scoped ? `「${scopeLabel(patOf(r))}」の${rows.filter((x) => patOf(x) === patOf(r)).indexOf(r) + 1}行目` : `${editor.rows.indexOf(r) + 1}行目`;
@@ -2800,7 +2853,7 @@ $("edOk").onclick = () => {
     const order = editorScopes().filter((p) => p !== COMMON).concat(COMMON);
     rows = order.flatMap((p) => rows.filter((r) => patOf(r) === p));
   }
-  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = FIELDS[f].kind === "level" ? clampLevel(r[f]) : r[f]; d.enabled = r.enabled; if (def.scoped) d.file_pattern = patOf(r); return d; });
+  const out = rows.map((r) => { const d = {}; for (const f of def.fields) d[f] = FIELDS[f].kind === "level" ? clampLevel(r[f]) : FIELDS[f].kind === "errtype" ? (r[f] === "warn" ? "warn" : "error") : r[f]; d.enabled = r.enabled; if (def.scoped) d.file_pattern = patOf(r); return d; });
   $("editDlg").close();
   applyConfig(Object.assign({}, state.config, { [editor.key]: out }));
   setStatus(`${def.title}: 保存しました（ブラウザに記憶されます。ファイルにするには 設定 > 設定保存）`);
