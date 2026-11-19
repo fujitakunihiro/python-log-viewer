@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<!-- 外部との通信をすべて禁止する（ログや設定ファイルに何が書かれていても、どこにも送らない・読み込まない） -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>Log Viewer</title>
@@ -952,7 +954,7 @@ function compileRules() {
       state.rules.push({
         filePat: new RegExp(pyToJsRegex(k.file_pattern || ".*"), "i"),
         re: new RegExp(normalizePattern(k.pattern), "is"),
-        color: k.color || WHITE, comment: k.comment || "", label: k.comment || k.pattern,
+        color: validColor(k.color) ? k.color.trim() : WHITE, comment: k.comment || "", label: k.comment || k.pattern,
         level: clampLevel(k.priority),
       });
     } catch (e) { state.errors.push(`フィルタ${i + 1}「${k.pattern}」: ${e.message}`); }
@@ -971,7 +973,7 @@ function compileRules() {
       state.sections.push({
         start: new RegExp(pyToJsRegex(s.start), "i"), startWait: !!s.start_wait,
         end: endPat ? new RegExp(pyToJsRegex(endPat), "i") : null, endStr: endPat, endWait: !!s.end_wait,
-        dur, name: s.name, color: s.color || WHITE, filePat: new RegExp(pyToJsRegex(s.file_pattern || ".*"), "i"), isVsyncEnd,
+        dur, name: s.name, color: validColor(s.color) ? s.color.trim() : WHITE, filePat: new RegExp(pyToJsRegex(s.file_pattern || ".*"), "i"), isVsyncEnd,
       });
     } catch (e) { state.errors.push(`区間${i + 1}「${s.name ?? ""}」: ${e.message}`); }
   });
