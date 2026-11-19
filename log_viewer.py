@@ -2622,7 +2622,7 @@ class LogViewerApp:
         config_count = len(getattr(self, f"{key}_config"))
         table_width = sum(column[3] + 4 for column in col_defs)
         desired_width = min(dlg.winfo_screenwidth() - 60, max(820, table_width + 310))
-        minimum_height = 470 if key == "sections" else 310
+        minimum_height = 470 if key == "sections" else 420
         desired_height = min(
             dlg.winfo_screenheight() - 80,
             max(minimum_height, 185 + min(max(config_count, 1), 12) * 30),
@@ -2671,9 +2671,7 @@ class LogViewerApp:
                 elif c_id in bool_fields:
                     tk.Checkbutton(f_cell, variable=item[c_id], bg=UIColors.PANEL_BG, activebackground=UIColors.PANEL_BG).pack(side=tk.LEFT)
                 elif c_id == "priority":
-                    om = tk.OptionMenu(f_cell, item["priority"], "3", "2", "1")
-                    om.config(relief=tk.FLAT, bg="#ffffff", highlightthickness=0, font=("Consolas", 9))
-                    om.pack(fill=tk.BOTH, expand=True)
+                    ttk.Combobox(f_cell, textvariable=item["priority"], values=["3", "2", "1"], state="readonly", width=3).pack(fill=tk.BOTH, expand=True)
                 elif c_id == "type":
                     ttk.Combobox(f_cell, textvariable=item["type"], values=["エラー", "警告"], state="readonly", width=6).pack(fill=tk.BOTH, expand=True)
                 elif c_id == "end":
@@ -2817,6 +2815,9 @@ class LogViewerApp:
                 " の形式で表示されます。"
             )
 
+        # OK は先に下へ置く（使い方の文が長くても、ボタンが押し出されて見えなくならないように）
+        flat_button(btn_fr, "OK", lambda: save(), primary=True, width=20, pady=8).pack(side=tk.BOTTOM, pady=5, fill=tk.X)
+
         color_vars = {}
         if key == "error_rules":
             cat = tk.LabelFrame(btn_fr, text="種類の色", bg=UIColors.BG, fg=UIColors.TEXT, font=("Yu Gothic UI", 9, "bold"))
@@ -2845,8 +2846,11 @@ class LogViewerApp:
             tk.Button(cat, text="既定に戻す", command=reset_defaults, bg="#ffffff", fg=UIColors.TEXT, relief=tk.FLAT, cursor="hand2", font=("Yu Gothic UI", 9)).pack(anchor="e", padx=6, pady=(0, 6))
 
         if info_text:
-            info_lbl = tk.Label(btn_fr, text=info_text, justify=tk.LEFT, anchor="nw", bg="#ffffff", fg=UIColors.TEXT_2, relief=tk.FLAT, bd=0, highlightbackground=UIColors.SEP, highlightthickness=1, padx=12, pady=12, font=("Yu Gothic UI", 9), wraplength=230)
-            info_lbl.pack(fill=tk.BOTH, expand=True, pady=10)
+            info_box = tk.Text(btn_fr, wrap=tk.CHAR, bg="#ffffff", fg=UIColors.TEXT_2, relief=tk.FLAT, bd=0, highlightbackground=UIColors.SEP,
+                               highlightthickness=1, padx=12, pady=10, font=("Yu Gothic UI", 9), width=1, height=1, cursor="arrow")
+            info_box.insert("1.0", info_text)
+            info_box.configure(state=tk.DISABLED)
+            info_box.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def save():
             new_cfg =[]
@@ -2888,7 +2892,7 @@ class LogViewerApp:
                     if isinstance(w, LogTab): self.apply_display_update(w)
                 except: pass
 
-        flat_button(btn_fr, "OK", save, primary=True, width=20, pady=8).pack(side=tk.BOTTOM, pady=5, fill=tk.X)
+
 
     # --- IO ---
     def load_config_dialog(self):
