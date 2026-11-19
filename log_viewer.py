@@ -427,6 +427,13 @@ class LogTab(tk.Frame):
             
         self.all_texts =[self.text, self.timediff_text, self.gap_text, self.comment_text] + list(self.status_texts.values())
         
+        # 読み取り専用: 文字の入力・Enter・貼り付けでは書き換わらない。
+        # クリックでフォーカスを移すので、矢印キーでの移動・選択・Ctrl+C は使える
+        for w in self.all_texts:
+            w.configure(state=tk.DISABLED, insertwidth=2, insertofftime=0)
+            w.bind('<Button-1>', lambda e: e.widget.focus_set(), add="+")
+            w.bind('<Control-c>', lambda e: (e.widget.event_generate("<<Copy>>"), "break")[1])
+
         # カーソル行のハイライト設定
         for w in self.all_texts:
             w.tag_configure("cursor_line", background="#fff0f5", underline=True)
@@ -1827,6 +1834,9 @@ class LogViewerApp:
                 if col != "#ffffff":
                     final_st_tags[fn].append((line_count, col))
 
+        # 列はふだん読み取り専用（Enter などで書き換わらないように）。書き込む間だけ編集できる状態にする
+        for w in tab.all_texts:
+            w.configure(state=tk.NORMAL)
         tab.gap_text.delete("1.0", tk.END)
         if flines:
             tab.gap_text.insert("1.0", "\n".join("" if g is None else f"{g:,.3f}" for g in disp_gap), "right")
@@ -1874,6 +1884,8 @@ class LogViewerApp:
             tab.text.tag_configure(tn, background=col)
             tab.text.tag_add(tn, f"{ln}.0", f"{ln}.end")
 
+        for w in tab.all_texts:
+            w.configure(state=tk.DISABLED)
         tab.linenumbers.redraw()
         tab.update_cursor_line()
         self._update_tab_badge(tab)
