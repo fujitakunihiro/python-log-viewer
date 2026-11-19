@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import html
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Dict, List, Tuple, Optional, Any
@@ -559,8 +558,6 @@ class LogViewerApp:
         fmenu.add_command(label="再読み込み", command=self.reload_file, accelerator="F5")
         fmenu.add_separator()
         fmenu.add_command(label="マージして表示...", command=self.merge_logs_action)
-        fmenu.add_separator()
-        fmenu.add_command(label="Excel形式でエクスポート (HTML)...", command=self.export_to_excel)
         fmenu.add_separator()
         fmenu.add_command(label="終了", command=self.root.quit)
         menubar.add_cascade(label="ファイル", menu=fmenu)
@@ -2682,50 +2679,6 @@ class LogViewerApp:
                     pass
         except Exception as e:
             print(f"Failed to load config from {p}: {e}")
-
-    def export_to_excel(self):
-        tab = self.get_current_tab()
-        if not tab: return
-        p = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML", "*.html")])
-        if not p: return
-        try:
-            l = tab.text.get("1.0", "end-1c").splitlines()
-            c = tab.comment_text.get("1.0", "end-1c").splitlines()
-            td = tab.timediff_text.get("1.0", "end-1c").splitlines()
-            srcs = tab.line_source_map if tab.is_merged else tab.source_file_names * len(l)
-            if len(srcs) < len(l): srcs.extend([""] * (len(l) - len(srcs))) 
-            
-            h =['<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;width:100%;font-family:monospace;} th{background:#ddd;border:1px solid #999;} td{border:1px solid #ccc;padding:2px 4px;white-space:pre-wrap;}</style></head><body><table>']
-            header_row = '<thead><tr><th>Line</th><th>Time Diff</th><th>Log Content</th><th>Comment</th>'
-            for fn in tab.source_file_names: header_row += f'<th>{html.escape(fn)}の区間</th>'
-            h.append(header_row + '</tr></thead><tbody>')
-            
-            for i, line in enumerate(l):
-                bg_color = "transparent"
-                tags = tab.text.tag_names(f"{i+1}.0")
-                for tag in tags:
-                    if tag.startswith("kw_"):
-                        bg_color = f"#{tag[3:]}"
-                        break
-                        
-                cm = c[i] if i < len(c) else ""
-                diff_str = td[i] if i < len(td) else ""
-                row_html = f'<tr style="background:{bg_color}"><td>{i+1}</td><td>{html.escape(diff_str)}</td><td>{html.escape(line)}</td><td>{html.escape(cm)}</td>'
-                
-                for fn in tab.source_file_names:
-                    txt = tab.status_texts[fn].get(f"{i+1}.0", f"{i+1}.end")
-                    st_bg = "transparent"
-                    st_tags = tab.status_texts[fn].tag_names(f"{i+1}.0")
-                    for tag in st_tags:
-                        if tag.startswith("st_"):
-                            st_bg = f"#{tag[3:]}"
-                            break
-                    row_html += f'<td style="background:{st_bg}">{html.escape(txt)}</td>'
-                h.append(row_html + '</tr>')
-                
-            with open(p, "w", encoding="utf-8-sig") as f: f.write("\n".join(h) + "</tbody></table></body></html>")
-            messagebox.showinfo("完了", "保存しました")
-        except Exception as e: messagebox.showerror("Error", str(e))
 
 if __name__ == "__main__":
     root = ROOT_CLASS()
